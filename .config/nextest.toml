@@ -1,0 +1,9 @@
+[profile.default]
+# Fast fail is disabled due to my personal preference -- mimas writes its tests extremely
+# generously, with many tests ranging from incredibly simple to vastly complex. Being able
+# to identify the simplest test that has failed in a series of failures makes the debugging
+# process much easier. You can override this by passing --fail-fast to nextest.
+fail-fast = false
+# ...that said, because there's so many, we don't need to flood our output with hundreds of passes!
+# This lets us just get a nice loading bar + a summary at the end (with any failures along the way).
+status-level = "fail"

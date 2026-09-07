@@ -1,0 +1,38 @@
+[package]
+name = "mimas-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Command-line interface for mimas, a flexible, statically typed scripting language for Rust."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+documentation = "https://mim.as"
+keywords = ["scripting", "language", "cli", "gamedev", "interpreter"]
+categories = ["command-line-utilities", "compilers", "game-development"]
+
+[[bin]]
+name = "mimas"
+path = "src/main.rs"
+
+[dependencies]
+parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
+compile = { package = "mimas-compile", path = "../compile", version = "0.1.0" }
+vm = { package = "mimas-vm", path = "../vm", version = "0.1.0" }
+library = { package = "mimas-library", path = "../library", version = "0.1.0" }
+api = { package = "mimas-api", path = "../api", version = "0.1.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+colored.workspace = true
+miette.workspace = true
+clap = { version = "3.2.23", features = ["derive", "cargo", "unicode"] }
+num-format = "0.4"
+walkdir.workspace = true
+backtrace = "0.3"
+color-backtrace = "0.7"
+owo-colors = "4.3.0"
+
+[features]
+logging = ["solve/logging"]
+op-count = ["vm/op-count"]

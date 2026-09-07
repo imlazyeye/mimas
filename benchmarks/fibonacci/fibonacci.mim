@@ -1,0 +1,16 @@
+const TARGET = 28;
+const REPEAT = 30;
+
+fn fib(n: int) -> int {
+    if n < 2 {
+        n
+    } else {
+        fib(n-1) + fib(n-2)
+    }
+}
+
+let result = 0;
+for n in REPEAT {
+    result = fib(TARGET);
+}
+print(result);

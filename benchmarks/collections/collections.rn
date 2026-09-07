@@ -1,0 +1,31 @@
+use std::collections::HashMap;
+
+let n = 4000000;
+let k = 256;
+
+let keys = Vec::new();
+for j in 0..k {
+    keys.push(format!("k{}", j));
+}
+
+let data = Vec::new();
+for i in 0..n {
+    data.push(i % k);
+}
+
+let hist = HashMap::new();
+for x in data {
+    let key = keys[x];
+    if hist.contains_key(key) {
+        hist.insert(key, hist[key] + 1);
+    } else {
+        hist.insert(key, 1);
+    }
+}
+
+let total = 0;
+for (key, v) in hist {
+    total += v;
+}
+println!("{}", total);
+

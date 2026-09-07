@@ -1,0 +1,192 @@
+{
+  "Module": {
+    "prefix": "module",
+    "body": ["module @;"],
+    "description": "Declare this file as its identity module"
+  },
+  "Use": {
+    "prefix": "use",
+    "body": ["use ${1:module};"],
+    "description": "Import a module or module item"
+  },
+  "Use Glob": {
+    "prefix": "use*",
+    "body": ["use ${1:module}::*;"],
+    "description": "Glob-import everything from a module"
+  },
+  "Let Binding": {
+    "prefix": "let",
+    "body": ["let ${1:name} = ${2:value};"],
+    "description": "Create a let binding"
+  },
+  "Const Binding": {
+    "prefix": "const",
+    "body": ["const ${1:NAME}: ${2:type} = ${3:value};"],
+    "description": "Create a constant binding"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2}) -> ${3:type} {", "\t$0", "}"],
+    "description": "Create a function with a return type"
+  },
+  "Unit Function": {
+    "prefix": "fnu",
+    "body": ["fn ${1:name}(${2}) {", "\t$0", "}"],
+    "description": "Create a function without an explicit return type"
+  },
+  "Pub Function": {
+    "prefix": "pubfn",
+    "body": ["pub fn ${1:name}(${2}) -> ${3:type} {", "\t$0", "}"],
+    "description": "Create a public function"
+  },
+  "Method": {
+    "prefix": "method",
+    "body": ["fn ${1:name}(self${2:, args}) -> ${3:type} {", "\t$0", "}"],
+    "description": "Create a method that takes self"
+  },
+  "Impl Block": {
+    "prefix": "impl",
+    "body": ["impl ${1:Type} {", "\t$0", "}"],
+    "description": "Create an impl block"
+  },
+  "Impl Pact For Type": {
+    "prefix": "implfor",
+    "body": ["impl ${1:Pact} for ${2:Type} {", "\t$0", "}"],
+    "description": "Implement a pact for a type"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name} {", "\t${2:field}: ${3:type},", "}"],
+    "description": "Create a struct"
+  },
+  "Tuple Struct": {
+    "prefix": "tuple-struct",
+    "body": ["struct ${1:Name}(${2:type});"],
+    "description": "Create a tuple struct"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "\t${2:Variant},", "}"],
+    "description": "Create an enum"
+  },
+  "Pact": {
+    "prefix": "pact",
+    "body": ["pact ${1:Name} {", "\tfn ${2:method}(self${3:, args}) -> ${4:type};", "}"],
+    "description": "Create a pact (contract / trait-like)"
+  },
+  "Match": {
+    "prefix": "match",
+    "body": ["match ${1:value} {", "\t${2:pattern} => ${3:result},", "\t_ => ${4:fallback},", "}"],
+    "description": "Create a match expression with a wildcard"
+  },
+  "Match Panic": {
+    "prefix": "matchpanic",
+    "body": ["match ${1:value} {", "\t${2:pattern} => ${3:result},", "\t!", "}"],
+    "description": "Create a match with an exhaustion-promise terminator (! panics at runtime if reached)"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": ["for ${1:item} in ${2:items} {", "\t$0", "}"],
+    "description": "Create a for loop"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": ["while ${1:condition} {", "\t$0", "}"],
+    "description": "Create a while loop"
+  },
+  "While Let": {
+    "prefix": "whilelet",
+    "body": ["while let ${1:name} = ${2:expr} {", "\t$0", "}"],
+    "description": "Create a while-let loop"
+  },
+  "Loop": {
+    "prefix": "loop",
+    "body": ["loop {", "\t$0", "}"],
+    "description": "Create an infinite loop"
+  },
+  "Loop Break": {
+    "prefix": "loopb",
+    "body": ["loop {", "\t$1", "\tbreak ${2:value};", "}"],
+    "description": "Create a loop that breaks with a value"
+  },
+  "If": {
+    "prefix": "if",
+    "body": ["if ${1:condition} {", "\t$0", "}"],
+    "description": "Create an if expression"
+  },
+  "If Else": {
+    "prefix": "ife",
+    "body": ["if ${1:condition} {", "\t${2}", "} else {", "\t$0", "}"],
+    "description": "Create an if/else expression"
+  },
+  "If Let": {
+    "prefix": "iflet",
+    "body": ["if let ${1:name} = ${2:expr} {", "\t$0", "}"],
+    "description": "Create an if-let expression"
+  },
+  "If Let Else": {
+    "prefix": "iflete",
+    "body": ["if let ${1:name} = ${2:expr} {", "\t${3}", "} else {", "\t$0", "}"],
+    "description": "Create an if-let/else expression"
+  },
+  "Closure": {
+    "prefix": "closure",
+    "body": ["|${1:args}| ${2:body}"],
+    "description": "Create a closure"
+  },
+  "Closure No Args": {
+    "prefix": "closure0",
+    "body": ["|| ${1:body}"],
+    "description": "Create a no-arg closure"
+  },
+  "Array Literal": {
+    "prefix": "array",
+    "body": ["[${1:items}]"],
+    "description": "Create an array literal"
+  },
+  "Dict Literal": {
+    "prefix": "dict",
+    "body": ["~{ ${1:key} = ${2:value} }"],
+    "description": "Create a dict literal"
+  },
+  "Tuple Literal": {
+    "prefix": "tuple",
+    "body": ["(${1:a}, ${2:b})"],
+    "description": "Create a tuple literal"
+  },
+  "F-String": {
+    "prefix": "fstr",
+    "body": ["f\"${1:text} {$2}\""],
+    "description": "Create an f-string"
+  },
+  "Collect": {
+    "prefix": "collect",
+    "body": ["collect ${1:value};"],
+    "description": "Create a collect statement"
+  },
+  "For Collect": {
+    "prefix": "forcollect",
+    "body": ["for ${1:item} in ${2:items} collect ${1:item}"],
+    "description": "Create a collecting for expression"
+  },
+  "Print": {
+    "prefix": "print",
+    "body": ["print(${1:value});"],
+    "description": "Print a value"
+  },
+  "Raise": {
+    "prefix": "raise",
+    "body": ["raise ${1:item}"],
+    "description": "Raise an error"
+  },
+  "Absolve": {
+    "prefix": "absolve",
+    "body": ["absolve ${1:item}"],
+    "description": "Absolve an error"
+  },
+  "Absolve Handler": {
+    "prefix": "absolveh",
+    "body": ["${1:expr} absolve |${2:e}| ${3:handler}"],
+    "description": "Absolve a Result with a handler closure"
+  }
+}

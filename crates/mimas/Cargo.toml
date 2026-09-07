@@ -1,0 +1,36 @@
+[package]
+name = "mimas"
+version = "0.1.0"
+edition = "2024"
+description = "A flexible, statically typed scripting language for Rust."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+documentation = "https://docs.rs/mimas"
+keywords = ["scripting", "language", "embedded", "gamedev", "interpreter"]
+categories = ["compilers", "game-development"]
+
+[lib]
+name = "mimas"
+
+[dependencies]
+api = { package = "mimas-api", path = "../api", version = "0.1.0" }
+compile = { package = "mimas-compile", path = "../compile", version = "0.1.0" }
+library = { package = "mimas-library", path = "../library", version = "0.1.0" }
+macros = { package = "mimas-macros", path = "../macros", version = "0.1.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
+vm = { package = "mimas-vm", path = "../vm", version = "0.1.0" }
+
+[features]
+op-count = ["vm/op-count"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "vm_benches"
+harness = false

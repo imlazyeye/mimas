@@ -1,0 +1,58 @@
+use std::sys;
+use std::parse;
+use shiki::Shiki;
+use mdbook::{ MdBook, BLOCK_PATTERN };
+
+match (sys::arg(1), sys::arg(2)) {
+    ("supports"?, renderer?) => sys::exit(if renderer == "html" 0 else 1),
+    ("svg"?, content?) => generate_svgs(content),
+    (null, _) => modify_book(),
+    _ => panic("invalid comamnd"),
+}
+
+/// mdBook preprocessor entry: read the `[context, book]` payload from stdin, render every mimas code
+/// block in the book to highlighted HTML, and emit the modified book back as JSON on stdout.
+fn modify_book() {
+    let input = sys::stdin()!;
+    let book = parse::from_json(input)!.as_array()![1];
+    let rendered = MdBook::from_value(book)!.render()!;
+    print(parse::to_json(rendered.serialize())!);
+}
+
+/// Rewrites a markdown file in-place, replacing mimas code blocks with svg renders stored in
+/// ../assets.
+fn generate_svgs(path: str) {
+    const EMBED_PATTERN = "!\[mimas source\]\((.+)\)";
+    const MIMAS_PATTERN = "<!-- mimas-source:\\n([\\s\\S]*?)\\n-->";
+
+    let md = std::fs::read(path)!;
+
+    for (i, line) in md.lines().enumerate() {
+        if let embed? = line.find(EMBED_PATTERN) {
+            if let svg? = std::fs::read(embed[1]) {
+                if let source? = svg.find(MIMAS_PATTERN) {
+                    std::fs::write(embed[0], Shiki::from_str(source[1])!.to_svg());
+                } else {
+                    print(f"Could not find mimas source in {embed[1]}");
+                    continue;
+                }
+            }
+        }
+    }
+
+    for found in md.find_all(BLOCK_PATTERN)! {
+        let shiki = shiki::Shiki::from_str(found[1])!;
+        let svg = shiki.to_svg();
+        let out_path = f"tools/assets/sample_{int::random(9999)}.svg";
+        std::fs::write(out_path, svg);
+        let original = f"```mimas\n{found[0]}\n```";
+        md = md.replace(original, f"![mimas source]({out_path})");
+    }
+    std::fs::write(path, md)!;
+
+    for file in std::fs::list_dir("tools/assets")! {
+        if (file in md) == false {
+            std::fs::remove(file);
+        }
+    }
+}

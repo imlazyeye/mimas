@@ -1,0 +1,33 @@
+[package]
+name = "mimas-library"
+version = "0.1.0"
+edition = "2024"
+description = "Standard library for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "library"
+path = "src/lib.rs"
+
+[dependencies]
+vm = { package = "mimas-vm", path = "../vm", version = "0.1.0" }
+api = { package = "mimas-api", path = "../api", version = "0.1.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+macros = { package = "mimas-macros", path = "../macros", version = "0.1.0" }
+chompy.workspace = true
+heck = "0.5.0"
+regex = "1.12.3"
+itertools.workspace = true
+rand.workspace = true
+camino = "1.2.2"
+serde_json = "1.0.145"
+walkdir.workspace = true
+
+[dev-dependencies]
+parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
+compile = { package = "mimas-compile", path = "../compile", version = "0.1.0" }
+pretty_assertions.workspace = true

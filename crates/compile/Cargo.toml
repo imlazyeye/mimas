@@ -1,0 +1,27 @@
+[package]
+name = "mimas-compile"
+version = "0.1.0"
+edition = "2024"
+description = "Bytecode compiler for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+api = { package = "mimas-api", path = "../api", version = "0.1.0" }
+itertools.workspace = true
+colored.workspace = true
+chompy.workspace = true
+mutants.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[features]
+# default = ["artifacts"]
+logging = []
+# artifacts = []

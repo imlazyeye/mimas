@@ -1,0 +1,65 @@
+[book]
+title = "mimas"
+authors = ["Gabe Weiner"]
+description = "A flexible, statically typed scripting language for Rust."
+language = "en"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+no-section-label = true
+additional-css = [
+    "theme/custom.css",
+    "theme/charts.min.css",
+    "theme/highlight-tokyo-night.css",
+    "./mdbook-admonish.css",
+    "./mdbook-admonish-custom.css",
+]
+smart-punctuation = true
+
+git-repository-url = "https://github.com/imlazyeye/mimas"
+edit-url-template = "https://github.com/imlazyeye/mimas/edit/main/{path}"
+additional-js = ["theme-rename.js"]
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.playground]
+runnable = false
+
+[preprocessor]
+
+[preprocessor.admonish]
+command = "mdbook-admonish"
+assets_version = "3.1.0"    # do not edit: managed by `mdbook-admonish install`
+
+[preprocessor.admonish.renderer.test]
+render_mode = "strip"
+
+[preprocessor.admonish.directive.custom.flexible]
+icon = "./assets/feather.svg"
+color = "#66E8FF"
+
+[preprocessor.admonish.directive.custom.typed]
+icon = "./assets/check-decagram.svg"
+color = "#3D8EF7"
+
+[preprocessor.admonish.directive.custom.fast]
+icon = "./assets/lightning-bolt.svg"
+color = "#FFC24B"
+
+
+[preprocessor.admonish.directive.custom.robust]
+icon = "./assets/shield.svg"
+color = "#8E9BFF"
+
+
+[preprocessor.admonish.directive.custom.extendable]
+icon = "./assets/puzzle.svg"
+color = "#5BD6B0"
+
+[preprocessor.mimas]
+command = "mimas run tools/highlighter --"
+renderers = ["html"]
+before = ["admonish"]

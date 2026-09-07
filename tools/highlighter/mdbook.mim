@@ -1,0 +1,174 @@
+module @;
+
+use std::parse;
+use shiki::Shiki;
+
+pub const BLOCK_PATTERN = "```mimas[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
+
+/// A deserialized mdBook Book — the second element of the `[context, book]` payload mdBook hands
+/// a preprocessor through stdin.
+pub struct MdBook {
+    sections: [BookItem],
+}
+
+impl MdBook {
+    /// Deserializes a parsed JSON Value into an MdBook.
+    pub fn from_value(value: parse::Value) -> Self! {
+        let book = value.as_dict()!;
+        Self {
+            sections = for item in book["sections"]!.as_array()! collect BookItem::from_value(item)!,
+        }
+    }
+
+    /// Returns a copy with every chapter's mimas code blocks rendered to highlighted html.
+    pub fn render(self) -> Self! {
+        let sources = self.sources()!;
+        let cache = ~{};
+        for (i, shiki) in Shiki::from_many(sources)!.enumerate() {
+            cache[sources[i]] = shiki.to_html();
+        }
+        Self {
+            sections = for item in self.sections collect item.render(cache)!,
+        }
+    }
+
+    fn sources(self) -> [str]! {
+        let out: [str] = [];
+        for item in self.sections {
+            out.extend(item.sources()!);
+        }
+        out
+    }
+
+    /// Serializes back into a Value ready for `parse::to_json`.
+    pub fn serialize(self) -> parse::Value {
+        parse::Value::Object(~{
+            sections = parse::Value::Array(for item in self.sections collect item.serialize()),
+            __non_exhaustive = parse::Value::Null,
+        })
+    }
+}
+
+/// Different items that appear in the book.
+enum BookItem {
+    Chapter(Chapter),
+    Separator,
+    PartTitle(str),
+}
+
+impl BookItem {
+    fn from_value(v: parse::Value) -> Self! {
+        if let _separator? = v.as_str() {
+            BookItem::Separator
+        } else {
+            let d = v.as_dict()!;
+            if "Chapter" in d {
+                BookItem::Chapter(Chapter::from_value(d["Chapter"]!)!)
+            } else if "PartTitle" in d {
+                BookItem::PartTitle(d["PartTitle"]!.as_str()!)
+            } else {
+                raise "unknown book item"
+            }
+        }
+    }
+
+    fn render(self, cache: ~{ str }) -> Self! {
+        match self {
+            BookItem::Chapter(chapter) => BookItem::Chapter(chapter.render(cache)!),
+            other => other,
+        }
+    }
+
+    fn sources(self) -> [str]! {
+        match self {
+            BookItem::Chapter(chapter) => chapter.sources()!,
+            _ => [],
+        }
+    }
+
+    fn serialize(self) -> parse::Value {
+        match self {
+            BookItem::Chapter(chapter) => parse::Value::Object(~{ Chapter = chapter.serialize() }),
+            BookItem::Separator => parse::Value::String("Separator"),
+            BookItem::PartTitle(title) => parse::Value::Object(~{ PartTitle = parse::Value::String(title) }),
+        }
+    }
+}
+
+/// A single chapter.
+struct Chapter {
+    name: str,
+    content: str,
+    number: [float]?,
+    path: str?,
+    source_path: str?,
+    parent_names: [str],
+    sub_items: [BookItem],
+}
+
+impl Chapter {
+    fn from_value(value: parse::Value) -> Self! {
+        let c = value.as_dict()!;
+        Self {
+            name = c["name"]!.as_str()!,
+            content = c["content"]!.as_str()!,
+            number = if let arr? = c["number"]!.as_array() {
+                for n in arr collect n.as_float()!
+            } else {
+                null
+            },
+            path = c["path"]!.as_str(),
+            source_path = c["source_path"]!.as_str(),
+            parent_names = for n in c["parent_names"]!.as_array()! collect n.as_str()!,
+            sub_items = for s in c["sub_items"]!.as_array()! collect BookItem::from_value(s)!,
+        }
+    }
+
+    fn render(self, cache: ~{ str }) -> Self! {
+        Self {
+            name = self.name,
+            content = self.render_blocks(cache)!,
+            number = self.number,
+            path = self.path,
+            source_path = self.source_path,
+            parent_names = self.parent_names,
+            sub_items = for s in self.sub_items collect s.render(cache)!,
+        }
+    }
+
+    fn sources(self) -> [str]! {
+        let out = for found in self.content.find_all(BLOCK_PATTERN)! collect found[1];
+        for s in self.sub_items {
+            out.extend(s.sources()!);
+        }
+        out
+    }
+
+    /// Replaces every ```mimas fence in a markdown string with a Shiki HTML block.
+    fn render_blocks(self, cache: ~{ str }) -> str! {
+        let out = self.content;
+        for found in self.content.find_all(BLOCK_PATTERN)! {
+            let original = f"```mimas\n{found[1]}\n```";
+            out = out.replace(original, cache[found[1]]!);
+        }
+        out
+    }
+
+
+    fn serialize(self) -> parse::Value {
+        parse::Value::Object(~{
+            name = parse::Value::String(self.name),
+            content = parse::Value::String(self.content),
+            number = if let n? = self.number {
+                parse::Value::Array(for x in n collect parse::Value::Number(x))
+            } else {
+                parse::Value::Null
+            },
+            path = if let p? = self.path { parse::Value::String(p) } else { parse::Value::Null },
+            source_path = if let p? = self.source_path { parse::Value::String(p) } else { parse::Value::Null },
+            parent_names = parse::Value::Array(for n in self.parent_names collect parse::Value::String(n)),
+            sub_items = parse::Value::Array(for s in self.sub_items collect s.serialize()),
+        })
+    }
+}
+

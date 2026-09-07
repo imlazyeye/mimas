@@ -1,0 +1,34 @@
+[package]
+name = "mimas-solve"
+version = "0.1.0"
+edition = "2024"
+description = "Type solver and checker for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "solve"
+path = "src/lib.rs"
+
+[dependencies]
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
+api = { package = "mimas-api", path = "../api", version = "0.1.0" }
+chompy.workspace = true
+colored.workspace = true
+pretty_assertions.workspace = true
+itertools.workspace = true
+lazy_static.workspace = true
+bitflags.workspace = true
+indexmap.workspace = true
+mutants.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["pretty_assertions"]
+
+[features]
+logging = []

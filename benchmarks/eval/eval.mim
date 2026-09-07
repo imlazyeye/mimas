@@ -1,0 +1,40 @@
+enum Expr {
+    Num(int),
+    Add(Expr, Expr),
+    Sub(Expr, Expr),
+    Mul(Expr, Expr),
+    Neg(Expr),
+}
+
+fn eval(e: Expr) -> int {
+    match e {
+        Expr::Num(n) => n,
+        Expr::Add(a, b) => eval(a) + eval(b),
+        Expr::Sub(a, b) => eval(a) - eval(b),
+        Expr::Mul(a, b) => eval(a) * eval(b),
+        Expr::Neg(a) => -eval(a),
+    }
+}
+
+fn build(depth: int) -> Expr {
+    if depth <= 1 {
+        return Expr::Num(depth + 1);
+    }
+    match depth % 4 {
+        0 => Expr::Add(build(depth - 1), build(depth - 2)),
+        1 => Expr::Sub(build(depth - 1), build(depth - 2)),
+        2 => Expr::Neg(build(depth - 1)),
+        3 => Expr::Mul(build(depth - 2), Expr::Num(2)),
+        !
+    }
+}
+
+const DEPTH = 35;
+const REPEAT = 800;
+
+let tree = build(DEPTH);
+let total = 0;
+for _ in REPEAT {
+    total += eval(tree);
+}
+print(total);

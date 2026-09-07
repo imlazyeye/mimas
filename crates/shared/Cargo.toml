@@ -1,0 +1,20 @@
+[package]
+name = "mimas-shared"
+version = "0.1.0"
+edition = "2024"
+description = "Shared types and utilities for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "shared"
+path = "src/lib.rs"
+
+[dependencies]
+itertools.workspace = true
+mutants.workspace = true
+miette.workspace = true
+chompy.workspace = true
+indexmap.workspace = true

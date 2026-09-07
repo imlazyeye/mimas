@@ -1,0 +1,27 @@
+[package]
+name = "mimas-parse"
+version = "0.1.0"
+edition = "2024"
+description = "Lexer and parser for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "parse"
+path = "src/lib.rs"
+
+[dependencies]
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+chompy.workspace = true
+pretty_assertions.workspace = true
+itertools.workspace = true
+hashbrown.workspace = true
+bitflags.workspace = true
+mutants.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["pretty_assertions"]

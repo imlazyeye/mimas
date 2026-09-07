@@ -1,0 +1,14 @@
+let player = Player { name = "Ferris", health = game::MAX_HEALTH };
+print(greet(player.name));
+print(player.health);
+
+player.damage(30);
+print(player.health);
+
+match game::weakness(Element::Fire) {
+    Element::Fire => print("weak to fire"),
+    Element::Water => print("weak to water"),
+    Element::Earth => print("weak to earth"),
+}
+
+foo();

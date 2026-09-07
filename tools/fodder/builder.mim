@@ -1,0 +1,122 @@
+/// Holds the `Builder` which is used to construct new fodder files.
+module @;
+
+use words;
+use ty;
+
+/// Interface for building a new fodder file. Each `with_*` appends to `out` and hands the
+/// builder back, so calls chain. `counter` keeps every minted identifier unique (the word
+/// banks are only flavor — they'd exhaust on a large file otherwise).
+pub struct Builder {
+    id: str,
+    items: [str],
+    counter: int,
+}
+
+impl Builder {
+    /// Creates a new, blank Builder.
+    pub fn new(id: str) -> Self {
+        Self {
+            id = id,
+            items = [],
+            counter = 0,
+        }
+    }
+
+    /// Inserts the given number of typed consts.
+    pub fn with_consts(self, count: int) -> Self {
+        for _ in count {
+            let t = ty::Ty::random_const();
+            self.items.push(f"const {self.const_name()}: {t.display()} = {t.sample()};");
+        }
+
+        self
+    }
+
+    /// Inserts the given number of structs, half record-style and half tuple-style.
+    pub fn with_structs(self, count: int) -> Self {
+        for _ in count {
+            let item = "";
+            item += f"struct {self.type_name()}";
+            if bool::random() {
+                item += " ";
+                item += ty::AdtFields::new(int::random(6) + 1).display(1);
+            } else {
+                item += ty::TupleFields::new(int::random(5) + 1).display();
+            };
+            item += "\n";
+            self.items.push(item);
+        }
+
+        self
+    }
+
+    /// Inserts the given number of unit-variant enums.
+    pub fn with_enums(self, count: int) -> Self {
+        for _ in count {
+            let item = "";
+            item += f"enum {self.type_name()} {{\n";
+            for _ in int::random(5) + 2 {
+                item += f"    {self.variant_name()}";
+                if bool::random() {
+                    item += " ";
+                    item += ty::AdtFields::new(int::random(6) + 1).display(2);
+                } else {
+                    item += ty::TupleFields::new(int::random(5) + 1).display();
+                };
+                item += ",\n";
+            }
+            item += "}\n";
+            self.items.push(item);
+        }
+
+        self
+    }
+
+    /// Inserts the given number of freestanding functions, each returning a sampled value of a
+    /// random type.
+    pub fn with_functions(self, count: int) -> Self {
+        for _ in count {
+            let t = ty::Ty::random();
+            self.items.push(f"fn {self.fn_name()}() -> {t.display()} {{ {t.sample()} }}\n");
+        }
+
+        self
+    }
+
+    /// Hands back the assembled source.
+    pub fn finish(self) -> [str] {
+        self.items
+    }
+
+    /// A fresh integer, unique for the life of this builder.
+    fn next(self) -> int {
+        self.counter = self.counter + 1;
+        self.counter
+    }
+
+    /// A new type name namespaced to this file's id so it can't clash across files.
+    fn type_name(self) -> str {
+        let adj = words::ADJECTIVES.choose()!;
+        let noun = words::NOUNS.choose()!;
+        f"{adj}{noun}{self.next()}{self.id}"
+    }
+
+    /// A new SCREAMING_CASE const name.
+    fn const_name(self) -> str {
+        let noun = words::NOUNS.choose()!;
+        f"{noun.to_upper()}_{self.next()}_{self.id.to_upper()}"
+    }
+
+    /// A new freestanding-function name.
+    fn fn_name(self) -> str {
+        let verb = words::VERBS.choose()!;
+        f"{verb}_{self.next()}_{self.id}"
+    }
+
+    /// A new enum variant name.
+    fn variant_name(self) -> str {
+        let adj = words::ADJECTIVES.choose()!;
+        f"{adj}_{self.next()}"
+    }
+}

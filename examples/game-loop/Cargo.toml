@@ -1,0 +1,10 @@
+[package]
+name = "game-loop"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+mimas = { path = "../../crates/mimas" }

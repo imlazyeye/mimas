@@ -1,0 +1,183 @@
+module @;
+
+use std::parse;
+
+use font_style::FontStyle;
+
+/// Our interface to shiki (https://github.com/shikijs/shiki).
+///
+/// Requires deno to be installed and available in PATH (https://github.com/denoland/deno).
+pub struct Shiki {
+    background: str,
+    foreground: str,
+    lines: [[Tok]],
+}
+
+impl Shiki {
+    const FONT = "'Fira Code',ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace";
+    const FONT_SIZE = 13.6;
+    const LINE_H = 19.72;
+    const CHAR_W = 8.16;
+    const PAD = 16.0;
+    const RADIUS = 6.0;
+    const BG = "#151b23";
+    const MIN_WIDTH = 400.0;
+    const GRAMMAR = "tools/highlighter/mimas.tmLanguage.json";
+    const THEME = "github-dark-default";
+
+    /// Loads the data from the shiki library in JS
+    pub fn from_str(source: str) -> Self! {
+        Self::from_many([source])![0]
+    }
+
+    pub fn from_many(sources: [str]) -> [Self]! {
+        let input = std::parse::to_json(
+            parse::Value::Array(for s in sources collect parse::Value::String(s)),
+        )!;
+        let stdout = std::process::run(
+            "deno",
+            ["run", "-A", "tools/highlighter/tokenize.mjs", "--grammar", Self::GRAMMAR, "--theme", Self::THEME],
+            input,
+        )!;
+        for entry in std::parse::from_json(stdout)!.as_array()! collect Self::from_json(entry)!
+    }
+
+    fn from_json(value: parse::Value) -> Self! {
+        let json = value.as_dict()!;
+
+        let lines = for line in json["lines"]!.as_array()! {
+            collect for tok in line.as_array()! {
+                collect Tok::from_value(tok)!;
+            };
+        };
+
+        Self {
+            background = json["bg"]!.as_str()!,
+            foreground = json["fg"]!.as_str()!,
+            lines,
+        }
+    }
+
+    /// Builds an HTML block of highlight.js-class spans from the tokens.
+    pub fn to_html(self) -> str {
+        let out_lines = for line in self.lines {
+            let spans = for tok in line {
+                collect if let cls? = scope_class(tok.scopes) {
+                    f"<span class=\"{cls}\">{html_escape(tok.content)}</span>"
+                } else {
+                    html_escape(tok.content)
+                };
+            };
+            collect spans.join("");
+        };
+        let body = out_lines.join("\n");
+        f"<pre><code class=\"language-mimas hljs\">{body}</code></pre>"
+    }
+
+    /// Emits the data from shiki into an svg format.
+    pub fn to_svg(self) -> str {
+        let (width, height) = self.dims();
+
+        // embed our source so that we can regenerate this later -- however because I just adore
+        // using em-dashes, as I literally just did, we need to replace that because its forbidden
+        // in svg comments.
+        let raw_source = (for line in self.lines {
+            collect (for tok in line collect tok.content).join("")
+        }).join("\n");
+        let safe_source = raw_source.replace("--", "- -");
+
+        let out_lines = for (i, line) in self.lines.enumerate() {
+            let y = Self::PAD + (i + 1) * Self::LINE_H - Self::LINE_H * 0.3;
+            let spans = for tok in line {
+                let styles = (for s in tok.styles collect s.css()).join(";");
+                let style_attr = if styles.is_empty() { "" } else { f" style=\"{styles}\"" };
+                collect f"<tspan fill=\"{tok.color}\"{style_attr}>{html_escape(tok.content)}</tspan>";
+            };
+            let inner = spans.join("");
+            collect f"  <text x=\"{Self::PAD}\" y=\"{y}\" xml:space=\"preserve\">{inner}</text>";
+        };
+
+        let texts = out_lines.join("\n");
+        f"<!-- mimas-source:\n{safe_source}\n-->\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" font-family=\"{Self::FONT}\" font-size=\"{Self::FONT_SIZE}\">\n  <rect width=\"100%\" height=\"100%\" rx=\"{Self::RADIUS}\" fill=\"{Self::BG}\"/>\n{texts}\n</svg>"
+    }
+
+    /// The size of the output svg.
+    fn dims(self) -> (float, float) {
+        let columns = (for line in self.lines collect
+            (for tok in line collect tok.content.len()).sum()
+        ).max()!;
+        let width = (columns * Self::CHAR_W + Self::PAD * 2.0).max(Self::MIN_WIDTH);
+        let height = self.lines.len() * Self::LINE_H + Self::PAD * 2.0;
+        (width, height)
+    }
+}
+
+
+// Escapes special characters in html.
+fn html_escape(string: str) -> str {
+    string
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+}
+
+/// Maps a token's TextMate scopes to a highlight.js class, walking the most-specific (innermost)
+/// scope outward; first match wins, `null` renders as plain text. Inside an f-string `{...}` we stop
+/// at the meta.interpolation boundary so the enclosing string scope can't claim interpolated code.
+fn scope_class(scopes: [str]) -> str? {
+    const TABLE = [
+        ("comment", "comment"),
+        ("string", "string"),
+        ("constant.character", "string"),
+        ("constant.numeric", "number"),
+        ("constant.language", "literal"),
+        ("storage", "keyword"),
+        ("keyword", "keyword"),
+        ("support.type", "built_in"),
+        ("entity.name.function", "title"),
+        ("variable.parameter", "params"),
+        ("variable.language", "keyword"),
+        ("variable.constant", "variable"),
+        ("variable.other.member", "attr"),
+        ("variable.other.type", "title"),
+        ("variable.other.namespace", "title"),
+    ];
+
+    let i = scopes.len() - 1;
+    while i >= 0 {
+        let scope = scopes[i];
+        if scope == "meta.interpolation.mim" {
+            return null;
+        }
+        for (prefix, cls) in TABLE {
+            if scope.starts_with(prefix) {
+                return f"hljs-{cls}";
+            }
+        }
+        i -= 1;
+    }
+
+    null
+}
+
+/// An individual token emitted by shiki.
+struct Tok {
+    content: str,
+    color: str,
+    styles: [FontStyle],
+    scopes: [str],
+}
+
+impl Tok {
+    /// Parses out a Tok from the json data.
+    fn from_value(value: parse::Value) -> Self! {
+        let t = value.as_dict()!;
+        Self {
+            content = t["content"]!.as_str()!,
+            color = t["color"]!.as_str()!,
+            styles = FontStyle::from_value(t["fontStyle"]!),
+            scopes = for s in t["scopes"]!.as_array()! collect s.as_str()!,
+        }
+    }
+}

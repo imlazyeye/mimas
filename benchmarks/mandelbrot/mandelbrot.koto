@@ -1,0 +1,19 @@
+WIDTH = 450
+HEIGHT = 450
+MAXITER = 400
+
+checksum = 0
+for py in 0..HEIGHT
+    cy = py / HEIGHT * 3.0 - 1.5
+    for px in 0..WIDTH
+        cx = px / WIDTH * 3.0 - 2.0
+        zx = 0.0
+        zy = 0.0
+        iter = 0
+        while (zx * zx + zy * zy <= 4.0) and (iter < MAXITER)
+            new_zx = (zx * zx - zy * zy) + cx
+            zy = (2.0 * zx * zy) + cy
+            zx = new_zx
+            iter = iter + 1
+        checksum = checksum + iter
+print checksum

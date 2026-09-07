@@ -1,0 +1,30 @@
+COUNT = 250
+STEPS = 600
+SIZE = 400.0
+TOUCH = 8.0
+
+balls = []
+for i in 0..COUNT
+    balls.push {x: (i % 25) * 16.0, y: (i % 17) * 23.0, vx: (i % 7) - 3.0, vy: (i % 5) - 2.0}
+
+for _ in 0..STEPS
+    # move each ball, reversing it whenever it reaches a wall
+    for ball in balls
+        ball.x += ball.vx
+        ball.y += ball.vy
+        if ball.x < 0.0 or ball.x > SIZE then ball.vx = -ball.vx
+        if ball.y < 0.0 or ball.y > SIZE then ball.vy = -ball.vy
+    # when two balls touch, swap their velocities so they bounce apart
+    for i in 0..COUNT
+        ball = balls[i]
+        for j in (i + 1)..COUNT
+            other = balls[j]
+            dx = other.x - ball.x
+            dy = other.y - ball.y
+            if (dx * dx + dy * dy).sqrt() < TOUCH
+                ball.vx, ball.vy, other.vx, other.vy = other.vx, other.vy, ball.vx, ball.vy
+
+total = 0.0
+for ball in balls
+    total += ball.x + ball.y
+print total

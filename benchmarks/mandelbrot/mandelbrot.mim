@@ -1,0 +1,22 @@
+const WIDTH = 450;
+const HEIGHT = 450;
+const MAXITER = 400;
+
+let checksum = 0;
+for py in HEIGHT {
+    let cy = py.to_float() / HEIGHT.to_float() * 3.0 - 1.5;
+    for px in WIDTH {
+        let cx = px.to_float() / WIDTH.to_float() * 3.0 - 2.0;
+        let zx = 0.0;
+        let zy = 0.0;
+        let iter = 0;
+        while zx * zx + zy * zy <= 4.0 && iter < MAXITER {
+            let new_zx = zx * zx - zy * zy + cx;
+            zy = 2.0 * zx * zy + cy;
+            zx = new_zx;
+            iter += 1;
+        }
+        checksum += iter;
+    }
+}
+print(checksum);

@@ -1,0 +1,45 @@
+fn main() {
+    count := 250
+    steps := 600
+    size := 400.0
+    touch := 8.0
+
+    balls := []
+    for i count {
+        push(mut balls, {
+            x: (i % 25) * 16.0,
+            y: (i % 17) * 23.0,
+            vx: (i % 7) - 3.0,
+            vy: (i % 5) - 2.0,
+        })
+    }
+
+    for s steps {
+        // move each ball, reversing it whenever it reaches a wall
+        for i count {
+            balls[i].x += balls[i].vx
+            balls[i].y += balls[i].vy
+            if (balls[i].x < 0.0) || (balls[i].x > size) { balls[i].vx = -balls[i].vx }
+            if (balls[i].y < 0.0) || (balls[i].y > size) { balls[i].vy = -balls[i].vy }
+        }
+        // when two balls touch, swap their velocities so they bounce apart
+        for i count, j [i+1, count) {
+            dx := balls[j].x - balls[i].x
+            dy := balls[j].y - balls[i].y
+            if sqrt(dx * dx + dy * dy) < touch {
+                balls[i].vx += balls[j].vx
+                balls[j].vx = balls[i].vx - balls[j].vx
+                balls[i].vx -= balls[j].vx
+                balls[i].vy += balls[j].vy
+                balls[j].vy = balls[i].vy - balls[j].vy
+                balls[i].vy -= balls[j].vy
+            }
+        }
+    }
+
+    total := 0.0
+    for i count {
+        total += balls[i].x + balls[i].y
+    }
+    println(total)
+}

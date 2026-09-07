@@ -1,0 +1,37 @@
+[package]
+name = "mimas-vm"
+version = "0.1.0"
+edition = "2024"
+description = "Register-based virtual machine for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "vm"
+path = "src/lib.rs"
+
+[dependencies]
+solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
+compile = { package = "mimas-compile", path = "../compile", version = "0.1.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
+api = { package = "mimas-api", path = "../api", version = "0.1.0" }
+macros = { package = "mimas-macros", path = "../macros", version = "0.1.0" }
+inventory = "0.3"
+itertools.workspace = true
+indexmap.workspace = true
+mutants.workspace = true
+gc-arena.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+smallvec = "1.15.1"
+rustc-hash = "2"
+itoa = "1.0.18"
+
+[features]
+op-count = []
+
+[dev-dependencies]
+pretty_assertions.workspace = true

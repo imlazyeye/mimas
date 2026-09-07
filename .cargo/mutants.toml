@@ -1,0 +1,34 @@
+# Pass extra arguments to cargo test
+additional_cargo_test_args = ["-j3", "--", "--nocapture"]
+
+# Minimum test timeout in seconds
+minimum_test_timeout = 5.0
+
+# Exclude files matching these glob patterns
+exclude_globs = [
+    "**/examples/**",
+    "**/tests/**",
+    "crates/compile/src/codegen/render.rs",
+    "crates/solve/src/utils/printer.rs",
+    # semantics-preserving optimizer: a mutated pass just optimizes less and the program
+    # still runs correctly, so behavioral mutation testing can't grade it (equivalent
+    # mutants). fold *correctness* is pinned by ir_tests::const_fold_* instead.
+    "crates/compile/src/codegen/clean.rs",
+]
+
+# Exclude individual mutants whose name matches these patterns -- objectively noise within
+# otherwise-examined files.
+exclude_re = [
+    # Display/Debug formatting: cosmetic, never behavior-tested
+    "::fmt ->",
+    # diagnostic span arithmetic: moves underline columns, not behavior. our tests assert on
+    # error messages, not span offsets
+    "Span::start",
+    "Span::end",
+    "Span::len",
+    "Span::is_empty",
+    # string interning identity: infra a test can't observe going wrong without already
+    # failing loudly elsewhere
+    "Interner::",
+]
+

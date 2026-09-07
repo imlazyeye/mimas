@@ -1,0 +1,55 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      languages:
+        description: 'Languages to run (space-separated, e.g. "mimas rhai luau") or "all"'
+        required: false
+        default: 'all'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HYPERFINE_VERSION: "1.18.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install latest stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks/runners
+
+      - name: Install hyperfine
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/sharkdp/hyperfine/releases/download/v${HYPERFINE_VERSION}/hyperfine-v${HYPERFINE_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz
+          echo "$PWD/hyperfine-v${HYPERFINE_VERSION}-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+
+      # every runtime is an embedded bin in benchmarks/runners; compare.sh builds the requested
+      # ones (cargo build --release --bin …) before benchmarking, so there's no separate build step
+      - name: Run benchmarks
+        env:
+          LANGS: ${{ inputs.languages }}
+        run: |
+          if [ "$LANGS" = "all" ] || [ -z "$LANGS" ]; then
+            bash ./benchmarks/compare.sh
+          else
+            bash ./benchmarks/compare.sh $LANGS
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/results/results-*.json
+          if-no-files-found: error

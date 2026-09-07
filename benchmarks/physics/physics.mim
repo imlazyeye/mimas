@@ -1,0 +1,46 @@
+struct Ball { x: float, y: float, vx: float, vy: float }
+const COUNT = 250;
+const STEPS = 600;
+const SIZE = 400.0;
+const TOUCH = 8.0;
+
+let balls: [Ball] = [];
+for i in COUNT {
+    balls.push(Ball { 
+        x = (i % 25).to_float() * 16.0,
+        y = (i % 17).to_float() * 23.0, 
+        vx = (i % 7).to_float() - 3.0, 
+        vy = (i % 5).to_float() - 2.0 
+    });
+}
+
+for _ in STEPS {
+    // move each ball, reversing it whenever it reaches a wall
+    for ball in balls {
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+        if ball.x < 0.0 || ball.x > SIZE { 
+            ball.vx = -ball.vx; 
+        }
+        if ball.y < 0.0 || ball.y > SIZE { 
+            ball.vy = -ball.vy; 
+        }
+    }
+    // when two balls touch, swap their velocities so they bounce apart
+    for i in COUNT {
+        let ball = balls[i];
+        for j in i..COUNT {
+            let other = balls[j];
+            let dx = other.x - ball.x;
+            let dy = other.y - ball.y;
+            if (dx * dx + dy * dy).sqrt() < TOUCH {
+                let vx = ball.vx; let vy = ball.vy;
+                ball.vx = other.vx; ball.vy = other.vy;
+                other.vx = vx; other.vy = vy;
+            }
+        }
+    }
+}
+let total = 0.0;
+for ball in balls { total += ball.x + ball.y; }
+print(total);

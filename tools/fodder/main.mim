@@ -1,0 +1,80 @@
+/// Generates a multi-file library of representative mimas for the compile benchmark.
+///
+/// usage: mimas run tools/fodder -- line-count-target [out-dir] 
+use builder::Builder;
+use std::fs;
+use std::sys;
+
+fn build_file(id: str, consts: int, structs: int, enums: int, fns: int) -> str {
+    let body = Builder::new(id)
+        .with_consts(consts)
+        .with_structs(structs)
+        .with_enums(enums)
+        .with_functions(fns)
+        .finish();
+
+    f"module @;\n\n{body}"
+}
+
+enum FileSize {
+    Giant,
+    Large,
+    Medium,
+    Small,
+}
+
+fn pad3(n: int) -> str {
+    if n < 10 {
+        f"00{n}"
+    } else if n < 100 {
+        f"0{n}"
+    } else {
+        f"{n}"
+    }
+}
+
+fn write_tier(dir: str, label: str, count: int, consts: int, structs: int, enums: int, fns: int) {
+    for i in count {
+        let id = f"{label}{pad3(i)}";
+        fs::write(f"{dir}/{id}.mim", build_file(id, consts, structs, enums, fns))!;
+    }
+}
+
+fn tier_count(cap: int, full: int) -> int {
+    if cap > 0 && cap < full { cap } else { full }
+}
+
+let line_target = sys::arg(1)!.to_int()!;
+let dir = sys::arg(2) ?? "tools/dump";
+
+fs::remove_dir(dir);
+fs::make_dir(dir);
+
+const SCALAR = 1_000;
+
+let lines = 0;
+let iter = 0;
+while lines < line_target {
+    let id = pad3(iter);
+
+    let items = Builder::new(id)
+        .with_consts(int::random(20))
+        .with_structs(int::random(30))
+        .with_enums(int::random(30))
+        .with_functions(int::random(50))
+        .finish();
+
+    items.shuffle();
+
+    while items.len() + lines > line_target && items.len() > 1 {
+        items.pop();
+    }
+    
+    let joined = items.join("\n");
+    fs::write(f"{dir}/{id}.mim", joined)!;
+
+    lines += joined.lines().len();
+    iter += 1;
+}
+
+fs::write(f"{dir}/main.mim", "// nothing!");

@@ -1,0 +1,26 @@
+fn main() {
+    width := 450.0
+    height := 450.0
+    maxiter := 400.0
+
+    checksum := 0.0
+    for py height {
+        cy := (py / height) * 3.0 - 1.5
+        for px width {
+            cx := (px / width) * 3.0 - 2.0
+            new_zx := 0.0
+            zx := 0.0
+            zy := 0.0
+            iter := 0.0
+            loop {
+                if !(((zx * zx + zy * zy) <= 4.0) && (iter < maxiter)) { break }
+                new_zx = (zx * zx - zy * zy) + cx
+                zy = (2.0 * zx * zy) + cy
+                zx = new_zx
+                iter = iter + 1.0
+            }
+            checksum = checksum + iter
+        }
+    }
+    println(checksum)
+}

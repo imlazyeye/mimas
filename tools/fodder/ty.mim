@@ -1,0 +1,154 @@
+/// Our interface for minting random but coherent types.
+module @;
+
+use words;
+
+/// The various mimas types we can mint.
+pub enum Ty {
+    Int,
+    Float,
+    Str,
+    Option(Ty),
+    Array(Ty),
+    Dict(Ty),
+}
+
+impl Ty {
+    /// Operators we can use on any type.
+    const UNIVERSAL_OPS = ["==", "!="];
+
+    /// Operators we'll only use on numericals (with some exceptions, like + for strs)
+    const MATH_OPS = ["+", "-", "*", "/", "~/", "^", "<", ">", ">=", "<="];
+
+    /// Generates a new, random Ty. Tracks its depth recursively to limit how nested the Ty can
+    /// become.
+    pub fn random(depth=0) -> Self {
+        const MAX_DEPTH = 3;
+        if depth > MAX_DEPTH {
+            return Self::random_primitive();
+        }
+        let opts = [
+            Ty::Int,
+            Ty::Float,
+            Ty::Str,
+            Ty::Option(Ty::random(depth + 1)),
+            Ty::Array(Ty::random(depth + 1)),
+            Ty::Dict(Ty::random(depth + 1)),
+        ];
+
+        opts.choose()!
+    }
+
+    /// Selects a random Ty with a flat structure.
+    fn random_primitive() -> Self {
+        [Ty::Int, Ty::Float, Ty::Str].choose()!
+    }
+
+    /// Generates a random Ty that is valid as a `const` annotation.
+    ///
+    /// A dict can't appear anywhere inside an array or tuple const: those elements have to
+    /// encode as bytecode constants, while dict consts only exist as use-site allocations. A
+    /// dict is still fine at the top level or nested in another dict, so only the array arm
+    /// needs the restriction.
+    pub fn random_const(depth=0) -> Self {
+        const MAX_DEPTH = 3;
+        if depth > MAX_DEPTH {
+            return Self::random_primitive();
+        }
+        let opts = [
+            Ty::Int,
+            Ty::Float,
+            Ty::Str,
+            Ty::Option(Ty::random_const(depth + 1)),
+            Ty::Array(Ty::random_dictless(depth + 1)),
+            Ty::Dict(Ty::random_const(depth + 1)),
+        ];
+
+        opts.choose()!
+    }
+
+    /// Generates a random Ty with no dict at any depth. See [Ty::random_const].
+    fn random_dictless(depth=0) -> Self {
+        const MAX_DEPTH = 3;
+        if depth > MAX_DEPTH {
+            return Self::random_primitive();
+        }
+        let opts = [
+            Ty::Int,
+            Ty::Float,
+            Ty::Str,
+            Ty::Option(Ty::random_dictless(depth + 1)),
+            Ty::Array(Ty::random_dictless(depth + 1)),
+        ];
+
+        opts.choose()!
+    }
+
+    /// Converts the Ty into its string form. Consecutive `?` are flattened, since `T??` is just
+    /// `T?`.
+    pub fn display(self) -> str {
+        match self {
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::Str => "str",
+            Self::Option(t) => {
+                let inner = t.display();
+                if inner.ends_with("?") { inner } else { f"{inner}?" }
+            },
+            Self::Array(t) => f"[{t.display()}]",
+            Self::Dict(t) => f"~\{ {t.display()} \}",
+        }
+    }
+
+    /// Mints a literal value that inhabits this type, for use on the right of a `const` or as a
+    /// function body.
+    pub fn sample(self) -> str {
+        match self {
+            Self::Int => f"{int::random(100)}",
+            Self::Float => f"{int::random(20)}.{int::random(99)}",
+            Self::Str => { let w = words::VERBS.choose()!; f"\"{w}\"" },
+            Self::Option(t) => t.sample(),
+            Self::Array(t) => { let a = t.sample(); let b = t.sample(); f"[{a}, {b}]" },
+            Self::Dict(t) => { let v = t.sample(); f"~\{ {words::numbered_noun()} = {v} \}" },
+        }
+    }
+}
+
+pub struct AdtFields(~{ Ty })
+impl AdtFields {
+    pub fn new(len: int) -> Self {
+        let d = ~{};
+        for _ in len {
+            d[words::numbered_noun()] = Ty::random();
+        }
+
+        Self(d)
+    }
+
+    pub fn display(self, tabs: int) -> str {
+        let formatted = for (name, ty) in self.0 {
+            collect f"{"    ".repeat(tabs)}{name}: {ty.display()},";
+        };
+
+        let lines = formatted.join("\n");
+
+        f"{{\n{lines}\n{"   ".repeat(tabs - 1)}}}"
+    }
+}
+
+pub struct TupleFields([Ty]);
+impl TupleFields {
+    pub fn new(len: int) -> Self {
+        let a = for _ in len {
+            collect Ty::random();
+        };
+
+        Self(a)
+    }
+
+    pub fn display(self) -> str {
+        let fields = (for t in self.0 collect t.display()).join(", ");
+
+        f"({fields})"
+    }
+}

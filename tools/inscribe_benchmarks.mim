@@ -1,0 +1,165 @@
+/// run from workspace dir to update the book's benchmarks with the latest results from compare
+///
+/// hastily written, this could use some cleanup and polish
+
+// these are the languages we use for the benchmarks page, not the set on the intro page
+const LANGUAGES = [
+    "mimas",
+    "rune",
+    "rhai",
+    "luau",
+];
+
+// (bench key, display name, repo, crate name in the runners' Cargo.lock)
+const LANG_META = [
+    ("mimas", "mimas", "https://github.com/imlazyeye/mimas", "mimas"),
+    ("luau", "Luau (mlua)", "https://github.com/luau-lang/luau", "mlua"),
+    ("rune", "Rune", "https://github.com/rune-rs/rune", "rune"),
+    ("rhai", "Rhai (perf)", "https://github.com/rhaiscript/rhai", "rhai"),
+    ("koto", "Koto", "https://github.com/koto-lang/koto", "koto"),
+    ("dyon", "Dyon", "https://github.com/PistonDevelopers/dyon", "dyon"),
+    ("steel", "Steel", "https://github.com/mattwparas/steel", "steel-core"),
+    ("boa", "Boa", "https://github.com/boa-dev/boa", "boa_engine"),
+    ("rustpython", "RustPython", "https://github.com/RustPython/RustPython", "rustpython-vm"),
+    ("fabricator", "Fabricator", "https://github.com/kyren/fabricator", "fabricator-vm"),
+];
+
+const TESTS = [
+    ("strings", "string formatting, builtin methods"),
+    ("physics", "struct field access, float math"),
+    ("mandelbrot", "scalar float throughput, tight loops"),
+    ("prime_numbers", "array indexing, tight integer loops"),
+    ("fibonacci", "function-call overhead, recursion"),
+    ("eval", "enum match dispatch, recursion"),
+    ("collections", "dict insert + lookup, string keys"),
+];
+
+/// The machine the published numbers were measured on. Update this whenever the benchmarks are
+/// re-run somewhere else -- both the benchmarks page and the home page legend read it from here.
+const MACHINE = "an AMD Ryzen 7 9800X3D running Linux";
+
+
+use std::parse::Value;
+
+// the chart spans up to this multiple of the fastest result; anything slower runs off the edge
+// (its real time is still printed). keeps a lone slow outlier from squashing every other bar.
+const CHART_RANGE = 5.0;
+
+fn build_chart(name: str, description: str, langs: [str], full_range: bool) -> [str] {
+    let out = [];
+    if let data? = std::fs::read(f"benchmarks/results/results-{name}.json") {
+
+        let fastest_time = 0.0;
+        let slowest_time = 0.0;
+        let source_path = f"https://github.com/imlazyeye/mimas/tree/main/benchmarks/{name}";
+
+        out.push(f"<div class=\"bench\"><h4><a href=\"{source_path}\">{name.replace("_", " ")}</a> <small>{description}</small></h4>");
+        out.push("<table class=\"charts-css bar show-labels data-spacing-4\"><tbody>");
+
+        let results = std::parse::from_json(data)!
+            .as_dict()!["results"]!
+            .as_array()!;
+
+        let outcomes = for result in results {
+            let result = result.as_dict()!;
+            let time = result["mean"]!.as_float()!;
+            let lang = result["command"]!.as_str()!;
+
+            if !(lang in langs) {
+                continue;
+            }
+
+            if fastest_time == 0.0 || time < fastest_time {
+                fastest_time = time;
+            }
+            if time > slowest_time {
+                slowest_time = time;
+            }
+
+            collect (lang, time);
+        };
+
+        outcomes.sort_by_float(for (_, t) in outcomes collect t);
+
+        // normally cap at CHART_RANGE x fastest so a lone slow outlier doesn't squash the rest
+        // (it runs off the edge instead), full_range scales 1:1 to the slowest with no fade.
+        let cap = if full_range { 
+            slowest_time 
+        } else { 
+            (fastest_time * CHART_RANGE).min(slowest_time) 
+        };
+
+        for (lang, time) in outcomes {
+            let raw = time / cap;
+            let size = if raw > 1.0 { 1.0 } else { raw };
+
+            let me_class = if lang == "mimas" "me " else "";
+            let of_class = if raw > 1.0 "overflow" else "";
+            let classes = (me_class + of_class).trim();
+            let class_attr = if classes != "" f" class=\"{classes}\"" else "";
+
+            let fmt_time = if time >= 1 {
+                f"{time.format(2)}s"
+            } else if time >= 0.001 {
+                f"{(time * 1000).round()}ms"
+            } else {
+                f"{(time * 1000 * 1000).round()}µs"
+            };
+
+            let th_class = if lang.len() > 8 f" class=\"long\"" else "";
+            out.push(f"<tr><th scope=\"row\"{th_class}>{lang}</th><td{class_attr} style=\"--size:{size}\"><span class=\"data\">{fmt_time}</span></td></tr>");
+        }
+        out.push("</tbody></table></div>");
+    };
+    out
+}
+
+// each entry is a repo link + the version pinned in the runners' lockfile, so the
+// legend can never drift from what was actually measured
+fn build_legend(langs: [str]) -> str {
+    let lock = std::fs::read("benchmarks/runners/Cargo.lock")!;
+    let parts = [];
+    for lang in langs {
+        for (key, display, repo, crate_name) in LANG_META {
+            if key != lang {
+                continue;
+            }
+            let block = lock.split(f"name = \"{crate_name}\"\n")[1].split("[[package]]")[0];
+            let version = if let rev? = block.find("#([0-9a-f]{7})") {
+                f"git {rev[1]}"
+            } else {
+                f"v{block.find("version = \"([^\"]+)\"")![1]}"
+            };
+            parts.push(f"<a href=\"{repo}\">{display}</a> {version}");
+        }
+    }
+    parts.join(" · ")
+}
+
+
+
+fn inscribe(path: str, marker: str, blob: str) {
+    let start = f"<!-- {marker} start -->\n";
+    let end = f"\n<!-- {marker} end -->";
+    let input = std::fs::read(path)!;
+    let blurb = input.find(start + "[\\s\\S]+" + end)![0];
+    let output = input.replace(blurb, start + blob + end);
+    std::fs::write(path, output)!;
+}
+
+// the benchmarks page
+let full = [];
+for (name, description) in TESTS {
+    full.extend(build_chart(name, description, LANGUAGES, false));
+}
+full.push(f"<p class=\"bench-legend\">{build_legend(LANGUAGES)} -- measured on {MACHINE}. Bars are scaled within each test. Results slower than 5x of the fastest result are faded and not factored into the scaling.</p>");
+inscribe("./book/src/introduction/benchmarks.md", "benchmark", full.join("\n"));
+
+// home page card -- pure-Rust runtimes only. luau is deliberately absent: it's the quickest
+// thing you can embed in Rust but it's a C++ runtime, so it belongs in the benchmarks page's
+// wider comparison rather than in a like-for-like chart.
+let home_langs = ["mimas", "rhai", "rune", "koto", "dyon", "steel", "boa", "rustpython", "fabricator"];
+let home = [];
+home.extend(build_chart("physics", "struct field access, float math", home_langs, true));
+home.push(f"<p class=\"bench-legend\">Pure-Rust runtimes, measured on {MACHINE}. {build_legend(home_langs)}</p>");
+inscribe("./book/src/introduction.md", "homepage benchmark", home.join("\n"));

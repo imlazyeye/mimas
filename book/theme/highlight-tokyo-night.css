@@ -1,0 +1,40 @@
+/* Tokyo Night code highlighting. Generated from the upstream VS Code themes;
+   restyles highlight.js token classes, so it covers mimas blocks too (no preprocessor change). */
+
+/* Mimas Dark -> Tokyo Night */
+.navy pre, .navy pre code.hljs { background: #1a1b26; }
+.navy code.hljs { color: #a9b1d6; }
+.navy .hljs-comment, .navy .hljs-quote { color: #51597d; }
+.navy .hljs-keyword, .navy .hljs-selector-tag { color: #bb9af7; }
+.navy .hljs-built_in, .navy .hljs-builtin-name { color: #0db9d7; }
+.navy .hljs-type { color: #0db9d7; }
+.navy .hljs-title, .navy .hljs-section { color: #7aa2f7; }
+.navy .hljs-string, .navy .hljs-symbol, .navy .hljs-bullet, .navy .hljs-addition, .navy .hljs-regexp { color: #9ece6a; }
+.navy .hljs-number { color: #ff9e64; }
+.navy .hljs-literal { color: #ff9e64; }
+.navy .hljs-variable, .navy .hljs-template-variable { color: #c0caf5; }
+.navy .hljs-params { color: #e0af68; }
+.navy .hljs-attr, .navy .hljs-attribute { color: #73daca; }
+.navy .hljs-tag, .navy .hljs-name, .navy .hljs-deletion { color: #f7768e; }
+.navy .hljs-selector-id, .navy .hljs-selector-class, .navy .hljs-selector-attr, .navy .hljs-selector-pseudo { color: #bb9af7; }
+.navy .hljs-emphasis { font-style: italic; }
+.navy .hljs-strong { font-weight: 700; }
+
+/* Mimas Light -> Tokyo Night Light */
+.light pre, .light pre code.hljs { background: #e6e7ed; }
+.light code.hljs { color: #343b59; }
+.light .hljs-comment, .light .hljs-quote { color: #888b94; }
+.light .hljs-keyword, .light .hljs-selector-tag { color: #65359d; }
+.light .hljs-built_in, .light .hljs-builtin-name { color: #006c86; }
+.light .hljs-type { color: #006c86; }
+.light .hljs-title, .light .hljs-section { color: #2959aa; }
+.light .hljs-string, .light .hljs-symbol, .light .hljs-bullet, .light .hljs-addition, .light .hljs-regexp { color: #385f0d; }
+.light .hljs-number { color: #965027; }
+.light .hljs-literal { color: #965027; }
+.light .hljs-variable, .light .hljs-template-variable { color: #343b58; }
+.light .hljs-params { color: #8f5e15; }
+.light .hljs-attr, .light .hljs-attribute { color: #33635c; }
+.light .hljs-tag, .light .hljs-name, .light .hljs-deletion { color: #8c4351; }
+.light .hljs-selector-id, .light .hljs-selector-class, .light .hljs-selector-attr, .light .hljs-selector-pseudo { color: #65359d; }
+.light .hljs-emphasis { font-style: italic; }
+.light .hljs-strong { font-weight: 700; }

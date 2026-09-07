@@ -1,0 +1,15 @@
+let n = 4500000;
+
+let total_len = 0;
+let hits = 0;
+for i in 0..n {
+    let s = format!("item_{}_value", i % 128);
+    total_len += s.len();
+    if s.contains("7") {
+        hits += 1;
+    }
+    let u = s.to_uppercase();
+    total_len += u.len();
+}
+println!("{}", total_len);
+

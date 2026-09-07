@@ -1,0 +1,398 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Fira+Code:wght@400;500;600&display=swap');
+
+:root {
+    /* accents from the logo designer; the surfaces are ours -- kept low-sat on
+       purpose so the saturation lives in the accents, not the backdrop */
+    --mimas-blue: #3d8ef7;
+    --atmosphere-cyan: #66e8ff;
+    --mimas-accent: var(--mimas-blue);
+    --mimas-accent-dark: #2b72d6;
+    --deep-space: #12141d;
+    --slate: #0d0f16;
+    --soft-white: #f6f8fb;
+}
+
+:root {
+    --mono-font: "Fira Code", ui-monospace, monospace;
+}
+
+body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.menu-title {
+    font-family: "Space Grotesk", "Inter", sans-serif;
+}
+
+.logo_title {
+    font-family: "Space Grotesk", "Inter", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.22em;
+    margin: 2.5rem 0 1.5rem;
+    font-size: 4.5rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--fg);
+}
+
+.navy .logo_title {
+    color: #fff;
+}
+
+body:has(.logo_title) .menu-title {
+    visibility: hidden;
+}
+
+.menu-title a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28em;
+    color: inherit;
+    text-decoration: none;
+}
+
+.menu-title a::before {
+    content: "";
+    flex: none;
+    width: 1.05em;
+    height: 1.05em;
+    background-color: currentColor;
+    -webkit-mask: url("../brand/icon-black.svg") center/contain no-repeat;
+    mask: url("../brand/icon-black.svg") center/contain no-repeat;
+}
+
+.logo {
+    width: 1.05em;
+    height: 1.05em;
+}
+
+a:hover {
+    color: var(--mimas-accent-dark);
+}
+
+:is(.navy, .coal, .ayu) a:hover {
+    color: var(--atmosphere-cyan);
+}
+
+.navy {
+    --bg: var(--deep-space);
+    --fg: #c3c8d8;
+
+    --sidebar-bg: var(--slate);
+    --sidebar-fg: #a9b0c2;
+    --sidebar-non-existant: #4c5268;
+    --sidebar-active: var(--atmosphere-cyan);
+    --sidebar-spacer: #1d2230;
+
+    --scrollbar: #2e3548;
+
+    --icons: #6b7388;
+    --icons-hover: #c3c8d8;
+
+    --links: var(--mimas-accent);
+
+    --inline-code-color: #9cc3f7;
+
+    --theme-popup-bg: #161927;
+    --theme-popup-border: #2a3046;
+    --theme-hover: #1b1f2e;
+
+    --quote-bg: #171a26;
+    --quote-border: #232839;
+
+    --searchbar-border-color: #2a3046;
+    --searchbar-bg: #161927;
+    --searchbar-fg: #c3c8d8;
+    --searchbar-shadow-color: var(--slate);
+    --searchresults-header-fg: #6b7388;
+    --searchresults-border-color: #2a3046;
+    --searchresults-li-bg: #161927;
+    --search-mark-bg: #2b72d6;
+
+    --footnote-highlight: #2b72d6;
+    --overlay-bg: rgba(9, 11, 17, 0.5);
+}
+
+.navy .content :is(h1, h2, h3, h4, h5, h6) {
+    color: #e7eaf3;
+}
+
+#theme-list li:has(#rust),
+#theme-list li:has(#coal),
+#theme-list li:has(#ayu) {
+    display: none;
+}
+
+.light {
+    --bg: var(--soft-white);
+    --fg: #1f2533;
+
+    --sidebar-bg: #eef1f7;
+    --sidebar-fg: #3a4252;
+    --sidebar-active: var(--mimas-accent-dark);
+    --sidebar-spacer: #dde3ee;
+
+    --scrollbar: #c3cad8;
+
+    --icons: #8a93a6;
+    --icons-hover: #1f2533;
+
+    --links: var(--mimas-accent-dark);
+
+    --theme-popup-bg: #ffffff;
+    --theme-popup-border: #d4dbe8;
+    --theme-hover: #e6ebf4;
+
+    --quote-bg: #eef2f9;
+    --quote-border: #dbe3f0;
+
+    --searchresults-li-bg: #e7eefb;
+    --search-mark-bg: #bcdcff;
+
+    --footnote-highlight: #2b72d6;
+}
+
+.light .content :is(h1, h2, h3, h4, h5, h6) {
+    color: #131927;
+}
+
+.chapter li.chapter-item a.active {
+    color: var(--sidebar-active);
+    font-weight: 600;
+}
+
+:root {
+    --content-max-width: 760px;
+}
+
+.navy .content strong {
+    color: #eee;
+}
+
+
+.light .content strong {
+    color: #000;
+}
+
+.badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.45rem;
+    margin: 3.5rem 0 3.5rem;
+}
+
+.badges img {
+    display: block;
+    height: 20px;
+}
+
+.cta-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin: 2.25rem 0 1rem;
+}
+
+.cta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.85rem 1.1rem;
+    border: 1px solid var(--mimas-accent);
+    border-radius: 8px;
+    text-decoration: none !important;
+    transition: transform 0.08s ease, background 0.12s ease;
+}
+
+.cta:hover {
+    transform: translateY(-1px);
+    background: color-mix(in srgb, var(--mimas-accent) 10%, var(--bg));
+}
+
+.cta__label {
+    font-weight: 600;
+    color: var(--mimas-accent);
+}
+
+.cta--primary {
+    background: var(--mimas-accent);
+    border-color: var(--mimas-accent);
+}
+
+.cta--primary:hover {
+    background: var(--mimas-accent-dark);
+    border-color: var(--mimas-accent-dark);
+}
+
+.cta--primary .cta__label,
+.cta--primary .cta__sub {
+    color: #fff;
+}
+
+.cta__sub {
+    font-size: 1.2rem;
+    color: var(--fg);
+    opacity: 0.75;
+}
+
+@media (max-width: 620px) {
+    .cta-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.hljs.language-mimas {
+    display: block;
+    padding: 1rem;
+    font-family: var(--mono-font);
+    font-size: var(--code-font-size);
+    font-feature-settings: "calt" 1, "liga" 1;
+}
+
+.diagnostic {
+    margin: 1rem 0 0.25rem;
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    background: #1a1b26;
+    color: #c9d1d9;
+    font-family: var(--mono-font);
+    font-size: var(--code-font-size);
+    line-height: 1.5;
+}
+
+:is(.light, .rust) .diagnostic {
+    background: #f6f7f6;
+    color: #1f2328;
+}
+
+:is(.light, .rust) .diagnostic span {
+    filter: none !important;
+}
+
+/* benchmarks — per-test cards; Charts.css draws the bars. each bar's --size is a 0–1 fraction of
+   the slowest run in that card. bar color derives from the theme --fg so it adapts light/dark; the
+   mimas bar (td.me) uses the brand accent. */
+.bench {
+    margin: 0.9rem 0;
+    padding: 0.8rem 1.05rem;
+    border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+}
+
+.bench h4 {
+    margin: 0 0 0.55rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.bench h4 small {
+    font-weight: 400;
+    opacity: 0.6;
+    margin-left: 0.4rem;
+}
+
+.bench .charts-css {
+    height: auto;
+    --labels-size: 6rem;
+    --bench-row-height: 2.5rem;
+}
+
+.bench .charts-css.bar tbody tr {
+    flex: 0 0 var(--bench-row-height);
+    height: var(--bench-row-height);
+}
+
+.bench .charts-css:has(th.long) {
+    --labels-size: 9rem;
+}
+
+
+.bench .charts-css td {
+    border-radius: 0.3em;
+    --color: color-mix(in srgb, var(--mimas-accent) 20%, color-mix(in srgb, var(--fg) 26%, transparent));
+}
+
+.bench .charts-css td.me {
+    --color: linear-gradient(to right, var(--mimas-accent-dark), var(--atmosphere-cyan));
+    --data-color: var(--mimas-accent-dark);
+}
+
+.navy .bench .charts-css td.me {
+    --data-color: var(--atmosphere-cyan);
+}
+
+.bench .charts-css.bar tbody tr td {
+    width: calc((100% - var(--bench-data-gutter, 5.5rem)) * var(--size));
+}
+
+.bench .charts-css.bar tbody tr td.overflow::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 50.0%;
+    background: linear-gradient(to right, transparent, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+}
+
+.bench .charts-css.bar tbody tr td .data {
+    white-space: nowrap;
+    color: var(--data-color, var(--fg));
+    opacity: 0.85;
+    transform: translateX(calc(100% + 0.8rem));
+}
+
+.bench .charts-css tr {
+    background-color: transparent !important;
+}
+
+/* kill mdBook table zebra */
+
+.bench-legend {
+    font-size: 1.2rem;
+    opacity: 0.7;
+}
+
+.content table:not(.charts-css) {
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+    border-radius: 8px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+}
+
+.content table:not(.charts-css) thead {
+    background: color-mix(in srgb, var(--fg) 7%, var(--bg));
+}
+
+.content table:not(.charts-css) thead th {
+    /* the !important beats the inline text-align mdBook emits from `:--` column markers */
+    text-align: center !important;
+    padding: 7px 20px;
+    font-family: "Space Grotesk", "Inter", sans-serif;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+.content table:not(.charts-css) td {
+    padding: 6px 20px;
+    border: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.content table:not(.charts-css) tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.content table:not(.charts-css) tbody tr:nth-child(2n) {
+    background: transparent;
+}

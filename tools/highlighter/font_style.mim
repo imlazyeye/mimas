@@ -1,0 +1,40 @@
+module @;
+
+use std::parse;
+
+/// The different font styling options that can be given to the svg output.
+pub enum FontStyle {
+    Italic,
+    Bold,
+    Underline,
+}
+
+impl FontStyle {
+    
+    /// Parses out an array of FontStyles from a parse value.
+    pub fn from_value(value: parse::Value) -> [Self] {
+        let ALL = [Self::Italic, Self::Bold, Self::Underline]; // todo: cannot evaluate constant adts
+        let input = value.as_float()?.to_int()!;
+        for s in ALL {
+            if input & s.flag() != 0 collect s;
+        }
+    }
+
+    /// Emits this style into its svg form.
+    pub fn css(self) -> str {
+        match self {
+            Self::Italic => "font-style:italic",
+            Self::Bold => "font-weight:bold",
+            Self::Underline => "text-decoration:underline",
+        }
+    }
+
+    /// Returns the position in Shiki's flag that represents this style.
+    fn flag(self) -> int {
+        match self {
+            Self::Italic => 1,
+            Self::Bold => 2,
+            Self::Underline => 4,
+        }
+    }
+}

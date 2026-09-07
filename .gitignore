@@ -1,0 +1,13 @@
+/target
+**/__pycache__
+mutants/
+/book/book
+benchmarks/results
+benchmarks/runners/target
+temp/
+.cargo/*
+!.cargo/mutants.toml
+*.vsix
+.vscode
+.claude/
+profile.json*

@@ -1,0 +1,110 @@
+{
+    "name": "mimas",
+    "displayName": "mimas",
+    "description": "Syntax highlighting, snippets, and language configuration for the mimas language.",
+    "version": "0.1.0",
+    "publisher": "imlazyeye",
+    "author": {
+        "name": "Gabe Weiner"
+    },
+    "license": "MIT OR Apache-2.0",
+    "homepage": "https://mim.as",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/imlazyeye/mimas.git",
+        "directory": "tools/vscode"
+    },
+    "bugs": {
+        "url": "https://github.com/imlazyeye/mimas/issues"
+    },
+    "icon": "icon.png",
+    "galleryBanner": {
+        "color": "#12141d",
+        "theme": "dark"
+    },
+    "keywords": [
+        "mimas",
+        "mim",
+        "language",
+        "scripting",
+        "syntax"
+    ],
+    "engines": {
+        "vscode": "^1.74.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Snippets"
+    ],
+    "scripts": {
+        "sync-grammar": "node ./scripts/sync-grammar.mjs",
+        "vscode:prepublish": "node ./scripts/sync-grammar.mjs"
+    },
+    "contributes": {
+        "languages": [
+            {
+                "id": "mimas",
+                "aliases": [
+                    "mimas"
+                ],
+                "extensions": [
+                    ".mim"
+                ],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./icons/mimas-file-light.svg",
+                    "dark": "./icons/mimas-file-dark.svg"
+                }
+            }
+        ],
+        "grammars": [
+            {
+                "language": "mimas",
+                "scopeName": "source.mim",
+                "path": "./syntaxes/mimas.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "mimas",
+                "path": "./snippets/mimas.json"
+            }
+        ],
+        "configurationDefaults": {
+            "[mimas]": {
+                "editor.quickSuggestions": {
+                    "other": "on",
+                    "comments": "off",
+                    "strings": "off"
+                },
+                "editor.snippetSuggestions": "top",
+                "editor.suggest.showSnippets": true,
+                "editor.tabCompletion": "on"
+            }
+        },
+        "problemMatchers": [
+            {
+                "name": "mimas",
+                "owner": "mimas",
+                "source": "mimas",
+                "fileLocation": [
+                    "autoDetect",
+                    "${workspaceFolder}"
+                ],
+                "pattern": [
+                    {
+                        "regexp": "^(error|warning):\\s+(.*)$",
+                        "severity": 1,
+                        "message": 2
+                    },
+                    {
+                        "regexp": "^\\s*\\S+\\s+(.+):(\\d+):(\\d+)\\s*$",
+                        "file": 1,
+                        "line": 2,
+                        "column": 3
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,22 @@
+let width = 450;
+let height = 450;
+let maxiter = 400;
+
+let checksum = 0;
+for py in 0..height {
+    let cy = (py as f64 / height as f64) * 3.0 - 1.5;
+    for px in 0..width {
+        let cx = (px as f64 / width as f64) * 3.0 - 2.0;
+        let zx = 0.0;
+        let zy = 0.0;
+        let iter = 0;
+        while zx * zx + zy * zy <= 4.0 && iter < maxiter {
+            let new_zx = (zx * zx - zy * zy) + cx;
+            zy = (2.0 * zx * zy) + cy;
+            zx = new_zx;
+            iter = iter + 1;
+        }
+        checksum = checksum + iter;
+    }
+}
+println!("{}", checksum);

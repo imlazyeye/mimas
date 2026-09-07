@@ -1,0 +1,16 @@
+[package]
+name = "mimas-api"
+version = "0.1.0"
+edition = "2024"
+description = "Shared API definitions for the mimas language. Internal to mimas; not intended for direct use."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "api"
+path = "src/lib.rs"
+
+[dependencies]
+shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
