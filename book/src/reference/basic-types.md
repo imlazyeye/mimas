@@ -80,6 +80,17 @@ let poem = "this string has
 multiple lines!"; // -> "this string has\nmultiple lines!"
 ```
 
+Index a string with an `int` to read the character at that position. Positions count characters rather than bytes, so they line up with `len()` and with `for c in s`. Reading past the end is a runtime error, and since strings are immutable, assigning into an index is a compile error.
+
+```mimas
+let word = "café";
+let first = word[0];              // -> "c"
+let last = word[word.len() - 1];  // -> "é"
+word[0] = "C";                    // compile error: strings can't be assigned into
+```
+
+Indexing a string that is entirely ASCII is constant-time; a string holding any other characters is scanned from the start.
+
 ### Interpolation (f-strings)
 
 Prefix a literal with `f` to interpolate expressions inside `{ }`. Any expression is allowed.

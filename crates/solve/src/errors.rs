@@ -233,16 +233,26 @@ pub struct NotAPact {
     pub ty: String,
 }
 
-/// `s[0]` on a string. Its own error because the generic index path would otherwise report a
-/// mismatch against a freshly minted element vid, putting an internal `?mimas<T>` in front of a
-/// user who only wanted a character.
+/// `s["k"]` on a string. Its own error because the generic index path would otherwise report a
+/// mismatch against a freshly minted element vid, putting an internal `?mimas<T>` in front of the
+/// user.
 #[derive(Error, Debug, Diagnostic)]
-#[error("strings can't be indexed")]
-#[diagnostic(help("iterate the characters with `for c in s` instead"))]
+#[error("strings are indexed by int")]
+#[diagnostic(help("index with a character position, like `s[0]`"))]
 pub struct StringIndexing {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
-    #[label("indexing is for arrays and dicts")]
+    #[label("this key isn't an int")]
+    pub at: SourceSpan,
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("strings can't be assigned into")]
+#[diagnostic(help("strings are immutable -- build a new string instead"))]
+pub struct AssignToStringIndex {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("this string can't be changed in place")]
     pub at: SourceSpan,
 }
 

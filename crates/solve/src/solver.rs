@@ -2,8 +2,8 @@ use crate::{
     Error, Result, Unification, UnificationError,
     components::*,
     errors::{
-        AssignToConst, AssignToLoopVar, BareNullBinding, ExtraTupleMembers, FieldNotFound,
-        InvalidAssignTarget, InvalidPattern, InvalidUseTarget, MissingTupleMembers,
+        AssignToConst, AssignToLoopVar, AssignToStringIndex, BareNullBinding, ExtraTupleMembers,
+        FieldNotFound, InvalidAssignTarget, InvalidPattern, InvalidUseTarget, MissingTupleMembers,
         MultipleConstDeclarations, NonConstantValue, NotFound, SelfOutOfContext,
     },
     traits::*,
@@ -1480,6 +1480,18 @@ impl Solver {
                         })?
                     }
                     _ => {}
+                }
+
+                if let ExprKind::Access(Access::Square { left: receiver, .. }) = left.kind() {
+                    let receiver = receiver.query(self)?.normalized(self);
+                    if receiver == Ty::Str
+                        || matches!(&receiver, Ty::Option(inner) if **inner == Ty::Str)
+                    {
+                        Err(AssignToStringIndex {
+                            src: self.src(left.location()),
+                            at: left.location().into(),
+                        })?
+                    }
                 }
 
                 // `??=` mirrors read-form `??`: the target must be an option and the rhs

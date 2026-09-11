@@ -184,15 +184,20 @@ impl Solve for Access {
                 let k = key.query(solver)?;
                 let key_src = solver.src(location);
 
-                // caught before the shape below is unified against the receiver: `str` matches
-                // neither array nor dict, and letting that mismatch surface would name the
-                // shape's fresh vid, leaking an internal type into a user-facing message
-                if left.query(solver)?.normalized(solver) == Ty::Str {
-                    return Err(StringIndexing {
-                        src: solver.src(left.location()),
-                        at: left.location().into(),
+                // strings index by char position and never unify against the array/dict shape
+                // below; a non-int key gets its own error so the shape's fresh vid never leaks
+                // into a user-facing message
+                let receiver = left.query(solver)?.normalized(solver);
+                let optional = *kind == AccessKind::Option || rides(solver, left);
+                if receiver == Ty::Str || (optional && receiver == option!(Ty::Str)) {
+                    if k.normalized(solver) != Ty::Int {
+                        return Err(StringIndexing {
+                            src: solver.src(key.location()),
+                            at: key.location().into(),
+                        }
+                        .into());
                     }
-                    .into());
+                    return Ok(if optional { option!(Ty::Str) } else { Ty::Str });
                 }
 
                 let shape = |inner: Ty| -> Result<Ty> {
