@@ -970,6 +970,11 @@ impl Solve for Equality {
                     self.right.fulfill_ty(self.left.query(solver)?, solver)
                 }
             }
+            _ if lhs.clone().normalized(solver) == Ty::Str
+                && rhs.clone().normalized(solver) == Ty::Str =>
+            {
+                Ok(())
+            }
             _ => Err(InvalidComparison {
                 src: solver.src(location),
                 at: location.into(),

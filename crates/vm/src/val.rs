@@ -514,6 +514,10 @@ pub fn bin<'gc>(this: Val<'gc>, ctx: Ctx<'gc>, other: Val<'gc>, op: BinOp) -> Rt
             let combined = format!("{}{}", a.as_str(), b.as_str());
             Val::Str(ctx.intern(&combined))
         }
+        (BinOp::LessThan, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() < b.as_str()),
+        (BinOp::LessEqual, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() <= b.as_str()),
+        (BinOp::GreaterThan, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() > b.as_str()),
+        (BinOp::GreaterEqual, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() >= b.as_str()),
         (BinOp::Coalesce, Val::Null, other) => other,
         (BinOp::Coalesce, this, _) => this,
         (BinOp::NotEqual, left, right) => Val::Bool(left != right),

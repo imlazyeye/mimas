@@ -602,7 +602,7 @@ pub struct InvalidAssignTarget {
 pub struct InvalidComparison {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
-    #[label("these two values cannot be compared like numerals")]
+    #[label("these types cannot be compared")]
     pub at: SourceSpan,
 }
 
