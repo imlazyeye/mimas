@@ -26,19 +26,21 @@ Mixing an `int` and a `float` promotes the result to `float`. And `/` produces a
 
 ## Comparison
 
-Comparisons produce a `bool`. Ordering (`<`, `<=`, `>`, `>=`) is defined for numbers only; `str` supports equality but not ordering.
+Comparisons produce a `bool`. Ordering (`<`, `<=`, `>`, `>=`) is defined for numbers and for `str`. Strings are ordered by their UTF-8 bytes (relying on ordinary Rust string ordering comparisons).
 
 | Name | Symbol | Types |
 | :--- | :---: | :--- |
 | Equal | `==` | any matching pair |
 | Not equal | `!=` | any matching pair |
-| Less / less-or-equal | `<` `<=` | `int`, `float` |
-| Greater / greater-or-equal | `>` `>=` | `int`, `float` |
+| Less / less-or-equal | `<` `<=` | `int`, `float`, `str` |
+| Greater / greater-or-equal | `>` `>=` | `int`, `float`, `str` |
 
 ```mimas
-print(2 < 3);          // true
-print("hi" == "hi");   // true
-print("a" < "b");      // compile error: these values cannot be compared like numerals
+print(2 < 3);            // true
+print("hi" == "hi");     // true
+print("apple" < "pear"); // true
+print("Zoo" < "apple");  // true -- uppercase sorts first
+print("a" < 1);          // compile error: these types cannot be compared
 ```
 
 ## Logical

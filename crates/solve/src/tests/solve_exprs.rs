@@ -210,7 +210,12 @@ test_ty!(
 );
 test_fail!(error_from_invalid_type_comp, "1 == true;");
 test_fail!(error_from_invalid_ord_comp, "1 > true;");
-test_fail!(string_ordering, "let a = \"a\" > \"b\";");
+test_ty!(string_ordering, "\"a\" > \"b\"" => Bool);
+test_fail!(string_int_ordering, "let a = \"a\" > 1;");
+test_fail!(
+    string_option_ordering,
+    "let s: str? = null; let a = s < \"b\";"
+);
 test_fail!(bool_ordering, "let a = true > false;");
 test_fail!(array_ordering, "let a = [] > [];");
 test_fail!(dict_ordering, "let a = ~{} > ~{};");

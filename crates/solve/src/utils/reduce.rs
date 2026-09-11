@@ -229,7 +229,7 @@ fn evaluate(
 }
 
 fn compare(lhs: Literal, op: EqualityOp, rhs: Literal) -> Option<Literal> {
-    fn comp_floats(a: f64, op: EqualityOp, b: f64) -> Literal {
+    fn ordered<T: PartialOrd>(a: T, op: EqualityOp, b: T) -> Literal {
         match op {
             Greater if a > b => True,
             Greater => False,
@@ -255,8 +255,9 @@ fn compare(lhs: Literal, op: EqualityOp, rhs: Literal) -> Option<Literal> {
         NotEqual if lhs == rhs => Some(False),
         NotEqual if lhs != rhs => Some(True),
         _ => match (lhs, rhs) {
-            (Int(a), Int(b)) => Some(comp_floats(a as f64, op, b as f64)),
-            (Float(a), Float(b)) => Some(comp_floats(a, op, b)),
+            (Int(a), Int(b)) => Some(ordered(a as f64, op, b as f64)),
+            (Float(a), Float(b)) => Some(ordered(a, op, b)),
+            (String(a), String(b)) => Some(ordered(a, op, b)),
             _ => None,
         },
     }

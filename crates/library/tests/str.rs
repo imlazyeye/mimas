@@ -54,6 +54,33 @@ test_fail!(
 
 test_fail!(index_assign, r#"let s = "abc"; s[0] = "x";"#);
 
+test_run!(
+    ordering_lexicographic,
+    r#""apple" < "banana""# => "true",
+    r#""banana" > "apple""# => "true",
+    r#""ab" < "abc""# => "true",
+    r#""abc" <= "abc""# => "true",
+    r#""abc" >= "abd""# => "false",
+    r#""Zebra" < "apple""# => "true",
+    r#""é" > "z""# => "true",
+);
+
+test_run!(
+    ordering_in_control_flow,
+    r#"let a = "pear"; let b = "plum";"#,
+    "if a < b { a } else { b }" => r#""pear""#,
+    r#"(for w in ["kiwi", "fig", "date"] { if w >= "e" collect w; })"# => r#"["kiwi", "fig"]"#,
+);
+
+test_run!(
+    ordering_in_consts,
+    r#"const LESS = "apple" < "pear"; const FLAGS = ["a" < "b", "b" <= "a"];"#,
+    "LESS" => "true",
+    "FLAGS" => "[true, false]",
+);
+
+test_fail!(ordering_mixed_types, r#"let x = "a" < 1;"#);
+
 // contains: substring test
 test_run!(
     contains_hit,
