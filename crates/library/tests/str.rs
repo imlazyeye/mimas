@@ -19,6 +19,41 @@ test_run!(
     r#""👍".len()"# => "1",
 );
 
+test_run!(
+    index_basic,
+    r#""hello"[0]"# => r#""h""#,
+    r#""hello"[4]"# => r#""o""#,
+);
+
+test_run!(
+    index_unicode,
+    r#""café"[3]"# => r#""é""#,
+    r#""👍abc"[1]"# => r#""a""#,
+    r#""aé漢b"[2]"# => r#""漢""#,
+);
+
+test_run!(
+    index_matches_iteration,
+    r#"let s = "héllo";"#,
+    r#"(for i in s.len() collect s[i]).join("")"# => r#""héllo""#,
+);
+
+test_run!(
+    index_optional,
+    r#"let some: str? = "xy"; let none: str? = null;"#,
+    "some?[1]" => r#""y""#,
+    "none?[0]" => "null",
+);
+
+test_fail!(
+    index_out_of_bounds,
+    r#"let c = "abc"[3];"#,
+    r#"let c = "abc"[-1];"#,
+    r#"let c = "é"[1];"#,
+);
+
+test_fail!(index_assign, r#"let s = "abc"; s[0] = "x";"#);
+
 // contains: substring test
 test_run!(
     contains_hit,

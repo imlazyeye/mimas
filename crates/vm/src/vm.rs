@@ -928,10 +928,13 @@ fn get_index<'gc>(
         }
         (Val::Str(s), Val::Int(i)) => {
             let st = s.as_str();
-            let len = st.chars().count();
-            let p = pos(i, len)?;
-            let ch = st.chars().nth(p).ok_or(RtErr::IndexOutOfBounds)?;
-            Val::Str(ctx.intern(&ch.to_string()))
+            let ch = if st.is_ascii() {
+                st.as_bytes()[pos(i, st.len())?] as char
+            } else {
+                let p = pos(i, st.chars().count())?;
+                st.chars().nth(p).ok_or(RtErr::IndexOutOfBounds)?
+            };
+            Val::Str(ctx.intern(ch.encode_utf8(&mut [0; 4])))
         }
         (Val::Int(_), Val::Int(_)) => index,
         _ => return Err(RtErr::invalid_index(set, index)),

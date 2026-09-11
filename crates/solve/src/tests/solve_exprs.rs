@@ -480,7 +480,7 @@ test_fail!(
     "let a: (int, int) = (0, 1, 2);",
 );
 test_fail!(index_assign_mismatch, "let a = [0]; a[0] = \"x\";");
-test_fail!(string_square_index, "let s = \"hi\"; let c = s[0];");
+test_ty!(string_square_index, "let s = \"hi\";", "s[0]" => Str);
 test_fail!(for_iter_elem_used_wrong, "for x in [0] { let y: str = x; }");
 test_fail!(while_cond_non_bool, "while 5 {}");
 test_fail!(logical_rhs_non_bool, "let x = true && 2;");
@@ -549,10 +549,13 @@ test_fail!(
     "for x in [] { collect 0; break 5; }",
 );
 
-// `s[0]` gets its own error rather than a mismatch against the index path's fresh element
-// vid, which used to put an internal `?mimas<T>` in a message about the user's own code
-test_fail!(str_square_index_rejected, "let s = \"abc\"; let c = s[0];");
+test_ty!(
+    optional_string_square_index,
+    "let s: str? = null;",
+    "s?[0]" => option!(Str),
+);
 test_fail!(
     str_square_index_by_str,
     "let s = \"abc\"; let c = s[\"k\"];"
 );
+test_fail!(string_index_assign, "let s = \"abc\"; s[0] = \"x\";");
