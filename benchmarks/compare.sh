@@ -35,6 +35,7 @@ STEEL_RUN="$RUN/steel-run"
 BOA_RUN="$RUN/boa-run"
 RUSTPYTHON_RUN="$RUN/rustpython-run"
 GML_RUN="$RUN/gml-run"
+ROTO_RUN="$RUN/roto-run"
 
 # when only some languages are requested, fold their timings into the saved results instead of
 # replacing the file -- lets a single language be re-measured without re-running the whole suite
@@ -54,6 +55,7 @@ if [ -f benchmarks/runners/Cargo.toml ]; then
     if want boa;        then runner_bins+=( --bin boa-run ); fi
     if want rustpython; then runner_bins+=( --bin rustpython-run ); fi
     if want fabricator; then runner_bins+=( --bin gml-run ); fi
+    if want roto;       then runner_bins+=( --bin roto-run ); fi
     if [ ${#runner_bins[@]} -gt 0 ]; then
         echo "building embedded runners..."
         ( cd benchmarks/runners && cargo build --release --quiet "${runner_bins[@]}" ) || echo "  runner build failed; skipping embedded runtimes"
@@ -76,6 +78,9 @@ for bench in ${BENCHES:-$ALL_BENCHES}; do
     fi
     if want luau && [ -x "$LUAU_RUN" ] && [ -f "benchmarks/$bench/$bench.lua" ]; then
         cmds+=( -n "luau" "$LUAU_RUN benchmarks/$bench/$bench.lua" )
+    fi
+    if want roto && [ -x "$ROTO_RUN" ] && [ -f "benchmarks/$bench/$bench.roto" ]; then
+        cmds+=( -n "roto" "$ROTO_RUN benchmarks/$bench/$bench.roto" )
     fi
 
     # other pure-Rust scripting languages: physics + mandelbrot only, for the home-page charts.
