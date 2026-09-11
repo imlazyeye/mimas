@@ -1,6 +1,6 @@
 use api::Intrinsic;
 use macros::native;
-use rand::seq::SliceRandom;
+use rand::{prelude::IndexedRandom, seq::SliceRandom};
 use shared::Ty;
 use vm::{Array, Ctx, RtErr, Val, anon, api::Api};
 
@@ -68,7 +68,7 @@ fn pop(arr: &mut Vec<anon::T<'gc>>) -> Option<anon::T<'gc>> {
 
 #[native]
 fn shuffle(arr: &mut Vec<anon::T<'gc>>) {
-    arr.shuffle(&mut rand::thread_rng());
+    arr.shuffle(&mut rand::rng());
 }
 
 // `other` stays as the gc handle because we already hold a borrow on `arr`. if `other`
@@ -100,7 +100,7 @@ fn flatten(arr: Vec<Vec<anon::T<'gc>>>) -> Vec<anon::T<'gc>> {
 
 #[native]
 fn choose(arr: &[Val<'gc>]) -> Option<anon::T<'gc>> {
-    arr.choose(&mut rand::thread_rng()).copied().map(anon::Anon)
+    arr.choose(&mut rand::rng()).copied().map(anon::Anon)
 }
 
 #[native]

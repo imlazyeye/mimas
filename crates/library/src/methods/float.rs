@@ -1,6 +1,6 @@
 use api::Intrinsic;
 use macros::native;
-use rand::Rng;
+use rand::RngExt;
 use shared::Ty;
 use vm::{RtErr, api::Api};
 
@@ -78,5 +78,5 @@ fn to_str<'gc>(n: f64) -> String {
 
 #[native]
 fn random<'gc>(len: f64) -> f64 {
-    rand::thread_rng().gen_range(0.0..len)
+    rand::rng().random_range(0.0..len)
 }
