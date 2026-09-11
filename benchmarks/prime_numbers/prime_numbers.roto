@@ -1,0 +1,35 @@
+const MAX_NUMBER_TO_CHECK: u64 = 7_000_000;
+
+fn main() {
+    let prime_mask: List[bool] = [];
+    let k: u64 = 0;
+    while k < MAX_NUMBER_TO_CHECK + 1 {
+        prime_mask.push(true);
+        k += 1;
+    }
+
+    prime_mask.set(0, false);
+    prime_mask.set(1, false);
+
+    let total_primes_found: i64 = 0;
+
+    let i: u64 = 2;
+    while i < MAX_NUMBER_TO_CHECK + 1 {
+        let is_prime = match prime_mask.get(i) {
+            Some(b) => b,
+            None => false,
+        };
+        if is_prime {
+            total_primes_found += 1;
+
+            let n = 2 * i;
+            while n < MAX_NUMBER_TO_CHECK + 1 {
+                prime_mask.set(n, false);
+                n += i;
+            }
+        }
+
+        i += 1;
+    }
+    print(f"{total_primes_found}");
+}

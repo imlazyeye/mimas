@@ -1,0 +1,83 @@
+record Ball {
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+}
+
+const COUNT: u64 = 250;
+const STEPS: i64 = 600;
+const SIZE: f64 = 400.0;
+const TOUCH: f64 = 8.0;
+
+fn main() {
+    let balls: List[Ball] = [];
+    let i: f64 = 0.0;
+    while balls.len() < COUNT {
+        balls.push(Ball {
+            x: (i - (i / 25.0).floor() * 25.0) * 16.0,
+            y: (i - (i / 17.0).floor() * 17.0) * 23.0,
+            vx: (i - (i / 7.0).floor() * 7.0) - 3.0,
+            vy: (i - (i / 5.0).floor() * 5.0) - 2.0,
+        });
+        i += 1.0;
+    }
+
+    let step: i64 = 0;
+    while step < STEPS {
+        // move each ball, reversing it whenever it reaches a wall
+        // (records are values in roto, each ball is read out of the list and set back)
+        let i: u64 = 0;
+        while i < COUNT {
+            let ball = match balls.get(i) {
+                Some(b) => b,
+                None => return,
+            };
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+            if ball.x < 0.0 || ball.x > SIZE {
+                ball.vx = -ball.vx;
+            }
+            if ball.y < 0.0 || ball.y > SIZE {
+                ball.vy = -ball.vy;
+            }
+            balls.set(i, ball);
+            i += 1;
+        }
+        // when two balls touch, swap their velocities so they bounce apart
+        i = 0;
+        while i < COUNT {
+            let ball = match balls.get(i) {
+                Some(b) => b,
+                None => return,
+            };
+            let j = i + 1;
+            while j < COUNT {
+                let other = match balls.get(j) {
+                    Some(b) => b,
+                    None => return,
+                };
+                let dx = other.x - ball.x;
+                let dy = other.y - ball.y;
+                if (dx * dx + dy * dy).sqrt() < TOUCH {
+                    let vx = ball.vx;
+                    let vy = ball.vy;
+                    ball.vx = other.vx;
+                    ball.vy = other.vy;
+                    other.vx = vx;
+                    other.vy = vy;
+                    balls.set(j, other);
+                }
+                j += 1;
+            }
+            balls.set(i, ball);
+            i += 1;
+        }
+        step += 1;
+    }
+    let total = 0.0;
+    for ball in balls {
+        total += ball.x + ball.y;
+    }
+    print(f"{total}");
+}

@@ -1,0 +1,57 @@
+// roto types can't be recursive, the tree lives in one list and children are indices into it
+enum Expr {
+    Num(i64),
+    Add(u64, u64),
+    Sub(u64, u64),
+    Mul(u64, u64),
+    Neg(u64),
+}
+
+fn eval(nodes: List[Expr], e: u64) -> i64 {
+    match nodes.get(e) {
+        Some(node) => match node {
+            Num(n) => n,
+            Add(a, b) => eval(nodes, a) + eval(nodes, b),
+            Sub(a, b) => eval(nodes, a) - eval(nodes, b),
+            Mul(a, b) => eval(nodes, a) * eval(nodes, b),
+            Neg(a) => -eval(nodes, a),
+        },
+        None => 0,
+    }
+}
+
+fn build(nodes: List[Expr], depth: i64) -> u64 {
+    if depth <= 1 {
+        nodes.push(Expr.Num(depth + 1));
+        return nodes.len() - 1;
+    }
+    let m = depth % 4;
+    let node = if m == 0 {
+        Expr.Add(build(nodes, depth - 1), build(nodes, depth - 2))
+    } else if m == 1 {
+        Expr.Sub(build(nodes, depth - 1), build(nodes, depth - 2))
+    } else if m == 2 {
+        Expr.Neg(build(nodes, depth - 1))
+    } else {
+        let lhs = build(nodes, depth - 2);
+        nodes.push(Expr.Num(2));
+        Expr.Mul(lhs, nodes.len() - 1)
+    };
+    nodes.push(node);
+    nodes.len() - 1
+}
+
+const DEPTH: i64 = 35;
+const REPEAT: i64 = 800;
+
+fn main() {
+    let nodes: List[Expr] = [];
+    let tree = build(nodes, DEPTH);
+    let total: i64 = 0;
+    let i: i64 = 0;
+    while i < REPEAT {
+        total += eval(nodes, tree);
+        i += 1;
+    }
+    print(f"{total}");
+}

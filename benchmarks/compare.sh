@@ -37,6 +37,7 @@ STEEL_RUN="$RUN/steel-run"
 BOA_RUN="$RUN/boa-run"
 RUSTPYTHON_RUN="$RUN/rustpython-run"
 GML_RUN="$RUN/gml-run"
+ROTO_RUN="$RUN/roto-run"
 
 # when only some languages are requested, fold their timings into the saved results instead of
 # replacing the file -- lets a single language be re-measured without re-running the whole suite
@@ -46,7 +47,7 @@ MERGE=0
 # build only the requested runners, so a luau-only run doesn't compile boa/rustpython. they share
 # one target dir to keep rebuilds down, which doesn't mix their features.
 echo "building embedded runners..."
-for lang in mimas rhai rune luau koto dyon steel boa rustpython fabricator; do
+for lang in mimas rhai rune luau koto dyon steel boa rustpython fabricator roto; do
     if want "$lang"; then
         cargo build --release --quiet --manifest-path "benchmarks/runners/$lang/Cargo.toml" \
             --target-dir benchmarks/runners/target || echo "  $lang runner build failed; skipping it"
@@ -69,6 +70,9 @@ for bench in ${BENCHES:-$ALL_BENCHES}; do
     fi
     if want luau && [ -x "$LUAU_RUN" ] && [ -f "benchmarks/$bench/$bench.lua" ]; then
         cmds+=( -n "luau" "$LUAU_RUN benchmarks/$bench/$bench.lua" )
+    fi
+    if want roto && [ -x "$ROTO_RUN" ] && [ -f "benchmarks/$bench/$bench.roto" ]; then
+        cmds+=( -n "roto" "$ROTO_RUN benchmarks/$bench/$bench.roto" )
     fi
 
     # other pure-Rust scripting languages: physics + mandelbrot only, for the home-page charts.

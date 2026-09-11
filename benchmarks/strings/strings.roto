@@ -1,0 +1,18 @@
+const N: i64 = 4_500_000;
+
+fn main() {
+    let total_len: u64 = 0;
+    let hits: i64 = 0;
+    let i: i64 = 0;
+    while i < N {
+        let s = f"item_{i % 128}_value";
+        total_len += s.bytes().len();
+        if s.contains("7") {
+            hits += 1;
+        }
+        let u = s.to_uppercase();
+        total_len += u.bytes().len();
+        i += 1;
+    }
+    print(f"{total_len}");
+}

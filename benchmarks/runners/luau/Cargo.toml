@@ -5,10 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-# held at 0.11.4 deliberately: 0.12 bundles a newer Luau whose gains we haven't analysed yet.
-# the legend reports whichever version is in the lockfile, so this stays honest -- revisit and
-# re-measure against current Luau after 0.1.0.
-mlua = { version = "=0.11.4", features = ["luau"] }
+mlua = { version = "=0.12.0", features = ["luau"] }
 
 [profile.release]
 lto = "fat"

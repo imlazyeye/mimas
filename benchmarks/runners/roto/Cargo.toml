@@ -1,0 +1,14 @@
+[package]
+name = "roto-run"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+roto = { git = "https://codeberg.org/NLnetLabs/roto", rev = "dd310da7ba326c90745edc9fd44fdffa5b3eb378", default-features = false }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[workspace]
