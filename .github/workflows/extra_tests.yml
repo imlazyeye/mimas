@@ -1,0 +1,28 @@
+name: extra tests
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    name: miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: miri
+      - run: cargo miri test --manifest-path crates/vm/Cargo.toml
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
