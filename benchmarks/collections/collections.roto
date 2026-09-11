@@ -1,0 +1,53 @@
+fn get_count(counts: List[i64], idx: u64) -> i64 {
+    match counts.get(idx) {
+        Some(c) => c,
+        None => 0,
+    }
+}
+
+fn main() {
+    let n: u64 = 4000000;
+    let k: u64 = 256;
+
+    let keys: List[String] = [];
+    let j: u64 = 0;
+    while j < k {
+        keys.push(f"k{j}");
+        j += 1;
+    }
+
+    let data: List[u64] = [];
+    let i: u64 = 0;
+    while i < n {
+        data.push(i % k);
+        i += 1;
+    }
+
+    let hist_keys: List[String] = [];
+    let hist_counts: List[i64] = [];
+    for x in data {
+        let key = match keys.get(x) {
+            Some(s) => s,
+            None => "",
+        };
+        match hist_keys.index(key) {
+            Some(slot) => {
+                hist_counts.push(get_count(hist_counts, slot) + 1);
+                hist_counts.swap(slot, hist_counts.len() - 1);
+            }
+            None => {
+                hist_keys.push(key);
+                hist_counts.push(1);
+                hist_counts.swap(hist_keys.len() - 1, hist_counts.len() - 1);
+            }
+        }
+    }
+
+    let total: i64 = 0;
+    let slot: u64 = 0;
+    while slot < hist_keys.len() {
+        total += get_count(hist_counts, slot);
+        slot += 1;
+    }
+    print(f"{total}");
+}

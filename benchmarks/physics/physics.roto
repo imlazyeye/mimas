@@ -1,0 +1,92 @@
+record Ball {
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+}
+
+fn get_ball(balls: List[Ball], idx: u64) -> Ball {
+    match balls.get(idx) {
+        Some(ball) => ball,
+        None => Ball { x: 0.0, y: 0.0, vx: 0.0, vy: 0.0 },
+    }
+}
+
+fn main() {
+    let count: u64 = 250;
+    let steps: i64 = 600;
+    let size = 400.0;
+    let touch = 8.0;
+
+    let balls: List[Ball] = [];
+    let k: u64 = 0;
+    let fk: f64 = 0.0;
+    while k < count {
+        let ball = Ball {
+            x: (fk - (fk / 25.0).floor() * 25.0) * 16.0,
+            y: (fk - (fk / 17.0).floor() * 17.0) * 23.0,
+            vx: (fk - (fk / 7.0).floor() * 7.0) - 3.0,
+            vy: (fk - (fk / 5.0).floor() * 5.0) - 2.0,
+        };
+        balls.push(ball);
+        k += 1;
+        fk += 1.0;
+    }
+
+    let step: i64 = 0;
+    while step < steps {
+        // move each ball, reversing it whenever it reaches a wall
+        let moved: List[Ball] = [];
+        let i: u64 = 0;
+        while i < count {
+            let ball = get_ball(balls, i);
+            ball.x = ball.x + ball.vx;
+            ball.y = ball.y + ball.vy;
+            if ball.x < 0.0 || ball.x > size { ball.vx = -ball.vx; }
+            if ball.y < 0.0 || ball.y > size { ball.vy = -ball.vy; }
+            moved.push(ball);
+            i += 1;
+        }
+        balls = moved;
+
+        // when two balls touch, swap their velocities so they bounce apart
+        i = 0;
+        while i < count {
+            let ball = get_ball(balls, i);
+            let bounced = false;
+            let j = i + 1;
+            while j < count {
+                let other = get_ball(balls, j);
+                let dx = other.x - ball.x;
+                let dy = other.y - ball.y;
+                if (dx * dx + dy * dy).sqrt() < touch {
+                    let tx = ball.vx;
+                    let ty = ball.vy;
+                    ball.vx = other.vx;
+                    ball.vy = other.vy;
+                    other.vx = tx;
+                    other.vy = ty;
+                    balls.push(other);
+                    balls.swap(j, balls.len() - 1);
+                    bounced = true;
+                }
+                j += 1;
+            }
+            if bounced {
+                balls.push(ball);
+                balls.swap(i, balls.len() - 1);
+            }
+            i += 1;
+        }
+        step += 1;
+    }
+
+    let total = 0.0;
+    let i: u64 = 0;
+    while i < count {
+        let ball = get_ball(balls, i);
+        total = total + ball.x + ball.y;
+        i += 1;
+    }
+    print(f"{total}");
+}

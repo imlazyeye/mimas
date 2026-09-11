@@ -1,0 +1,34 @@
+fn main() {
+    let width: i64 = 450;
+    let height: i64 = 450;
+    let maxiter: i64 = 400;
+    let fwidth = 450.0;
+    let fheight = 450.0;
+
+    let checksum: i64 = 0;
+    let py: i64 = 0;
+    let fpy = 0.0;
+    while py < height {
+        let cy = (fpy / fheight) * 3.0 - 1.5;
+        let px: i64 = 0;
+        let fpx = 0.0;
+        while px < width {
+            let cx = (fpx / fwidth) * 3.0 - 2.0;
+            let zx = 0.0;
+            let zy = 0.0;
+            let iter: i64 = 0;
+            while zx * zx + zy * zy <= 4.0 && iter < maxiter {
+                let new_zx = (zx * zx - zy * zy) + cx;
+                zy = (2.0 * zx * zy) + cy;
+                zx = new_zx;
+                iter = iter + 1;
+            }
+            checksum = checksum + iter;
+            px = px + 1;
+            fpx = fpx + 1.0;
+        }
+        py = py + 1;
+        fpy = fpy + 1.0;
+    }
+    print(f"{checksum}");
+}

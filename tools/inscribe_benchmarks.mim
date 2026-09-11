@@ -8,6 +8,7 @@ const LANGUAGES = [
     "rune",
     "rhai",
     "luau",
+    "roto",
 ];
 
 // (bench key, display name, repo, crate name in the runners' Cargo.lock)
@@ -22,6 +23,7 @@ const LANG_META = [
     ("boa", "Boa", "https://github.com/boa-dev/boa", "boa_engine"),
     ("rustpython", "RustPython", "https://github.com/RustPython/RustPython", "rustpython-vm"),
     ("fabricator", "Fabricator", "https://github.com/kyren/fabricator", "fabricator-vm"),
+    ("roto", "Roto", "https://codeberg.org/NLnetLabs/roto", "roto"),
 ];
 
 const TESTS = [
@@ -158,7 +160,7 @@ inscribe("./book/src/introduction/benchmarks.md", "benchmark", full.join("\n"));
 // home page card -- pure-Rust runtimes only. luau is deliberately absent: it's the quickest
 // thing you can embed in Rust but it's a C++ runtime, so it belongs in the benchmarks page's
 // wider comparison rather than in a like-for-like chart.
-let home_langs = ["mimas", "rhai", "rune", "koto", "dyon", "steel", "boa", "rustpython", "fabricator"];
+let home_langs = ["mimas", "rhai", "rune", "koto", "dyon", "steel", "boa", "rustpython", "fabricator", "roto"];
 let home = [];
 home.extend(build_chart("physics", "struct field access, float math", home_langs, true));
 home.push(f"<p class=\"bench-legend\">Pure-Rust runtimes, measured on {MACHINE}. {build_legend(home_langs)}</p>");

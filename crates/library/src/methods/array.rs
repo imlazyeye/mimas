@@ -14,6 +14,7 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     let id = api.add_method(push);
     api.mark_intrinsic(id, Intrinsic::Push);
     api.add_method(pop);
+    api.add_method(swap);
     api.add_method(shuffle);
     api.add_method(extend);
     api.add_method(enumerate);
@@ -69,6 +70,11 @@ fn pop(arr: &mut Vec<anon::T<'gc>>) -> Option<anon::T<'gc>> {
 #[native]
 fn shuffle(arr: &mut Vec<anon::T<'gc>>) {
     arr.shuffle(&mut rand::rng());
+}
+
+#[native]
+fn swap(arr: &mut Vec<anon::T<'gc>>, a: usize, b: usize) {
+    arr.swap(a, b);
 }
 
 // `other` stays as the gc handle because we already hold a borrow on `arr`. if `other`

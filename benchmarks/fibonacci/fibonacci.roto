@@ -1,0 +1,20 @@
+fn fib(n: i64) -> i64 {
+    if n < 2 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn main() {
+    let target: i64 = 28;
+    let repeat: i64 = 30;
+
+    let result: i64 = 0;
+    let i: i64 = 0;
+    while i < repeat {
+        result = fib(target);
+        i += 1;
+    }
+    print(f"{result}");
+}

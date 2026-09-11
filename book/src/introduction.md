@@ -41,17 +41,10 @@ print(f"found {big.len()}: {big}"); // -> found 2: [5, 8]
 <!-- homepage benchmark start -->
 <div class="bench"><h4><a href="https://github.com/imlazyeye/mimas/tree/main/benchmarks/physics">physics</a> <small>struct field access, float math</small></h4>
 <table class="charts-css bar show-labels data-spacing-4"><tbody>
-<tr><th scope="row">mimas</th><td class="me" style="--size:0.07320498533468472"><span class="data">928ms</span></td></tr>
-<tr><th scope="row" class="long">fabricator</th><td style="--size:0.1810239681829396"><span class="data">2.29s</span></td></tr>
-<tr><th scope="row">rune</th><td style="--size:0.22143650390777547"><span class="data">2.81s</span></td></tr>
-<tr><th scope="row">boa</th><td style="--size:0.29603705921174783"><span class="data">3.75s</span></td></tr>
-<tr><th scope="row">koto</th><td style="--size:0.4784179593076348"><span class="data">6.06s</span></td></tr>
-<tr><th scope="row">steel</th><td style="--size:0.5178004998409025"><span class="data">6.56s</span></td></tr>
-<tr><th scope="row">dyon</th><td style="--size:0.6601124304850979"><span class="data">8.37s</span></td></tr>
-<tr><th scope="row" class="long">rustpython</th><td style="--size:0.8585265802171286"><span class="data">10.88s</span></td></tr>
-<tr><th scope="row">rhai</th><td style="--size:1"><span class="data">12.68s</span></td></tr>
+<tr><th scope="row">mimas</th><td class="me" style="--size:0.9627351889898419"><span class="data">1.06s</span></td></tr>
+<tr><th scope="row">roto</th><td style="--size:1"><span class="data">1.10s</span></td></tr>
 </tbody></table></div>
-<p class="bench-legend">Pure-Rust runtimes, measured on an AMD Ryzen 7 9800X3D running Linux. <a href="https://github.com/imlazyeye/mimas">mimas</a> v0.1.0 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/koto-lang/koto">Koto</a> v0.16.1 · <a href="https://github.com/PistonDevelopers/dyon">Dyon</a> v0.51.2 · <a href="https://github.com/mattwparas/steel">Steel</a> v0.8.3 · <a href="https://github.com/boa-dev/boa">Boa</a> v0.22.0 · <a href="https://github.com/RustPython/RustPython">RustPython</a> v0.5.0 · <a href="https://github.com/kyren/fabricator">Fabricator</a> git cef73ca</p>
+<p class="bench-legend">Pure-Rust runtimes, measured on an AMD Ryzen 7 9800X3D running Linux. <a href="https://github.com/imlazyeye/mimas">mimas</a> v0.1.0 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/koto-lang/koto">Koto</a> v0.16.1 · <a href="https://github.com/PistonDevelopers/dyon">Dyon</a> v0.51.2 · <a href="https://github.com/mattwparas/steel">Steel</a> v0.8.3 · <a href="https://github.com/boa-dev/boa">Boa</a> v0.22.0 · <a href="https://github.com/RustPython/RustPython">RustPython</a> v0.5.0 · <a href="https://github.com/kyren/fabricator">Fabricator</a> git cef73ca · <a href="https://codeberg.org/NLnetLabs/roto">Roto</a> v0.12.0</p>
 <!-- homepage benchmark end -->
 ````
 
