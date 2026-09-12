@@ -18,7 +18,7 @@ additional-css = [
 smart-punctuation = true
 
 git-repository-url = "https://github.com/imlazyeye/mimas"
-edit-url-template = "https://github.com/imlazyeye/mimas/edit/main/{path}"
+edit-url-template = "https://github.com/imlazyeye/mimas/edit/main/book/{path}"
 additional-js = ["theme-rename.js"]
 
 [output.html.fold]
