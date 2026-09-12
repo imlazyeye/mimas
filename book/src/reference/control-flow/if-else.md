@@ -45,7 +45,7 @@ let port: int = if configured {
 `if let` swaps the `bool` test for an **option test**. It evaluates an expression and, if the result is not `null`, binds the unwrapped value and runs the block. An `else` runs when the value was `null`.
 
 ```mimas
-if let port = lookup_port() {
+if let port? = lookup_port() {
     // runs only when `lookup_port()` was not null;
     // `port` is the non-null value in here
     connect(port);

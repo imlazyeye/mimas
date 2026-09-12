@@ -139,10 +139,10 @@ When you'd rather supply a fallback than risk a runtime error, reach for `??`, w
 let port: int = lookup_port() ?? 8080; // the value if present, otherwise 8080
 ```
 
-And to branch on presence while binding the unwrapped value, use [`if let`](./control-flow/if-else.md#if-let):
+And to branch on presence while binding the unwrapped value, use [`if let`](./control-flow/if-else.md#if-let) with a `?` on the binding to ask for the unwrap:
 
 ```mimas
-if let port = lookup_port() {
+if let port? = lookup_port() {
     connect(port);
 } else {
     use_default();
