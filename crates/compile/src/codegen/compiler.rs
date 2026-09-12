@@ -546,12 +546,21 @@ impl Compiler {
             .map(|(&dec, &body)| (ir.resolutions.decs[dec].name.clone(), body))
             .collect();
 
+        let struct_names: IdVec<_, String> = ir
+            .resolutions
+            .adts
+            .values()
+            .map(|adt| adt.name.clone())
+            .collect::<Vec<_>>()
+            .into();
+
         Program {
             entry: BodyId::ZERO,
             chunks: std::mem::replace(&mut self.chunks, IdVec::new()),
             strs: ir.str_interner,
             bytes: bytes.finish(),
             items,
+            struct_names,
         }
     }
 }
