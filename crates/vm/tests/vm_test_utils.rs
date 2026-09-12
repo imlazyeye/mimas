@@ -52,8 +52,10 @@ macro_rules! dict {
     }};
 }
 
-// the struct name is accepted for readability but ignored at comparison time (the runtime
-// only carries a numeric struct_id, not a name -- see task #18); fields compare positionally
+// the struct name is accepted for readability but ignored at comparison time -- `Captured`
+// compares instance fields positionally, with no name involved. The runtime does now carry
+// struct/variant names (used by `print`/`display`/f-strings, see types.rs's display tests);
+// this macro just never needed them for equality.
 #[macro_export]
 macro_rules! instance {
     ( $name:ident { $($field:ident = $val:expr),* $(,)? } ) => {{

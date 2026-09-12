@@ -16,6 +16,9 @@ pub struct Program {
     pub strs: StrInterner,
     pub bytes: Vec<u8>,
     pub items: HashMap<String, BodyId>,
+    /// Struct/variant names, indexed by the same `AdtId`/`struct_id` that `NewInstance` and
+    /// runtime instances carry -- lets `print`/`display` show `Node { .. }` instead of `@3 { .. }`.
+    pub struct_names: IdVec<AdtId, String>,
 }
 
 #[derive(Debug, Clone)]

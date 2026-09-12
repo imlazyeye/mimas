@@ -41,6 +41,7 @@ pub enum ResolvedDeclKind {
 }
 
 pub struct ResolvedAdt {
+    pub name: String,
     pub fields: Vec<String>,
     pub implements: Vec<PactId>,
     pub methods: IndexMap<String, DecId>,
@@ -78,6 +79,7 @@ impl ResolvedAdt {
         };
 
         Self {
+            name: adt.name.clone(),
             fields,
             implements,
             methods,
