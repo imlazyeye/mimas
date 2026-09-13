@@ -499,3 +499,9 @@ fn mismatch_names_the_struct() {
         "expected the adt's name in the error: {rendered}"
     );
 }
+
+// regression check for #10
+test_success!(
+    self_access_on_function,
+    "struct S {} impl S { fn foo() {} } let s = S {}; s.foo();"
+);

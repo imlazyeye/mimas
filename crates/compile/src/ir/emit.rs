@@ -375,7 +375,7 @@ impl Emit for Call {
             let recv = receiver.lower(ir)?;
             // lower args once -- fill_call_args evaluates them, so per-arm calls re-run side
             // effects.
-            let args = fill_call_args(ir, fn_ty, &[], arguments, Some(recv))?;
+            let args = fill_call_args(ir, fn_ty, &[], arguments, fn_ty.is_method.then_some(recv))?;
 
             let candidates: Vec<_> = ir
                 .resolutions
@@ -475,7 +475,9 @@ impl Emit for Call {
 
             let access_id = self.left.id();
             if let Some(&dec) = ir.resolutions.node_decs.get(&access_id)
-                && let ResolvedDeclKind::Item { native, .. } = ir.resolutions.decs[dec].kind
+                && let ResolvedDeclKind::Item {
+                    native, takes_self, ..
+                } = ir.resolutions.decs[dec].kind
             {
                 let native_id = native;
                 let body = (native_id.is_none()).then(|| ir.item_body_for(dec));
@@ -483,8 +485,8 @@ impl Emit for Call {
                 let receiver = left.lower(ir)?;
 
                 let do_call = |ir: &mut Ir, receiver: InstId| -> Option<InstId> {
-                    let args =
-                        fill_call_args(ir, &fn_ty, &defaults, &self.arguments, Some(receiver))?;
+                    let receiver = takes_self.then_some(receiver);
+                    let args = fill_call_args(ir, &fn_ty, &defaults, &self.arguments, receiver)?;
                     Some(match (native_id, body) {
                         (Some(id), _) => {
                             if let Some(i) = ir.intrinsics.get(&id) {

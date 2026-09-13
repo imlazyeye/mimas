@@ -4,6 +4,7 @@ use api::NativeId;
 use indexmap::IndexMap;
 use parse::{Literal, NodeId};
 use shared::{IdVec, PactId};
+use std::collections::HashSet;
 
 use crate::{
     Solver,
@@ -30,6 +31,7 @@ pub enum ResolvedDeclKind {
     Item {
         defaults: Vec<Option<Literal>>,
         native: Option<NativeId>,
+        takes_self: bool,
     },
     Constant(Literal),
     Variant {
@@ -99,14 +101,31 @@ impl From<Solver> for Resolutions {
             resolved_adts.push(ResolvedAdt::new(aid, adt, &solver));
         }
 
+        let takes_self: HashSet<DecId> = solver
+            .decs
+            .iter()
+            .filter(|(id, dec)| match solver.dec_to_native.get(id) {
+                Some(binding) => binding.takes_self,
+                None => {
+                    matches!(dec.kind, DecKind::Item { .. })
+                        && matches!(
+                            Ty::Vid(dec.vid).normalized(&solver),
+                            Ty::Fn(header) if header.is_method
+                        )
+                }
+            })
+            .map(|(id, _)| id)
+            .collect();
+
         let mut resolved_decs: IdVec<DecId, ResolvedDecl> = IdVec::new();
         for (id, dec) in solver.decs {
             let kind = match dec.kind {
                 DecKind::Local | DecKind::LoopVar => ResolvedDeclKind::Local,
-                DecKind::Item { defaults } => {
-                    let native = solver.dec_to_native.get(&id).map(|b| b.id);
-                    ResolvedDeclKind::Item { defaults, native }
-                }
+                DecKind::Item { defaults } => ResolvedDeclKind::Item {
+                    defaults,
+                    native: solver.dec_to_native.get(&id).map(|b| b.id),
+                    takes_self: takes_self.contains(&id),
+                },
                 DecKind::Constant(Some(lit)) => ResolvedDeclKind::Constant(lit),
                 DecKind::Constant(None) => panic!(
                     "dec {:?} ({}) reached IR boundary as `DeclKind::Constant(None)`",

@@ -651,8 +651,14 @@ impl Solver {
             Vis::Public,
         );
         self.ribs.module_mut().insert(ident, dec_id);
-        self.dec_to_native
-            .insert(dec_id, NativeBinding { id: native_id, sig });
+        self.dec_to_native.insert(
+            dec_id,
+            NativeBinding {
+                id: native_id,
+                sig,
+                takes_self: false,
+            },
+        );
         dec_id
     }
 
@@ -960,7 +966,14 @@ impl Solver {
                         DecKind::Item { defaults: vec![] },
                         Vis::Public,
                     );
-                    self.dec_to_native.insert(dec_id, NativeBinding { id, sig });
+                    self.dec_to_native.insert(
+                        dec_id,
+                        NativeBinding {
+                            id,
+                            sig,
+                            takes_self: false,
+                        },
+                    );
                     self.adts[leaf].as_struct_mut().insert(
                         f.name.clone(),
                         Field {
@@ -995,7 +1008,14 @@ impl Solver {
                         DecKind::Item { defaults: vec![] },
                         Vis::Public,
                     );
-                    self.dec_to_native.insert(dec_id, NativeBinding { id, sig });
+                    self.dec_to_native.insert(
+                        dec_id,
+                        NativeBinding {
+                            id,
+                            sig,
+                            takes_self: m.takes_self,
+                        },
+                    );
                     let field = Field {
                         ty,
                         constant: true,
@@ -1960,6 +1980,7 @@ pub(crate) struct NativeFnSig {
 pub(crate) struct NativeBinding {
     pub id: NativeId,
     pub sig: NativeFnSig,
+    pub takes_self: bool,
 }
 
 /// One module-nested native function, as handed to [`Solver::register_native_module`].

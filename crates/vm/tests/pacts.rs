@@ -186,3 +186,15 @@ test_vm!(
      }",
     "render_all([Square { s = 1 }, Circle { r = 2 }])" => str!("sqci")
 );
+
+// regression check for #10
+test_vm!(
+    pact_assoc_fn_via_value,
+    "pact Maker { fn make(n: int) -> int; }
+    struct A;
+    impl Maker for A { fn make(n: int) -> int { n + 1 } }
+    fn run(m: Maker) -> int { m.make(10) }
+    let a = A;",
+    "a.make(1)" => Int(2),
+    "run(a)" => Int(11),
+);

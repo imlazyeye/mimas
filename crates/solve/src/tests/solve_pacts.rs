@@ -394,3 +394,13 @@ test_fail!(
     pact_name_as_value_ices,
     "pact Greet { fn name(self) -> str; } struct S; impl Greet for S { fn name(self) -> str { \"x\" } } fn main() { let g = Greet; }"
 );
+
+// regression check for #10
+test_ty!(
+    pact_assoc_fn_via_pact_value,
+    "pact Maker { fn make() -> int; }
+     struct S { x: int }
+     impl Maker for S { fn make() -> int { 5 } }
+     fn f(m: Maker) -> int { m.make() }",
+    "f(S { x = 1 })" => Int,
+);

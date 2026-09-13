@@ -118,3 +118,31 @@ fn host_function_call() {
     let mut vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
     assert_eq!(vm.call_fn("foo"), Some(vm::Captured::Int(1)));
 }
+
+// regression check for #10
+test_vm!(
+    assoc_fn_called_on_self,
+    "struct Board { n: int }
+     struct Puzzle {}
+     impl Puzzle {
+         fn count(board: Board) -> int { board.n }
+         fn run(self, board: Board) -> int { self.count(board) }
+     }
+     let p = Puzzle {};",
+    "p.run(Board { n = 7 })" => Int(7),
+);
+
+test_vm!(
+    assoc_fn_called_on_value,
+    "struct S { x: int }
+     impl S { fn make(a: int, b = 10) -> int { a + b } }
+     enum E { A, B }
+     impl E { fn pick(n: int) -> int { n * 2 } }
+     let s = S { x = 1 };
+     let maybe: S? = s;
+     let e = E::B;",
+    "s.make(1)" => Int(11),
+    "s.make(1, b = 2)" => Int(3),
+    "maybe?.make(4)" => Int(14),
+    "e.pick(4)" => Int(8),
+);
