@@ -19,6 +19,8 @@ mod native;
 pub use native::*;
 pub mod fixtures;
 pub use fixtures::*;
+mod math;
+pub use ::glam;
 
 // re-exports the MimasEnum / MimasStruct derives resolve against -- saves user crates from
 // depending on mimas-api / mimas-shared directly.

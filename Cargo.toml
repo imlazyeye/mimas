@@ -20,6 +20,7 @@ split-debuginfo = "packed"
 debug = "line-tables-only"
 
 [workspace.dependencies]
+glam = { version = "0.32", default-features = false, features = ["std"] }
 static_assertions = "1.1"
 codespan-reporting = "0.13"
 colored = "2"
