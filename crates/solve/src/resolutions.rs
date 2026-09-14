@@ -4,11 +4,10 @@ use api::NativeId;
 use indexmap::IndexMap;
 use parse::{Literal, NodeId};
 use shared::{IdVec, PactId};
-use std::collections::HashSet;
 
 use crate::{
     Solver,
-    components::{Adt, AdtFlags, AdtId, DecId, DecKind, Ty, TyExt, Variant},
+    components::{Adt, AdtFlags, AdtId, DecId, DecKind, Ty, TyExt, Variant, Vis},
 };
 
 pub struct Resolutions {
@@ -17,11 +16,58 @@ pub struct Resolutions {
     pub decs: IdVec<DecId, ResolvedDecl>,
     pub adts: IdVec<AdtId, ResolvedAdt>,
     pub closure_captures: IndexMap<NodeId, Vec<DecId>>,
+    pub root: ResolvedModule,
+}
+
+/// The fns and consts the script declares at the top of a file, and the `pub` ones of each
+/// module, in declaration order.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedModule {
+    pub items: IndexMap<String, DecId>,
+    pub modules: IndexMap<String, ResolvedModule>,
+}
+
+impl ResolvedModule {
+    fn new(solver: &Solver, adt: AdtId) -> Self {
+        let root = adt == AdtId::DANGLING;
+        let items = solver
+            .module_items
+            .get(&adt)
+            .into_iter()
+            .flatten()
+            .map(|(name, &dec)| (name.clone(), dec))
+            .filter(|&(_, dec)| root || solver.decs[dec].vis == Vis::Public)
+            .collect();
+        let children: Vec<(String, AdtId)> = if root {
+            solver
+                .root_modules
+                .iter()
+                .map(|(name, &adt)| (name.clone(), adt))
+                .collect()
+        } else {
+            let fields = solver.adts[adt].as_struct().fields.iter();
+            fields
+                .filter_map(|(name, field)| {
+                    let child = *field.ty.as_adt()?;
+                    let is_module = solver.adts[child].flags.contains(AdtFlags::IS_MODULE);
+                    is_module.then(|| (name.clone(), child))
+                })
+                .collect()
+        };
+        Self {
+            items,
+            modules: children
+                .into_iter()
+                .map(|(name, child)| (name, Self::new(solver, child)))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedDecl {
     pub name: String,
+    pub ty: Ty,
     pub kind: ResolvedDeclKind,
 }
 
@@ -101,30 +147,24 @@ impl From<Solver> for Resolutions {
             resolved_adts.push(ResolvedAdt::new(aid, adt, &solver));
         }
 
-        let takes_self: HashSet<DecId> = solver
+        let root = ResolvedModule::new(&solver, AdtId::DANGLING);
+        let tys: Vec<Ty> = solver
             .decs
             .iter()
-            .filter(|(id, dec)| match solver.dec_to_native.get(id) {
-                Some(binding) => binding.takes_self,
-                None => {
-                    matches!(dec.kind, DecKind::Item { .. })
-                        && matches!(
-                            Ty::Vid(dec.vid).normalized(&solver),
-                            Ty::Fn(header) if header.is_method
-                        )
-                }
-            })
-            .map(|(id, _)| id)
+            .map(|(_, dec)| Ty::Vid(dec.vid).normalized(&solver))
             .collect();
 
         let mut resolved_decs: IdVec<DecId, ResolvedDecl> = IdVec::new();
-        for (id, dec) in solver.decs {
+        for ((id, dec), ty) in solver.decs.into_iter().zip(tys) {
             let kind = match dec.kind {
                 DecKind::Local | DecKind::LoopVar => ResolvedDeclKind::Local,
                 DecKind::Item { defaults } => ResolvedDeclKind::Item {
                     defaults,
                     native: solver.dec_to_native.get(&id).map(|b| b.id),
-                    takes_self: takes_self.contains(&id),
+                    takes_self: match solver.dec_to_native.get(&id) {
+                        Some(binding) => binding.takes_self,
+                        None => matches!(&ty, Ty::Fn(header) if header.is_method),
+                    },
                 },
                 DecKind::Constant(Some(lit)) => ResolvedDeclKind::Constant(lit),
                 DecKind::Constant(None) => panic!(
@@ -137,6 +177,7 @@ impl From<Solver> for Resolutions {
             };
             resolved_decs.push(ResolvedDecl {
                 name: dec.name,
+                ty,
                 kind,
             });
         }
@@ -153,6 +194,7 @@ impl From<Solver> for Resolutions {
             decs: resolved_decs,
             adts: resolved_adts,
             closure_captures,
+            root,
         }
     }
 }

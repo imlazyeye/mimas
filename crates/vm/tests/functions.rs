@@ -113,10 +113,149 @@ test_vm!(
 );
 
 #[test]
-fn host_function_call() {
-    const SOURCE: &str = "fn foo() -> int { 1 }";
+fn host_passes_typed_args() {
+    const SOURCE: &str = "fn add(a: int, b: int) -> int { a + b }";
     let mut vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
-    assert_eq!(vm.call_fn("foo"), Some(vm::Captured::Int(1)));
+    assert_eq!(vm.call::<i64>("add", (1, 2)).unwrap(), 3);
+    let missing = vm.call::<i64>("add", (1,)).unwrap_err();
+    assert!(
+        missing.to_string().contains("takes 2 arguments, got 1"),
+        "{missing}"
+    );
+    let extra = vm.call::<i64>("add", (1, 2, 3)).unwrap_err();
+    assert!(
+        extra.to_string().contains("takes 2 arguments, got 3"),
+        "{extra}"
+    );
+    let wrong = vm.call::<i64>("add", (1, "two")).unwrap_err();
+    assert!(wrong.to_string().contains("argument 2"), "{wrong}");
+    let returns = vm.call::<String>("add", (1, 2)).unwrap_err();
+    assert!(returns.to_string().contains("returns `int`"), "{returns}");
+    let unknown = vm.call::<i64>("missing", ()).unwrap_err();
+    assert!(unknown.to_string().contains("no fn `missing`"), "{unknown}");
+}
+
+#[test]
+fn host_fills_defaults_and_calls_resolved_fns() {
+    const SOURCE: &str = "
+        fn greet(name: str, punct = \"!\") -> str { name + punct }
+        fn last(xs = [1, 2]) -> int { xs[1] }
+    ";
+    let mut vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
+    assert_eq!(vm.call::<String>("greet", ("hi", "?")).unwrap(), "hi?");
+    assert_eq!(vm.call::<i64>("last", ()).unwrap(), 2);
+    let none = vm.call::<String>("greet", ()).unwrap_err();
+    assert!(
+        none.to_string().contains("takes 1 to 2 arguments, got 0"),
+        "{none}"
+    );
+    let greet = vm.root().function("greet").unwrap().clone();
+    greet
+        .check("greet", &[Some(vm::Ty::Str)], Some(&vm::Ty::Str))
+        .unwrap();
+    for _ in 0..3 {
+        let (s, ()) = vm
+            .call_function::<String, _>(&greet, ("hi",), |_| ())
+            .unwrap();
+        assert_eq!(s, "hi!");
+    }
+}
+
+#[test]
+fn host_calls_return_units_and_options() {
+    const SOURCE: &str = "
+        fn nothing() {}
+        fn maybe(flag: bool) -> int? { if flag 4 else null }
+    ";
+    let mut vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
+    vm.call::<()>("nothing", ()).unwrap();
+    assert_eq!(vm.call::<Option<i64>>("maybe", (true,)).unwrap(), Some(4));
+    assert_eq!(vm.call::<Option<i64>>("maybe", (false,)).unwrap(), None);
+}
+
+#[test]
+fn host_sees_root_items_but_not_methods() {
+    const SOURCE: &str = "
+        const LIMIT = 3;
+        struct Foo;
+        impl Foo {
+            fn value(self) -> int { 2 }
+            fn only_method(self) -> int { 3 }
+        }
+        fn value() -> int { 1 }
+        fn inner() -> int { const LIMIT = 99; const INNER = 7; LIMIT + INNER }
+    ";
+    let mut vm = vm::Vm::execute(SOURCE, |api| {
+        api.module("lib")
+            .constant("K", vm::Ty::Int, vm::Literal::Int(1), "");
+        api.constant("ROOT_K", vm::Ty::Int, vm::Literal::Int(2), "");
+    })
+    .unwrap();
+    assert_eq!(vm.call::<i64>("value", ()).unwrap(), 1);
+    assert_eq!(vm.call::<i64>("inner", ()).unwrap(), 106);
+    assert!(vm.root().function("only_method").is_none());
+    assert_eq!(vm.root().constants.len(), 1);
+    assert_eq!(vm.root().constants["LIMIT"], vm::Constant::Int(3));
+    assert!(vm.root().modules.is_empty());
+    let names: Vec<&str> = vm.root().functions.keys().map(String::as_str).collect();
+    assert_eq!(names, ["value", "inner"]);
+}
+
+#[test]
+fn host_reaches_pub_module_items_by_path() {
+    let files = &[
+        (
+            "util",
+            "module @; pub const STEP = 2; pub fn value() -> int { 2 } fn hidden() -> int { 3 }",
+        ),
+        ("deep", "module util::deep; pub fn value() -> int { 4 }"),
+        ("main", "use util; fn value() -> int { 1 }"),
+    ];
+    let mut vm = vm::Vm::execute_files(files, |_| {}).unwrap();
+    assert_eq!(vm.call::<i64>("value", ()).unwrap(), 1);
+    assert_eq!(vm.call::<i64>("util::value", ()).unwrap(), 2);
+    assert_eq!(vm.call::<i64>("util::deep::value", ()).unwrap(), 4);
+    assert!(vm.root().function("util::hidden").is_none());
+    assert!(vm.root().function("hidden").is_none());
+    let util = vm.root().module("util").unwrap();
+    assert_eq!(util.constants["STEP"], vm::Constant::Int(2));
+    assert!(util.module("deep").is_some());
+    assert!(vm.root().module("std").is_none());
+}
+
+#[test]
+fn host_call_keeps_entry_registers() {
+    const SOURCE: &str = "
+        let a = 7;
+        let b = 8;
+        fn f() -> int { 99 }
+    ";
+    let mut vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
+    assert_eq!(vm.call::<i64>("f", ()).unwrap(), 99);
+    assert_eq!(vm.resolve_name("a"), Some(Int(7)));
+    assert_eq!(vm.resolve_name("b"), Some(Int(8)));
+}
+
+#[test]
+fn host_call_then_runs_in_the_arena_and_faults_recover() {
+    const SOURCE: &str = "
+        fn seven() -> int { 7 }
+        fn boom() -> int { let xs = [1]; xs[5] }
+    ";
+    let mut vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
+    let (n, built) = vm
+        .call_then::<i64, _>("seven", (), |ctx| {
+            vm::Val::Array(ctx.new_array(vec![vm::Val::Int(1)])).capture()
+        })
+        .unwrap();
+    assert_eq!(n, 7);
+    assert_eq!(built, Array(vec![Int(1)]));
+    for _ in 0..3 {
+        let faulted =
+            vm.call_then::<i64, _>("boom", (), |_| unreachable!("then ran after a fault"));
+        assert!(faulted.is_err());
+    }
+    assert_eq!(vm.call::<i64>("seven", ()).unwrap(), 7);
 }
 
 // regression check for #10

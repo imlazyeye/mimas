@@ -403,3 +403,63 @@ pub(crate) fn ty_error<'gc>(expected: &str, got: Val<'gc>) -> TypeError {
         got: format!("{got:?}"),
     }
 }
+
+/// One argument of a host call: any [`MimasType`], plus `&str`, which is only a `MimasType` for
+/// the arena's own lifetime.
+pub trait Arg {
+    fn arg_ty(reg: &Registry) -> Option<Ty>;
+    fn into_arg<'gc>(self, ctx: Ctx<'gc>) -> Val<'gc>;
+}
+
+impl<T: for<'gc> MimasType<'gc>> Arg for T {
+    fn arg_ty(reg: &Registry) -> Option<Ty> {
+        T::mimas_ty(reg)
+    }
+
+    fn into_arg<'gc>(self, ctx: Ctx<'gc>) -> Val<'gc> {
+        self.into_value(ctx)
+    }
+}
+
+impl Arg for &str {
+    fn arg_ty(_: &Registry) -> Option<Ty> {
+        Some(Ty::Str)
+    }
+
+    fn into_arg<'gc>(self, ctx: Ctx<'gc>) -> Val<'gc> {
+        Val::Str(ctx.intern(self))
+    }
+}
+
+/// The arguments of a host call into a script, as a tuple of [`Arg`]s: `()`, `(a,)`, `(a, b)`,
+/// up to eight.
+pub trait Args {
+    fn tys(&self, reg: &Registry) -> Vec<Option<Ty>>;
+    fn into_values<'gc>(self, ctx: Ctx<'gc>) -> Vec<Val<'gc>>;
+}
+
+macro_rules! impl_args {
+    ($($t:ident),*) => {
+        impl<$($t: Arg),*> Args for ($($t,)*) {
+            fn tys(&self, _reg: &Registry) -> Vec<Option<Ty>> {
+                vec![$($t::arg_ty(_reg)),*]
+            }
+
+            #[allow(non_snake_case)]
+            fn into_values<'gc>(self, _ctx: Ctx<'gc>) -> Vec<Val<'gc>> {
+                let ($($t,)*) = self;
+                vec![$($t.into_arg(_ctx)),*]
+            }
+        }
+    };
+}
+
+impl_args!();
+impl_args!(A);
+impl_args!(A, B);
+impl_args!(A, B, C);
+impl_args!(A, B, C, D);
+impl_args!(A, B, C, D, E);
+impl_args!(A, B, C, D, E, F);
+impl_args!(A, B, C, D, E, F, G);
+impl_args!(A, B, C, D, E, F, G, H);

@@ -37,6 +37,10 @@ impl<C> Library<C> {
         &mut self.registry
     }
 
+    pub fn into_registry(self) -> Registry {
+        self.registry
+    }
+
     pub fn push_adt(&mut self, adt: ApiAdt) {
         self.adts.push(adt);
     }

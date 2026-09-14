@@ -55,7 +55,7 @@ fn main() {
 
     for _ in 0..3 {
         // freeze our game -- we guarantee it's safe and sound while mimas does its thing.
-        game_cell.freeze(&mut game, || vm.call_fn("update").unwrap());
+        game_cell.freeze(&mut game, || vm.call::<()>("update", ()).unwrap());
     }
 
     assert_eq!(game.score, 30);

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use api::NativeId;
+use indexmap::IndexMap;
 use parse::AccessKind;
-use shared::{IdVec, Location, StrId, StrInterner};
+use shared::{Error, FnHeader, IdVec, Location, Result, StrId, StrInterner, Ty};
 use solve::components::AdtId;
 
 use crate::{
@@ -15,7 +16,81 @@ pub struct Program {
     pub chunks: IdVec<BodyId, Chunk>,
     pub strs: StrInterner,
     pub bytes: Vec<u8>,
-    pub items: HashMap<String, BodyId>,
+    pub root: Module,
+}
+
+/// The items a host can reach in a script -- every fn and const at the root, and the `pub` ones of
+/// each module, in declaration order.
+#[derive(Debug, Clone, Default)]
+pub struct Module {
+    pub functions: IndexMap<String, Function>,
+    pub constants: IndexMap<String, Constant>,
+    pub modules: IndexMap<String, Module>,
+}
+
+impl Module {
+    /// Looks a fn up by `::` path from this module, so `"tick"` and `"game::tick"` both work.
+    pub fn function(&self, path: &str) -> Option<&Function> {
+        match path.rsplit_once("::") {
+            Some((module, name)) => self.module(module)?.functions.get(name),
+            None => self.functions.get(path),
+        }
+    }
+
+    pub fn module(&self, path: &str) -> Option<&Module> {
+        path.split("::")
+            .try_fold(self, |module, name| module.modules.get(name))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub body: BodyId,
+    pub header: FnHeader,
+    pub defaults: Vec<Option<Constant>>,
+}
+
+impl Function {
+    /// Checks a host call against the signature. `given` are the argument types (`None` for a
+    /// non-mimas type, trailing defaulted parameters may be left out) and `returns` is what the
+    /// host expects back.
+    pub fn check(&self, path: &str, given: &[Option<Ty>], returns: Option<&Ty>) -> Result<()> {
+        let params = &self.header.parameters;
+        let required = params
+            .iter()
+            .position(|p| p.has_default)
+            .unwrap_or(params.len());
+        if !(required..=params.len()).contains(&given.len()) {
+            let takes = if required == params.len() {
+                params.len().to_string()
+            } else {
+                format!("{required} to {}", params.len())
+            };
+            return Err(Error::msg(format!(
+                "`{path}` takes {takes} arguments, got {}",
+                given.len()
+            )));
+        }
+        for (i, (param, ty)) in params.iter().zip(given).enumerate() {
+            if ty.as_ref() != Some(&param.ty) {
+                return Err(Error::msg(format!(
+                    "argument {} of `{path}` is `{}`, but a `{}` was passed",
+                    i + 1,
+                    param.ty,
+                    ty.as_ref()
+                        .map_or("non-mimas type".to_string(), Ty::to_string)
+                )));
+            }
+        }
+        if returns != Some(&*self.header.return_ty) {
+            return Err(Error::msg(format!(
+                "`{path}` returns `{}`, but the host asked for `{}`",
+                self.header.return_ty,
+                returns.map_or("a non-mimas type".to_string(), Ty::to_string)
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

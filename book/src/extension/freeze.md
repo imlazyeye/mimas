@@ -25,7 +25,7 @@ fn main() {
     vm.run().unwrap();
 
     let cell = vm.fixture::<DatabaseCell>();
-    cell.freeze(&mut database, || vm.call_fn("call_me").unwrap());
+    cell.freeze(&mut database, || vm.call::<()>("call_me", ()).unwrap());
 
     assert_eq!(database.0.first(), Some(&"hello!".to_string()));
 }
@@ -56,7 +56,7 @@ A few things worth noticing:
 
 - The fixture is the *cell*, not the `Database`. The `Database` never enters the Vm and never needs `Default` -- the cell is built empty on first access, which is exactly the state it should be in between frames.
 - `with_mut` returns a `Result` because the cell might be empty: a native that runs outside any freeze scope gets an error instead of stale data. `add_entry` just `unwrap`s it, which is a plain panic of our own choosing; if some of your natives can legitimately run outside a frame, surface a [runtime error](./runtime-errors.md) instead.
-- `vm.fixture` hands back a handle that is deliberately *not* borrow-tied to the Vm -- that's what lets us hold `cell` while calling `vm.call_fn` (a `&mut` borrow) inside the closure. The cost of that freedom is one rule: drop the handle before the Vm. Declaring it after the `vm`, like above, gets you that for free.
+- `vm.fixture` hands back a handle that is deliberately _not_ borrow-tied to the Vm -- that's what lets us hold `cell` while calling `vm.call` (a `&mut` borrow) inside the closure. The cost of that freedom is one rule: drop the handle before the Vm. Declaring it after the `vm`, like above, gets you that for free.
 - Need to lend more than one thing per frame? Cells nest: `a.freeze(x, || b.freeze(y, || ...))`.
 
 ```admonish info

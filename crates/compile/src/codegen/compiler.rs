@@ -1,14 +1,17 @@
 use shared::IdVec;
 
 use colored::Colorize;
-use shared::{FileId, Location};
+use parse::Literal;
+use shared::{FileId, Location, Ty};
+use solve::{ResolvedDeclKind, ResolvedModule};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 
 use crate::{
-    BinOp, BlockId, BlockTarget, BodyId, Constant, Inst, InstId, Ir, Local, Op, OperandKind,
+    BinOp, BlockId, BlockTarget, BodyId, Constant, Function, Inst, InstId, Ir, Local, Module, Op,
+    OperandKind,
     codegen::{
         clean::{self, uses},
         program::{Chunk, Encoder, Program},
@@ -61,7 +64,7 @@ impl Compiler {
         self
     }
 
-    pub fn compile(&mut self, ir: Ir) -> Program {
+    pub fn compile(&mut self, mut ir: Ir) -> Program {
         let mut bytes = Encoder::new();
 
         // body -> source name, for the --disasm dump only
@@ -73,6 +76,45 @@ impl Compiler {
         } else {
             HashMap::new()
         };
+
+        fn export(ir: &mut Ir, module: ResolvedModule) -> Module {
+            let mut out = Module::default();
+            for (name, dec) in module.items {
+                match ir.resolutions.decs[dec].kind.clone() {
+                    ResolvedDeclKind::Item { defaults, .. } => {
+                        let Ty::Fn(header) = ir.resolutions.decs[dec].ty.clone() else {
+                            unreachable!("item `{name}` is not a fn");
+                        };
+                        let defaults = defaults
+                            .into_iter()
+                            .map(|d| d.map(|lit| Constant::from_literal(ir, lit)))
+                            .collect();
+                        let body = ir.item_bodies[&dec];
+                        out.functions.insert(
+                            name,
+                            Function {
+                                body,
+                                header,
+                                defaults,
+                            },
+                        );
+                    }
+                    // dicts and structs have no constant form, see `Constant::emit_const_dec`
+                    ResolvedDeclKind::Constant(lit)
+                        if !matches!(lit, Literal::Dictionary(_) | Literal::Struct(_)) =>
+                    {
+                        out.constants.insert(name, Constant::from_literal(ir, lit));
+                    }
+                    _ => {}
+                }
+            }
+            for (name, module) in module.modules {
+                out.modules.insert(name, export(ir, module));
+            }
+            out
+        }
+        let root = std::mem::take(&mut ir.resolutions.root);
+        let root = export(&mut ir, root);
 
         for (body_id, mut body) in ir.bodies {
             clean::clean(&mut body);
@@ -540,18 +582,12 @@ impl Compiler {
             self.ops.extend(body_ops);
         }
 
-        let items: HashMap<String, BodyId> = ir
-            .item_bodies
-            .iter()
-            .map(|(&dec, &body)| (ir.resolutions.decs[dec].name.clone(), body))
-            .collect();
-
         Program {
             entry: BodyId::ZERO,
+            root,
             chunks: std::mem::replace(&mut self.chunks, IdVec::new()),
             strs: ir.str_interner,
             bytes: bytes.finish(),
-            items,
         }
     }
 }

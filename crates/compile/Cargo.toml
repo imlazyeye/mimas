@@ -17,6 +17,7 @@ itertools.workspace = true
 colored.workspace = true
 chompy.workspace = true
 mutants.workspace = true
+indexmap.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true

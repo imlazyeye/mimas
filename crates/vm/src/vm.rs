@@ -1,8 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
+use api::Registry;
 use compile::{
-    AccessKind, BinOp, BodyId, Chunk, Constant, Decode, Decoder, OpCode, OpFormatPart, Program,
-    Reg, UnaryOp,
+    AccessKind, BinOp, BodyId, Chunk, Constant, Decode, Decoder, Function, Module, OpCode,
+    OpFormatPart, Program, Reg, UnaryOp,
 };
 use gc_arena::{Arena, Gc, Rootable};
 use shared::{Error, IdVec, StrInterner};
@@ -11,6 +12,7 @@ use smallvec::SmallVec;
 use crate::{
     Closure, Ctx, DictMap, Fields, Frame, INLINE_FIELDS, LocatedRtErr, RtErr, RtResult, Sources,
     State, ThreadState, Val,
+    conversion::{Args, MimasType},
 };
 
 const FUEL: usize = 1024;
@@ -50,7 +52,8 @@ pub struct Vm {
     pub(crate) c_strs: StrInterner,
     pub(crate) arena: Arena<Rootable![State<'_>]>,
     pub(crate) sources: Sources,
-    pub(crate) items: HashMap<String, BodyId>,
+    pub(crate) root: Rc<Module>,
+    pub(crate) registry: Registry,
 }
 
 impl Vm {
@@ -69,7 +72,8 @@ impl Vm {
             c_strs: StrInterner::new(),
             arena,
             sources: Sources::new(),
-            items: HashMap::default(),
+            root: Rc::default(),
+            registry: Registry::new(),
         }
     }
 
@@ -79,13 +83,13 @@ impl Vm {
             chunks,
             strs,
             bytes,
-            items,
+            root,
         } = program;
         self.entry = entry;
         self.code = Decoder { bytes, ip: 0 };
         self.chunks = chunks;
         self.c_strs = strs;
-        self.items = items;
+        self.root = Rc::new(root);
         let entry_chunk = &self.chunks[self.entry];
         let regs_count = entry_chunk.regs as usize;
         let entry_offset = entry_chunk.offset;
@@ -401,7 +405,7 @@ macro_rules! branch_float_imm {
 /// resize `thread.regs` *inline* without a borrow conflict. The window is refreshed after every
 /// `thread.regs` mutation so the pointer never dangles and never overlaps another live borrow.
 /// `stop_depth` is the frame floor: returning out of frame `stop_depth` ends the dispatch.
-/// `Vm::run` passes 1 (the entry frame's own return is the end of the program); `Vm::call_fn`
+/// `Vm::run` passes 1 (the entry frame's own return is the end of the program); `Vm::call`
 /// passes the pre-call depth + 1 so dispatch stops -- result written, entry ip untouched --
 /// when the injected call returns, instead of running off the end of the entry's bytecode.
 #[allow(clippy::too_many_arguments)]
@@ -1315,10 +1319,64 @@ impl Vm {
         })
     }
 
-    /// Calls a function by name. Must be within the root of the program. Must require 0 arguments.
-    pub fn call_fn(&mut self, name: &str) -> Option<Captured> {
-        let body_id = self.items.get(name).copied()?;
+    /// The script's items as the host sees them: its root fns and consts, and each module's
+    /// `pub` ones.
+    pub fn root(&self) -> &Module {
+        &self.root
+    }
 
+    /// The host types this program was compiled against, for turning a Rust type into its `Ty`.
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    /// Calls a fn by `::` path (`"update"`, `"game::tick"`) once the program has [run](Self::run).
+    /// Arguments and `R` are checked against the signature first; trailing defaults may be left
+    /// out; a fault leaves the Vm usable.
+    pub fn call<R: for<'gc> MimasType<'gc>>(
+        &mut self,
+        path: &str,
+        args: impl Args,
+    ) -> Result<R, Error> {
+        self.call_then(path, args, |_| ()).map(|(value, ())| value)
+    }
+
+    /// [`call`](Self::call), then `then` with the arena still open -- the fn's frame is gone but
+    /// nothing has been collected yet, so whatever a native put aside during the call can still
+    /// be read. `then` doesn't run when the call faults.
+    pub fn call_then<R, T>(
+        &mut self,
+        path: &str,
+        args: impl Args,
+        then: impl for<'gc> FnOnce(Ctx<'gc>) -> T,
+    ) -> Result<(R, T), Error>
+    where
+        R: for<'gc> MimasType<'gc>,
+    {
+        let root = Rc::clone(&self.root);
+        let Some(f) = root.function(path) else {
+            return Err(miette::miette!("no fn `{path}` is reachable from the host"));
+        };
+        f.check(
+            path,
+            &args.tys(&self.registry),
+            R::mimas_ty(&self.registry).as_ref(),
+        )?;
+        self.call_function(f, args, then)
+    }
+
+    /// [`call_then`](Self::call_then) for a fn already looked up in [`root`](Self::root), without
+    /// checking `args` or `R` against its signature: [`Function::check`] once, then call as often
+    /// as needed. A fn from another Vm is a logic error.
+    pub fn call_function<R, T>(
+        &mut self,
+        f: &Function,
+        args: impl Args,
+        then: impl for<'gc> FnOnce(Ctx<'gc>) -> T,
+    ) -> Result<(R, T), Error>
+    where
+        R: for<'gc> MimasType<'gc>,
+    {
         let Vm {
             code,
             chunks,
@@ -1327,29 +1385,43 @@ impl Vm {
             sources,
             ..
         } = self;
-        arena.mutate(|mc, state| {
+        let result = arena.mutate(|mc, state| {
             let ctx = state.ctx(mc);
-            // scope the borrow so it's released before we re-borrow to read the result.
-            {
-                let mut thread = state.thread.borrow_mut(mc);
-                let stop_depth = thread.frames.len() + 1;
-                enter_call(&mut thread, code, chunks, body_id, Reg::ZERO, &[], &[]);
-                run_dispatch(
-                    ctx,
-                    code,
-                    chunks,
-                    strs,
-                    sources,
-                    &mut thread,
-                    usize::MAX,
-                    stop_depth,
-                )
-                .ok()?;
+            let mut values = args.into_values(ctx);
+            for default in f.defaults.iter().skip(values.len()).flatten() {
+                values.push(constant_to_val(default.clone(), ctx, strs));
             }
 
-            let t = state.thread.borrow();
-            Some(t.regs.first().unwrap().capture())
-        })
+            let mut thread = state.thread.borrow_mut(mc);
+            let base = thread.frames.last().unwrap().base;
+            let (depth, regs, ip) = (thread.frames.len(), thread.regs.len(), code.ip);
+            // the callee returns into r0 of the entry body, which still needs its own value
+            let r0 = thread.regs[base];
+            enter_call(&mut thread, code, chunks, f.body, Reg::ZERO, &values, &[]);
+            let ran = run_dispatch(
+                ctx,
+                code,
+                chunks,
+                strs,
+                sources,
+                &mut thread,
+                usize::MAX,
+                depth + 1,
+            );
+            // a fault returns without unwinding, so the callee's frames are still stacked
+            if ran.is_err() {
+                thread.frames.truncate(depth);
+                thread.regs.truncate(regs);
+                code.ip = ip;
+            }
+            let value = std::mem::replace(&mut thread.regs[base], r0);
+            drop(thread);
+            ran?;
+            let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
+            Ok((value, then(ctx)))
+        });
+        self.arena.collect_debt();
+        result
     }
 
     pub fn execute<F>(source: &str, install_lib: F) -> std::result::Result<Self, ExecuteError>
@@ -1425,6 +1497,7 @@ impl Vm {
 
         vm.load_program(program);
         vm.set_sources(sources);
+        vm.registry = library.into_registry();
         Ok(vm)
     }
 }

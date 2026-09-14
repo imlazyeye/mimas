@@ -37,6 +37,8 @@ pub struct Solver {
     subs: IdVec<Vid, Option<Ty>>,
     node_visits: HashSet<NodeId>,
     library: HashMap<String, AdtId>,
+    pub(crate) root_modules: IndexMap<String, AdtId>,
+    pub(crate) module_items: IndexMap<AdtId, IndexMap<String, DecId>>,
     sources: HashMap<FileId, NamedSource<Arc<str>>>,
 
     pub(crate) dec_to_native: HashMap<DecId, NativeBinding>,
@@ -69,6 +71,8 @@ impl Solver {
             loop_stack: vec![],
             fn_stack: vec![],
             library: HashMap::new(),
+            root_modules: IndexMap::new(),
+            module_items: IndexMap::new(),
             sources: HashMap::new(),
             dec_to_native: HashMap::new(),
         };
@@ -154,6 +158,8 @@ impl Solver {
             let segments: Vec<String> = name.split("::").map(str::to_string).collect();
             let id = self.ensure_module_path(&segments);
             module_adts.insert(name.clone(), id);
+            self.root_modules
+                .insert(segments[0].clone(), self.library[&segments[0]]);
         }
 
         // each ast's module rib accumulates across phases -- saved between visits
@@ -1894,6 +1900,10 @@ impl Solver {
         };
         let dec_id = self.dec_id(ident, ty.clone(), kind, vis);
         self.ribs.module_mut().insert(ident.clone(), dec_id);
+        self.module_items
+            .entry(self.ribs.current_module())
+            .or_default()
+            .insert(ident.lexeme.clone(), dec_id);
 
         if let Some(node_id) = node_id {
             self.node_decs.insert(node_id, dec_id);
