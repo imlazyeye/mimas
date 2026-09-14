@@ -400,3 +400,33 @@ native_tests! { install_geo;
     module_enum_array_annotation:
         "let xs: [geo::Shape] = [geo::Shape::Circle(8.0)]; let TEST_VALUE = describe_shape(xs[0]);" => Captured::Str("circle:8".into())
 }
+
+#[test]
+fn runtime_described_types_and_natives() {
+    struct Point;
+    let value = run_with(
+        |api| {
+            let binding = api.add_adt_described(std::any::TypeId::of::<Point>(), |_| {
+                vm::adt::ApiAdtDescriptor {
+                    name: "Point",
+                    module: &["geo"],
+                    kind: vm::ApiAdtKind::Struct,
+                    doc: "",
+                    variants: vec![vm::adt::ApiVariantShape {
+                        name: "@".into(),
+                        doc: "",
+                        fields: vm::ApiVariantFields::Named(vec![("x".into(), Ty::Int)]),
+                    }],
+                }
+            });
+            let point = Ty::Adt(binding.adt_id);
+            api.add_assoc_described(point, "double", vec![Ty::Int], Ty::Int, |_, args| {
+                Ok(vm::Val::Int(args[0].as_int().unwrap_or_default() * 2))
+            });
+            api.module("geo")
+                .add_described("origin_x", Vec::new(), Ty::Int, |_, _| Ok(vm::Val::Int(0)));
+        },
+        "use geo::Point; let TEST_VALUE = Point::double(Point { x = 21 }.x) + geo::origin_x();",
+    );
+    assert_eq!(value, Captured::Int(42));
+}
