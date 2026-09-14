@@ -80,6 +80,7 @@ impl Vm {
             strs,
             bytes,
             items,
+            struct_names,
         } = program;
         self.entry = entry;
         self.code = Decoder { bytes, ip: 0 };
@@ -101,6 +102,7 @@ impl Vm {
                 return_reg: 0,
                 base: 0,
             });
+            *state.struct_names.borrow_mut(mc) = struct_names.into_values().collect();
         });
     }
 

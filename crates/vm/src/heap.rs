@@ -67,6 +67,10 @@ pub struct State<'gc> {
     pub natives: Gc<'gc, RefLock<Vec<Option<crate::native::NativeRef<'gc>>>>>,
     pub mimas_bindings: Gc<'gc, RefLock<MimasBindings>>,
     pub fixtures: Gc<'gc, crate::fixtures::Fixtures>,
+    /// Struct/variant names indexed by `struct_id` (see [`InstanceData::struct_id`]), for
+    /// rendering instances as `Name { .. }` instead of `@id { .. }`. Filled in by
+    /// `Vm::load_program`.
+    pub struct_names: Gc<'gc, RefLock<Vec<String>>>,
 }
 
 impl<'gc> State<'gc> {
@@ -81,12 +85,14 @@ impl<'gc> State<'gc> {
         let natives = Gc::new(mc, RefLock::new(Vec::new()));
         let mimas_bindings = Gc::new(mc, RefLock::new(MimasBindings::default()));
         let fixtures = Gc::new(mc, crate::fixtures::Fixtures::default());
+        let struct_names = Gc::new(mc, RefLock::new(Vec::new()));
         State {
             strings: InternedStrings::new(mc),
             thread,
             natives,
             mimas_bindings,
             fixtures,
+            struct_names,
         }
     }
 
@@ -266,7 +272,15 @@ impl<'gc> Ctx<'gc> {
                     .map(|v| self.display(v))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let _ = write!(out, "@{} {{ {} }}", inst.struct_id, entries);
+                let names = self.state.struct_names.borrow();
+                match names.get(inst.struct_id as usize) {
+                    Some(name) => {
+                        let _ = write!(out, "{name} {{ {entries} }}");
+                    }
+                    None => {
+                        let _ = write!(out, "@{} {{ {} }}", inst.struct_id, entries);
+                    }
+                }
             }
         }
     }

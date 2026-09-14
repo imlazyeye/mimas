@@ -45,3 +45,27 @@ test_vm!(
      let w = make(7);",
     "if let Wrap(x) = w { x } else { -1 }" => Int(7),
 );
+
+// `print`/`display`/f-strings render an instance as `Name { .. }`, not the bare `@id { .. }`
+// the runtime used to fall back to before struct/variant names were threaded through to the VM.
+test_vm!(
+    instance_display_uses_struct_name,
+    "struct Node { next: Node?, prev: Node?, val: int }
+     let n = Node { next = null, prev = null, val = 3 };",
+    r#"f"{n}""# => str!("Node { null, null, 3 }"),
+);
+
+test_vm!(
+    tuple_struct_display_uses_struct_name,
+    "struct Wrap(int);
+     let w = Wrap(9);",
+    r#"f"{w}""# => str!("Wrap { 9 }"),
+);
+
+// enum variant instances display qualified as `Enum::Variant { .. }`
+test_vm!(
+    enum_variant_display_uses_qualified_name,
+    "enum Shape { Circle { radius: int }, Square(int) }",
+    r#"f"{Shape::Circle { radius = 5 }}""# => str!("Shape::Circle { 5 }"),
+    r#"f"{Shape::Square(4)}""# => str!("Shape::Square { 4 }"),
+);
