@@ -108,6 +108,7 @@ Runnable projects live in [`examples/`](examples):
 
 - [`extension`](examples/extension) -- sharing Rust structs, enums, methods, and fallible functions with a script via `#[mimas]`.
 - [`game-loop`](examples/game-loop) -- driving a script from a host game loop, using fixtures and `FreezeCell` to safely hand mimas a `&mut` to host state.
+- [`bevy`](examples/bevy) — a breakout game on the `bevy` feature, which runs `.mim` scripts as hot-reloaded Bevy assets with typed access to reflected components, resources, and messages. See the [Bevy guide](https://mim.as/extension/bevy.html), and run it with `cargo run --manifest-path examples/bevy/Cargo.toml`.
 
 ## Editor support
 

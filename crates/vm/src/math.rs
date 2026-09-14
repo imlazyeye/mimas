@@ -30,10 +30,10 @@ macro_rules! glam_struct {
 
         impl<'gc> MimasType<'gc> for $ty {
             fn mimas_ty(reg: &Registry) -> Option<Ty> {
-                let binding = reg.get::<Self>().unwrap_or_else(|| {
-                    panic!(concat!("`", stringify!($ty), "` isn't registered with mimas"))
-                });
-                Some(Ty::Adt(binding.adt_id))
+                Some(
+                    reg.ty_of_id(TypeId::of::<Self>())
+                        .expect(concat!("`", stringify!($ty), "` isn't registered with mimas")),
+                )
             }
 
             fn from_value(ctx: Ctx<'gc>, value: Val<'gc>) -> Result<Self, TypeError> {
@@ -44,7 +44,7 @@ macro_rules! glam_struct {
                 let Val::Instance(instance) = value else {
                     return Err(mismatch());
                 };
-                let id = ctx.state().mimas_bindings.borrow().0.get(&TypeId::of::<Self>()).map(|b| b.adt_id);
+                let id = ctx.binding(TypeId::of::<Self>()).map(|b| b.adt_id);
                 let fields = {
                     let instance = instance.0.borrow();
                     if id.is_none_or(|id| id.index() as u32 != instance.struct_id) {
@@ -61,7 +61,10 @@ macro_rules! glam_struct {
             }
 
             fn into_value(self, ctx: Ctx<'gc>) -> Val<'gc> {
-                let id = ctx.state().mimas_bindings.borrow().0[&TypeId::of::<Self>()].adt_id;
+                let id = ctx
+                    .binding(TypeId::of::<Self>())
+                    .expect(concat!("`", stringify!($ty), "` isn't registered with mimas"))
+                    .adt_id;
                 let fields = vec![$(Val::Float(self.$field as f64)),+];
                 Val::Instance(ctx.new_instance(id.index() as u32, Fields::new(fields)))
             }

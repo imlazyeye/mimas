@@ -1,0 +1,3 @@
+bevy::start(|| {
+    Counter::insert(bevy::ecs::me(), Counter(50));
+});

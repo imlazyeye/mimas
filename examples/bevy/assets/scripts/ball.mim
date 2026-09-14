@@ -1,0 +1,110 @@
+use std::math::{PI, Vec2};
+
+impl Ball {
+    const SPEED = 380.0;
+
+    /// Update the physics of the ball.
+    fn fixed_update(self, game: Game, t: bevy::Transform) {
+        let paddle = bevy::Transform::get(Paddle::entities()[0])!;
+        match game.state {
+            State::Ready | State::Won | State::Lost => {
+                self.velocity.scale(0.0);
+                self.dock(t, paddle);
+            }
+            State::Playing => {
+                // `game.mim` sets `serve` when the round starts
+                if self.serve {
+                    self.serve = false;
+                    self.dock(t, paddle);
+                    let side = if bool::random() 1.0 else -1.0;
+                    self.aim(side * (0.4 + float::random(0.3)));
+                }
+                self.fly(t, paddle);
+            }
+        }
+    }
+
+    /// Sticks the ball to the paddle.
+    fn dock(self, t: bevy::Transform, paddle: bevy::Transform) {
+        t.translation.x = paddle.translation.x;
+        t.translation.y = core::PADDLE_Y + core::PADDLE_HEIGHT / 2.0 + core::BALL_RADIUS;
+    }
+
+    /// Launches the ball at full speed, `lean` radians off from straight up.
+    fn aim(self, lean: float) {
+        self.velocity = Vec2::from_angle(PI / 2.0 - lean).scale(Self::SPEED);
+    }
+
+    /// Bounces off a surface facing `normal` (unless the ball's already moving away from it).
+    fn bounce(self, normal: Vec2) {
+        let into = self.velocity.dot(normal);
+        if into < 0.0 {
+            self.velocity = self.velocity.sub(normal.scale(2.0 * into));
+        }
+    }
+
+    /// Applies general movement code.
+    fn fly(self, t: bevy::Transform, paddle: bevy::Transform) {
+        let r = core::BALL_RADIUS;
+        let at = Vec2::new(t.translation.x, t.translation.y).add(self.velocity.scale(bevy::time::delta()));
+
+        // walls
+        let side = core::WIDTH / 2.0 - r;
+        if at.x < -side {
+            at.x = -side;
+            self.bounce(Vec2::new(1.0, 0.0));
+        }
+        if at.x > side {
+            at.x = side;
+            self.bounce(Vec2::new(-1.0, 0.0));
+        }
+        let top = core::HEIGHT / 2.0 - r;
+        if at.y > top {
+            at.y = top;
+            self.bounce(Vec2::new(0.0, -1.0));
+        }
+
+        // paddle (where the ball lands decides the angle it leaves at)
+        let paddle_top = core::PADDLE_Y + core::PADDLE_HEIGHT / 2.0;
+        let across = (at.x - paddle.translation.x) / (core::PADDLE_WIDTH / 2.0);
+        if self.velocity.y < 0.0
+            && at.y - r <= paddle_top
+            && at.y > core::PADDLE_Y
+            && across.abs() <= 1.1
+        {
+            at.y = paddle_top + r;
+            self.aim(across * 0.8);
+        }
+
+        // bricks
+        for brick in Brick::entities() {
+            let b = bevy::Transform::get(brick)!.translation;
+            let offset = at.sub(Vec2::new(b.x, b.y));
+            let dx = offset.x.abs() - core::BRICK_WIDTH / 2.0;
+            let dy = offset.y.abs() - core::BRICK_HEIGHT / 2.0;
+            if dx < r && dy < r {
+                brick.despawn();
+                // bounce off whichever side it hit
+                let normal = if dx > dy {
+                    Vec2::new(offset.x.signum(), 0.0)
+                } else {
+                    Vec2::new(0.0, offset.y.signum())
+                };
+                self.bounce(normal);
+                GameEvent::write(GameEvent::Broke);
+                break;
+            }
+        }
+
+        t.translation.x = at.x;
+        t.translation.y = at.y;
+
+        // fell off the bottom
+        if self.velocity.y < 0.0 && at.y < -core::HEIGHT / 2.0 - r {
+            self.velocity = Vec2::new(0.0, 0.0);
+            GameEvent::write(GameEvent::Dropped);
+        }
+    }
+}
+
+bevy::fixed_update(Ball::fixed_update);

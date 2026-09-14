@@ -1,4 +1,4 @@
-use shared::{AdtId, Id};
+use shared::{AdtId, Id, Ty};
 use std::{any::TypeId, collections::HashMap};
 
 #[derive(Debug, Clone)]
@@ -43,6 +43,10 @@ impl Registry {
 
     pub fn get_id(&self, type_id: TypeId) -> Option<&AdtBinding> {
         self.bindings.get(&type_id)
+    }
+
+    pub fn ty_of_id(&self, type_id: TypeId) -> Option<Ty> {
+        self.get_id(type_id).map(|binding| Ty::Adt(binding.adt_id))
     }
 
     pub fn bindings(&self) -> &HashMap<TypeId, AdtBinding> {

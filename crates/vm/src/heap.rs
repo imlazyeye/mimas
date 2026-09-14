@@ -201,6 +201,15 @@ impl<'gc> Ctx<'gc> {
         Ref::filter_map(table, |table| table.get(body)?.as_ref().map(|f| &f.header)).ok()
     }
 
+    /// The binding for a Rust type registered with `add_adt`, by its `TypeId`. It's borrowed, so
+    /// don't hold onto it.
+    pub fn binding(self, type_id: TypeId) -> Option<Ref<'gc, AdtBinding>> {
+        Ref::filter_map(self.state.mimas_bindings.borrow(), |bindings| {
+            bindings.0.get(&type_id)
+        })
+        .ok()
+    }
+
     pub fn new_array(self, items: Vec<Val<'gc>>) -> Array<'gc> {
         Array(Gc::new(self.mutation, RefLock::new(items)))
     }

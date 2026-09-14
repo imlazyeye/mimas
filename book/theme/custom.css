@@ -396,3 +396,43 @@ a:hover {
 .content table:not(.charts-css) tbody tr:nth-child(2n) {
     background: transparent;
 }
+
+#breakout-section {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+}
+
+#breakout-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+@media (max-width: 700px) {
+    #breakout-section {
+        flex-direction: column;
+    }
+}
+
+#breakout-demo {
+    flex: 0 0 270px;
+    max-width: 100%;
+    aspect-ratio: 480 / 640;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+    border-radius: 6px;
+}
+
+#breakout {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+}
+
+#breakout:focus-visible {
+    outline: 2px solid var(--mimas-accent);
+    outline-offset: 2px;
+}

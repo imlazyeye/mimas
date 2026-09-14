@@ -1,19 +1,12 @@
 [package]
-name = "mimas"
+name = "mimas-bevy"
 version = "0.1.0"
 edition = "2024"
-description = "A flexible, statically typed scripting language for Rust."
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-rust-version.workspace = true
-readme = "../../README.md"
-documentation = "https://docs.rs/mimas"
-keywords = ["scripting", "language", "embedded", "gamedev", "interpreter"]
-categories = ["compilers", "game-development"]
-
-[lib]
-name = "mimas"
+description = "todo"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/imlazyeye/mimas"
+homepage = "https://mim.as"
+rust-version = "1.95"
 
 [dependencies]
 api = { package = "mimas-api", path = "../api", version = "0.1.0" }
@@ -22,18 +15,25 @@ library = { package = "mimas-library", path = "../library", version = "0.1.0" }
 macros = { package = "mimas-macros", path = "../macros", version = "0.1.0" }
 parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
 shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
-solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
 vm = { package = "mimas-vm", path = "../vm", version = "0.1.0" }
-mimas-bevy = { path = "../bevy", version = "0.1.0", optional = true }
-
-[features]
-op-count = ["vm/op-count"]
-bevy = ["dep:mimas-bevy"]
+miette = { version = "7.6", features = ["fancy"] }
+bevy = { version = "0.19.1", default-features = false, features = [
+    "std",
+    "bevy_asset",
+    "bevy_camera",
+    "bevy_log",
+    "bevy_window",
+    "keyboard",
+    "mouse",
+    "reflect_auto_register",
+] }
 
 [dev-dependencies]
 criterion = "0.5"
 
-[[bench]]
-name = "vm_benches"
-harness = false
+[[test]]
+name = "bevy"
 
+[[bench]]
+name = "hook_benches"
+harness = false

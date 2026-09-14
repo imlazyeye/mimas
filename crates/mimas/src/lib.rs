@@ -35,6 +35,10 @@
 //! of the embedding surface, see the [Extension with Rust](https://mim.as/extension-with-rust.html)
 //! guide.
 //!
+//! # Bevy
+//!
+//! The `bevy` feature adds [`bevy`], a plugin for running mimas scripts in a Bevy app.
+//!
 //! # Stability
 //!
 //! mimas is `0.1.0`. The language design is committed, but the Rust-facing API is not stable yet --
@@ -42,6 +46,9 @@
 
 pub use library;
 pub use vm;
+
+#[cfg(feature = "bevy")]
+pub use mimas_bevy as bevy;
 
 pub use macros::{MimasEnum, MimasStruct, mimas, native};
 

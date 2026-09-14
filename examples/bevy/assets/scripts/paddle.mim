@@ -1,0 +1,6 @@
+bevy::update(|t: bevy::Transform| {
+    const SPEED = 460.0;
+    let limit = (core::WIDTH - core::PADDLE_WIDTH) / 2.0;
+    let x = t.translation.x + controls::steer() * SPEED * bevy::time::delta();
+    t.translation.x = x.max(-limit).min(limit);
+});

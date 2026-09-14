@@ -32,6 +32,11 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
+        with:
+          # the breakout demo is its own workspace, and misses the cache without this
+          workspaces: |
+            . -> target
+            examples/bevy -> target
 
       - name: Install mdBook
         run: |
@@ -46,12 +51,34 @@ jobs:
       - name: Install mimas
         run: cargo install --path crates/cli --locked
 
+      - name: Install wasm tooling
+        run: |
+          rustup target add wasm32-unknown-unknown
+          # the cli has to match the crate, or the glue it writes won't load the wasm
+          version=$(grep -A1 'name = "wasm-bindgen"$' examples/bevy/Cargo.lock \
+            | sed -n 's/version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+          sudo apt-get update
+          sudo apt-get install -y binaryen
+
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v5
 
       - name: Build
         run: mdbook build book
+
+      # after the book, because `mdbook build` empties `book/book`
+      - name: Build the breakout demo
+        run: |
+          out=book/book/extension/breakout
+          cargo build --release --target wasm32-unknown-unknown \
+            --manifest-path examples/bevy/Cargo.toml
+          wasm-bindgen --target web --no-typescript \
+            --out-dir "$out" --out-name breakout \
+            examples/bevy/target/wasm32-unknown-unknown/release/bevy.wasm
+          wasm-opt -Oz "$out/breakout_bg.wasm" -o "$out/breakout_bg.wasm"
+          cp -r examples/bevy/assets "$out/assets"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

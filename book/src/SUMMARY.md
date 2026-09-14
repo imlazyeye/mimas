@@ -43,3 +43,4 @@
   - [Freeze](./extension/freeze.md)
   - [Function Values](./extension/function-values.md)
   - [Advanced Usage](./extension/advanced-usage.md)
+  - [Bevy](./extension/bevy.md)

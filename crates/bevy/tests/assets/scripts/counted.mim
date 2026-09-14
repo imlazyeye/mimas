@@ -1,0 +1,3 @@
+bevy::update(|counter: Counter| {
+    steps::step(counter);
+});

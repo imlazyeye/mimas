@@ -105,7 +105,7 @@ assert_eq!(vm.call_value::<i64>(&f, (&receiver, 2)).unwrap(), 3);
 When the host has nothing to add to the call, let the script capture the receiver and hand over one closure instead:
 
 ```mimas
-execute_call(|| { tally.bump(2); });
+execute_call(|| tally.bump(2));
 ```
 
 That leaves one handle to keep and nothing to pair up. Reach for the method and receiver shape when the host supplies the arguments, or when it calls the same method on several different values.
