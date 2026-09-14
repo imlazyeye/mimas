@@ -1254,9 +1254,10 @@ impl Solver {
         let mut stack = vec![pat];
         while let Some(pat) = stack.pop() {
             match pat.kind() {
-                PatKind::Ident(ident) => {
+                PatKind::Ident(ident) if ident.lexeme != "_" => {
                     out.insert(ident.lexeme.clone());
                 }
+                PatKind::Ident(_) => {}
                 PatKind::Tuple(pats) | PatKind::TupleVariant(_, pats) | PatKind::Or(pats) => {
                     stack.extend(pats);
                 }
@@ -1291,7 +1292,7 @@ impl Solver {
         };
 
         match pat.kind() {
-            PatKind::Ident(ident) if reuse => {
+            PatKind::Ident(ident) if reuse && ident.lexeme != "_" => {
                 // the or-pattern already checked every alternative binds the same names, so the
                 // first alternative's dec is guaranteed present in this arm's rib.
                 let dec = self

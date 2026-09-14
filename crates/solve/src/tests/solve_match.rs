@@ -357,3 +357,9 @@ test_fail!(
     "let a = 0;
      let x = match a { x? => x + 1, _ => 0 };"
 );
+
+test_ty!(
+    or_pattern_wildcard_fields_bind_nothing,
+    "enum E { A, B { n: int } }",
+    "match E::A { E::A | E::B { n = _ } => 1 }" => Int
+);
