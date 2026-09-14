@@ -35,6 +35,11 @@
 //! of the embedding surface, see the [Extension with Rust](https://mim.as/extension-with-rust.html)
 //! guide.
 //!
+//! # Bevy
+//!
+//! The `bevy` feature adds [`bevy`], a plugin that loads a folder of `.mim` files as Bevy assets
+//! and runs them with typed access to reflected components, resources, and messages.
+//!
 //! # Stability
 //!
 //! mimas is `0.1.0`. The language design is committed, but the Rust-facing API is not stable yet --
@@ -47,6 +52,30 @@ pub use macros::{MimasEnum, MimasStruct, mimas, native};
 
 pub use shared::{Literal, Ty};
 pub use vm::{Ctx, Val, Vm, api::Api};
+
+/// Runs mimas scripts in a Bevy app. See the [Bevy](https://mim.as/extension/bevy.html) guide.
+#[cfg(feature = "bevy")]
+pub mod bevy {
+    mod api;
+    mod compile;
+    mod hooks;
+    mod plugin;
+    mod reflect;
+    mod script;
+    mod types;
+    mod writeback;
+
+    pub use plugin::{MimasApp, MimasPlugin, MimasSystems, ScriptCtx};
+    pub use script::{MimasScript, Script, ScriptError};
+    pub use types::Entity;
+
+    /// The plugin, its app extension, and the script components, for a single glob import.
+    pub mod prelude {
+        pub use super::{
+            MimasApp, MimasPlugin, MimasScript, MimasSystems, Script, ScriptCtx, ScriptError,
+        };
+    }
+}
 
 /// Compiles the given source with mimas's std included.
 pub fn compile_source(source: &str) -> Result<vm::Vm, vm::ExecuteError> {

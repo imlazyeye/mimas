@@ -1,0 +1,87 @@
+impl Game {
+    const ROWS = 5;
+    const COLS = 8;
+    const GAP = 4.0;
+    const TOP = 250.0;
+    const LIVES = 3;
+    const RESTART_DELAY = 0.6;
+
+    /// Set the current state the game is in.
+    fn set_state(self, state: State) {
+        self.state = state;
+        self.since = time::elapsed();
+    }
+
+    /// Called every update by the hook below this impl.
+    fn update(self) {
+        match self.state {
+            // Await the player hitting space to start the round
+            State::Ready => {
+                if controls::serve() {
+                    self.set_state(State::Playing);
+                    let ball = Ball::get(Ball::entities()[0])!;
+                    ball.serve = true;
+                }
+            }
+
+            // Check for signals from other scripts to proceed the state
+            State::Playing => {
+                for event in GameEvent::read() {
+                    match event {
+                        GameEvent::Broke => {
+                            self.score += 10;
+                            if Brick::entities().is_empty() {
+                                self.set_state(State::Won);
+                            }
+                        }
+                        GameEvent::Dropped => {
+                            self.lives -= 1;
+                            self.set_state(if self.lives > 0 State::Ready else State::Lost);
+                        }
+                    }
+                }
+            }
+
+            // Run the delay before we reset
+            State::Won | State::Lost => {
+                let waited = time::elapsed() - self.since;
+                if waited > Self::RESTART_DELAY && controls::serve() {
+                    self.reset();
+                }
+            }
+        }
+    }
+
+    /// Resets all state and sets up the bricks for a new round.
+    fn reset(self) {
+        self.score = 0;
+        self.lives = Self::LIVES;
+        for brick in Brick::entities() {
+            brick.despawn();
+        }
+        let step_x = core::BRICK_WIDTH + Self::GAP;
+        let step_y = core::BRICK_HEIGHT + Self::GAP;
+        let left = -(Self::COLS.to_float() * step_x - Self::GAP) / 2.0 + core::BRICK_WIDTH / 2.0;
+        for row in Self::ROWS {
+            for col in Self::COLS {
+                let brick = bevy::Entity::spawn();
+                Brick::insert(brick, Brick { row = row });
+                let x = left + col.to_float() * step_x;
+                let y = Self::TOP - row.to_float() * step_y;
+                bevy::Transform::insert(brick, bevy::Transform::from_xyz(x, y, 0.0));
+            }
+        }
+
+        self.set_state(State::Ready);
+    }
+}
+
+/// Hook this function into the entity's start.
+fn start(game: Game) {
+    game.reset();
+}
+
+/// Hook this function into the entity's update.
+fn update(game: Game) {
+   game.update();
+}

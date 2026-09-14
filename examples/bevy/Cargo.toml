@@ -1,0 +1,23 @@
+[package]
+name = "bevy"
+version = "0.1.0"
+edition = "2024"
+description = "A breakout game scripted in mimas through its `bevy` feature."
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+mimas = { path = "../../crates/mimas", features = ["bevy"] }
+# mimas's `bevy` feature already turns on assets, windowing and input; this adds the renderer and
+# hot reloading
+bevy = { version = "0.19.1", default-features = false, features = [
+    "2d",
+    "file_watcher",
+] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "examples/*"]
+# the bevy examples are their own workspace so their renderer stays out of the core build
+exclude = ["examples/bevy"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

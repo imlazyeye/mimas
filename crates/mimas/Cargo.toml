@@ -24,9 +24,21 @@ parse = { package = "mimas-parse", path = "../parse", version = "0.1.0" }
 shared = { package = "mimas-shared", path = "../shared", version = "0.1.0" }
 solve = { package = "mimas-solve", path = "../solve", version = "0.1.0" }
 vm = { package = "mimas-vm", path = "../vm", version = "0.1.0" }
+miette = { workspace = true, optional = true }
+bevy = { version = "0.19.1", optional = true, default-features = false, features = [
+    "std",
+    "bevy_asset",
+    "bevy_camera",
+    "bevy_log",
+    "bevy_window",
+    "keyboard",
+    "mouse",
+    "reflect_auto_register",
+] }
 
 [features]
 op-count = ["vm/op-count"]
+bevy = ["dep:bevy", "dep:miette"]
 
 [dev-dependencies]
 criterion = "0.5"
@@ -34,3 +46,7 @@ criterion = "0.5"
 [[bench]]
 name = "vm_benches"
 harness = false
+
+[[test]]
+name = "bevy"
+required-features = ["bevy"]

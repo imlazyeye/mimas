@@ -1,0 +1,5 @@
+module @;
+
+pub fn step(counter: Counter) {
+    counter.0 += 1;
+}

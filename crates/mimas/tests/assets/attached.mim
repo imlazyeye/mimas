@@ -1,0 +1,3 @@
+fn start() {
+    Counter::insert(script::entity(), Counter(50));
+}

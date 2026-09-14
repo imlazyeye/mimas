@@ -42,3 +42,4 @@
   - [Fixtures & Context](./extension/fixtures-and-context.md)
   - [Freeze](./extension/freeze.md)
   - [Advanced Usage](./extension/advanced-usage.md)
+  - [Bevy](./extension/bevy.md)

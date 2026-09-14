@@ -1,0 +1,19 @@
+// since we declare this as a module we can use it in our other scripts
+module @;
+
+/// Returns the direction along the x-axis the user wants to move the paddle.
+pub fn steer() -> float {
+    let dir = 0.0;
+    if input::pressed(bevy::KeyCode::ArrowLeft) || input::pressed(bevy::KeyCode::KeyA) {
+        dir -= 1.0;
+    }
+    if input::pressed(bevy::KeyCode::ArrowRight) || input::pressed(bevy::KeyCode::KeyD) {
+        dir += 1.0;
+    }
+    dir
+}
+
+/// Returns if the user is ready to serve.
+pub fn serve() -> bool {
+    input::just_pressed(bevy::KeyCode::Space)
+}

@@ -1,0 +1,3 @@
+fn update(counter: Counter) {
+    steps::step(counter);
+}

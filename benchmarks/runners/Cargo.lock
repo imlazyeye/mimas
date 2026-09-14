@@ -1717,6 +1717,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
+name = "glam"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
+
+[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2851,6 +2857,7 @@ version = "0.1.0"
 dependencies = [
  "chompy",
  "colored",
+ "indexmap 2.14.0",
  "itertools 0.10.5",
  "mimas-api",
  "mimas-parse",
@@ -2871,7 +2878,7 @@ dependencies = [
  "mimas-macros",
  "mimas-shared",
  "mimas-vm",
- "rand 0.8.6",
+ "rand 0.10.2",
  "regex",
  "serde_json",
  "walkdir",
@@ -2937,6 +2944,7 @@ name = "mimas-vm"
 version = "0.1.0"
 dependencies = [
  "gc-arena 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "glam",
  "indexmap 2.14.0",
  "inventory",
  "itertools 0.10.5",
