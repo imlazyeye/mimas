@@ -29,7 +29,7 @@ for _ in STEPS {
     // when two balls touch, swap their velocities so they bounce apart
     for i in COUNT {
         let ball = balls[i];
-        for j in i..COUNT {
+        for j in i + 1..COUNT {
             let other = balls[j];
             let dx = other.x - ball.x;
             let dy = other.y - ball.y;
