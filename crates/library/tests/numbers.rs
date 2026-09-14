@@ -235,9 +235,6 @@ test_fail!(
     "let x = (3).format(2);"
 );
 
-// float has no int-only clamp
-test_fail!(float_no_clamp, "let x = (3.5).clamp(1.0, 10.0);");
-
 // arity / type mismatches
 test_fail!(
     method_arity_and_type_mismatches,
@@ -299,3 +296,16 @@ test_run!(
 
 // PI is float, not int -- binding it to an int slot must be rejected
 test_fail!(math_pi_not_int, "use std::math::PI; let _: int = PI;");
+
+test_run!(
+    float_trig_and_friends,
+    "(0.0).sin()" => "0",
+    "(0.0).cos()" => "1",
+    "(1.0).atan2(1.0) * 4.0 == std::math::PI" => "true",
+    "(2.0).pow(10.0)" => "1024",
+    "(1.0).exp().ln()" => "1",
+    "(5.5).clamp(0.0, 1.0)" => "1",
+    "(-2.5).clamp(0.0, 1.0)" => "0",
+    "(-3.0).signum()" => "-1",
+    "std::math::TAU == 2.0 * std::math::PI" => "true",
+);
