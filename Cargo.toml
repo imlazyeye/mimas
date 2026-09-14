@@ -6,7 +6,7 @@ members = ["crates/*", "examples/*"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/imlazyeye/mimas"
 homepage = "https://mim.as"
-rust-version = "1.85"
+rust-version = "1.95"
 
 [profile.release]
 lto = "fat"
