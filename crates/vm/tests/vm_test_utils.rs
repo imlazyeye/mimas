@@ -1,7 +1,45 @@
 #![allow(dead_code, unused_macros, unused_imports)]
 
+use std::cell::RefCell;
+
 pub use vm::Captured;
-use vm::Vm;
+use vm::{Ctx, Stashed, Val, Vm};
+
+#[derive(Default)]
+struct Kept(RefCell<Vec<Stashed>>);
+
+fn keep<'gc>(ctx: Ctx<'gc>, f: Val<'gc>) {
+    ctx.fixture::<Kept>().0.borrow_mut().push(ctx.stash(f));
+}
+
+pub fn with_keep(source: &str) -> Vm {
+    Vm::execute(source, |api| api.add_named("keep", keep)).unwrap()
+}
+
+pub fn kept(vm: &Vm) -> Stashed {
+    vm.fixture::<Kept>().0.borrow_mut().remove(0)
+}
+
+#[derive(Default)]
+pub struct Arities(pub RefCell<Vec<Option<usize>>>);
+
+pub fn arity<'gc>(ctx: Ctx<'gc>, f: Val<'gc>) {
+    let arity = f.signature(ctx).map(|header| header.parameters.len());
+    ctx.fixture::<Arities>().0.borrow_mut().push(arity);
+}
+
+#[vm::native]
+fn untyped<'gc>(_ctx: Ctx<'gc>, v: Val<'gc>) -> Val<'gc> {
+    v
+}
+
+pub fn dynamic_call(source: &str) -> Result<(), String> {
+    let result = Vm::execute(source, |api| api.add_named("untyped", untyped));
+    match result {
+        Ok(_) => Ok(()),
+        Err(err) => Err(err.0.to_string()),
+    }
+}
 
 #[track_caller]
 pub fn assert_output(source: &str, expected: Captured) {

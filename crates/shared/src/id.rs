@@ -1,9 +1,15 @@
 use std::{fmt::Debug, marker::PhantomData};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct IdVec<I: Id, T> {
     inner: Vec<T>,
     _marker: PhantomData<I>,
+}
+
+impl<I: Id, T> Default for IdVec<I, T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<I: Id, T> IdVec<I, T> {

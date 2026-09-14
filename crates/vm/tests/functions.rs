@@ -1,7 +1,8 @@
 #[macro_use]
 mod vm_test_utils;
 
-use vm::{Captured::*, Ctx, Val, Vm};
+use vm::{Captured::*, Vm};
+use vm_test_utils::{Arities, arity, dynamic_call, kept, with_keep};
 
 test_vm!(
     return_int,
@@ -202,7 +203,7 @@ fn host_sees_root_items_but_not_methods() {
 }
 
 #[test]
-fn host_reaches_pub_module_items_by_path() {
+fn host_reaches_module_items_by_path() {
     let files = &[
         (
             "util",
@@ -215,12 +216,58 @@ fn host_reaches_pub_module_items_by_path() {
     assert_eq!(vm.call::<i64>("value", ()).unwrap(), 1);
     assert_eq!(vm.call::<i64>("util::value", ()).unwrap(), 2);
     assert_eq!(vm.call::<i64>("util::deep::value", ()).unwrap(), 4);
-    assert!(vm.root().function("util::hidden").is_none());
-    assert!(vm.root().function("hidden").is_none());
+    assert_eq!(vm.call::<i64>("util::hidden", ()).unwrap(), 3);
     let util = vm.root().module("util").unwrap();
+    assert_eq!(util.function("hidden").unwrap().vis, vm::Vis::Private);
+    assert_eq!(util.function("value").unwrap().vis, vm::Vis::Public);
+    assert!(vm.root().function("hidden").is_none());
     assert_eq!(util.constants["STEP"], vm::Constant::Int(2));
     assert!(util.module("deep").is_some());
     assert!(vm.root().module("std").is_none());
+}
+
+#[test]
+fn host_reaches_declared_items() {
+    const SOURCE: &str = "
+        struct Tally { n: int }
+        impl Tally {
+            fn bump(self, by: int) -> int { self.n += by; self.n }
+            fn make() -> Tally { Tally { n = 0 } }
+        }
+        enum Mood { Good, Bad }
+        impl Mood { fn label(self) -> str { \"mood\" } }
+        struct Pair(int);
+    ";
+    let vm = vm::Vm::execute(SOURCE, |_| {}).unwrap();
+    let tally = vm.root().ty("Tally").unwrap();
+    assert_eq!(tally.fields, ["n"]);
+    let names: Vec<&str> = tally.methods.keys().map(String::as_str).collect();
+    assert_eq!(names, ["bump", "make"]);
+    // a method counts its own `self` as parameter 0, an assoc fn has none
+    assert_eq!(
+        vm.root()
+            .method("Tally::bump")
+            .unwrap()
+            .header
+            .parameters
+            .len(),
+        2
+    );
+    assert_eq!(
+        vm.root()
+            .method("Tally::make")
+            .unwrap()
+            .header
+            .parameters
+            .len(),
+        0
+    );
+    // a tuple struct names its members by index, an enum has no fields of its own
+    assert_eq!(vm.root().ty("Pair").unwrap().fields, ["0"]);
+    assert!(vm.root().ty("Mood").unwrap().fields.is_empty());
+    assert!(vm.root().method("Mood::label").is_some());
+    // a method isn't a fn of the module that declared it
+    assert!(vm.root().function("bump").is_none());
 }
 
 #[test]
@@ -260,19 +307,6 @@ fn host_call_then_runs_in_the_arena_and_faults_recover() {
 
 #[test]
 fn dynamic_calls_fault() {
-    #[vm::native]
-    fn untyped<'gc>(_ctx: Ctx<'gc>, v: Val<'gc>) -> Val<'gc> {
-        v
-    }
-
-    fn dynamic_call(source: &str) -> Result<(), String> {
-        let result = Vm::execute(source, |api| api.add_named("untyped", untyped));
-        match result {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.0.to_string()),
-        }
-    }
-
     const F: &str = "let f = untyped(|n: int| { n + 1; });";
     let many = dynamic_call(&format!("{F} f(1, 2, 3);")).unwrap_err();
     assert!(many.contains("takes 1 arguments, got 3"), "{many}");
@@ -284,6 +318,114 @@ fn dynamic_calls_fault() {
         let err = dynamic_call(source).unwrap_err();
         assert!(err.contains("isn't a function"), "{source}: {err}");
     }
+}
+
+#[test]
+fn host_call_stashed_closure_cross_collection() {
+    const SOURCE: &str = "
+        let step = 10;
+        keep(|n: int| -> int { n + step });
+        fn churn() -> int { 
+            let n = 0; 
+            for i in 500 { 
+                let xs = [i, i, i]; 
+                n += xs[2]; 
+            } 
+            n 
+        }
+    ";
+    let mut vm = with_keep(SOURCE);
+    let add_step = kept(&vm);
+    assert_eq!(vm.call_value::<i64>(&add_step, (5,)).unwrap(), 15);
+    // we're basically just forcing a gc run
+    for _ in 0..8 {
+        vm.call::<i64>("churn", ()).unwrap();
+    }
+    assert_eq!(vm.call_value::<i64>(&add_step, (1,)).unwrap(), 11);
+}
+
+#[test]
+fn host_calls_stashed_method() {
+    const SOURCE: &str = "
+        struct Tally { n: int }
+        impl Tally { 
+            fn bump(self, by: int) -> int { 
+                self.n += by; 
+                self.n 
+            } 
+        }
+        let tally = Tally { n = 1 };
+        keep(Tally::bump);
+        keep(tally);
+    ";
+    let mut vm = with_keep(SOURCE);
+    let (bump, tally) = (kept(&vm), kept(&vm));
+    assert_eq!(vm.call_value::<i64>(&bump, (&tally, 2)).unwrap(), 3);
+}
+
+#[test]
+fn value_reports_its_own_sig() {
+    const SOURCE: &str = "
+        struct Tally { n: int }
+        impl Tally { 
+            fn bump(self, by: int) -> int { 
+                self.n += by; 
+                self.n 
+            } 
+        }
+        struct Pair(int);
+        fn two(a: int, b: int) -> int { a + b }
+        arity(two);
+        arity(Tally::bump);
+        arity(|n: int| { n });
+        arity(Pair);
+        arity(4);
+    ";
+    let vm = Vm::execute(SOURCE, |api| api.add_named("arity", arity)).unwrap();
+    let noted = vm.fixture::<Arities>();
+    assert_eq!(
+        *noted.0.borrow(),
+        [Some(2), Some(2), Some(1), None, None],
+        "fn, method, closure, ctor, int"
+    );
+}
+#[test]
+fn ctor_value_has_no_body() {
+    const F: &str = "struct Pair(int); let f = untyped(Pair);";
+    for call in ["f();", "f(1);"] {
+        let err = dynamic_call(&format!("{F} {call}")).unwrap_err();
+        assert!(err.contains("isn't a function"), "{call}: {err}");
+    }
+}
+
+#[test]
+fn value_with_no_body_is_rejected() {
+    const SOURCE: &str = "
+        struct Pair(int);
+        keep(Pair);
+        fn seven() -> int { 7 }
+    ";
+    let mut vm = with_keep(SOURCE);
+    let ctor = kept(&vm);
+    let err = vm.call_value::<i64>(&ctor, (1,)).unwrap_err();
+    assert!(err.to_string().contains("no function body"), "{err}");
+    assert_eq!(vm.call::<i64>("seven", ()).unwrap(), 7);
+}
+
+#[test]
+fn fault_through_call_value() {
+    const SOURCE: &str = "
+        keep(|| { let xs = [1]; xs[5] });
+        fn seven() -> int { 7 }
+    ";
+    let mut vm = with_keep(SOURCE);
+    let boom = kept(&vm);
+    for _ in 0..3 {
+        let faulted =
+            vm.call_value_then::<i64, _>(&boom, (), |_| unreachable!("then ran after a fault"));
+        assert!(faulted.is_err());
+    }
+    assert_eq!(vm.call::<i64>("seven", ()).unwrap(), 7);
 }
 
 // regression check for #10

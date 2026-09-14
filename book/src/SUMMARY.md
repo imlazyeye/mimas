@@ -41,4 +41,5 @@
   - [Runtime Errors](./extension/runtime-errors.md)
   - [Fixtures & Context](./extension/fixtures-and-context.md)
   - [Freeze](./extension/freeze.md)
+  - [Function Values](./extension/function-values.md)
   - [Advanced Usage](./extension/advanced-usage.md)

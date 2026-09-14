@@ -317,10 +317,11 @@ impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
     }
 
     /// A module fn whose signature is only known at runtime, like [`Api::add_assoc_described`].
+    /// A `None` parameter takes any value, the way `print` does.
     pub fn add_described(
         &mut self,
         name: impl Into<String>,
-        parameters: Vec<Ty>,
+        parameters: Vec<Option<Ty>>,
         return_ty: Ty,
         call: impl for<'g> Fn(Ctx<'g>, &[Val<'g>]) -> RtResult<Val<'g>> + 'static,
     ) {
@@ -328,7 +329,7 @@ impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
         let id = self.parent.library.function(ApiFunction {
             name: name.into(),
             module: self.path.clone(),
-            parameters: parameters.into_iter().map(Some).collect(),
+            parameters,
             return_ty: Some(return_ty),
             doc: String::new(),
             call: (),

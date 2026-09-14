@@ -19,6 +19,7 @@ pub struct Ir {
     pub bodies: IdVec<BodyId, Body>,
     pub str_interner: StrInterner,
     pub item_bodies: HashMap<DecId, BodyId>,
+    pub closure_bodies: HashMap<BodyId, NodeId>,
     pub(crate) resolutions: Resolutions,
     pub(crate) intrinsics: HashMap<NativeId, Intrinsic>,
 
@@ -40,6 +41,7 @@ impl Ir {
             current_body: BodyId::ZERO,
             body_stack: Vec::new(),
             item_bodies: HashMap::new(),
+            closure_bodies: HashMap::new(),
             current_loc: Location::SYNTHETIC,
         }
     }

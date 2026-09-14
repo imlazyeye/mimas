@@ -25,9 +25,9 @@ pub use ::glam;
 // re-exports the MimasEnum / MimasStruct derives resolve against -- saves user crates from
 // depending on mimas-api / mimas-shared directly.
 pub use ::api::{AdtBinding, ApiAdtKind, ApiVariantFields, Registry};
-pub use ::compile::{Constant, Function, Module};
+pub use ::compile::{Constant, Function, Module, Type, Vis};
 pub use ::macros::{MimasEnum, MimasStruct, mimas, native};
-pub use ::shared::{Literal, Ty};
+pub use ::shared::{BodyId, FnHeader, Literal, Ty};
 pub use conversion::{Arg, Args};
 
 // the `#[mimas]` attribute macro expands to `vm::inventory::submit!{ ... }`, so the inventory

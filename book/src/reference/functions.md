@@ -78,9 +78,19 @@ A no-argument closure uses an empty pair of pipes:
 let now = || current_time();
 ```
 
-```admonish note
-Functions cannot currently be passed to native functions and called. This is a high priority to be added after `v0.1.0`.
+````admonish note title="Handing a function to the host"
+A native can take a function or a closure, keep it, and call it later. A host that offers one registers whatever it wants run, rather than the script having to declare functions under names the host already knows.
+
+```mimas
+fn on_tick(n: int) { print(f"tick {n}"); }
+
+every_tick(on_tick);                  // a function by name
+every_tick(Counter::bump);            // a method, `self` filled like any parameter
+every_tick(|n: int| { print(n); });   // or a closure
 ```
+
+Whether a native does anything with a function you give it is up to the host. Writing that side is covered in [Function Values](../extension/function-values.md).
+````
 
 ### Closures vs. functions
 

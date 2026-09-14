@@ -6,12 +6,12 @@ use compile::{
     OpFormatPart, Program, Reg, UnaryOp,
 };
 use gc_arena::{Arena, Gc, Rootable};
-use shared::{Error, IdVec, StrInterner};
+use shared::{Error, FnHeader, IdVec, StrInterner};
 use smallvec::SmallVec;
 
 use crate::{
     Closure, Ctx, DictMap, Fields, Frame, INLINE_FIELDS, LocatedRtErr, RtErr, RtResult, Sources,
-    State, ThreadState, Val,
+    Stashed, State, ThreadState, Val,
     conversion::{Args, MimasType},
 };
 
@@ -48,6 +48,7 @@ pub struct Vm {
     pub(crate) entry: BodyId,
     pub(crate) code: Decoder,
     pub(crate) chunks: IdVec<BodyId, Chunk>,
+    pub(crate) signatures: Rc<IdVec<BodyId, Option<Function>>>,
     /// as in, strings from the compiler, not "c string". i know this is dumb and yet here I am
     pub(crate) c_strs: StrInterner,
     pub(crate) arena: Arena<Rootable![State<'_>]>,
@@ -69,6 +70,7 @@ impl Vm {
                 ip: 0,
             },
             chunks: IdVec::new(),
+            signatures: Rc::default(),
             c_strs: StrInterner::new(),
             arena,
             sources: Sources::new(),
@@ -77,10 +79,12 @@ impl Vm {
         }
     }
 
+    /// Load `program`, replacing whatever this Vm was running.
     pub fn load_program(&mut self, program: Program) {
         let Program {
             entry,
             chunks,
+            signatures,
             strs,
             bytes,
             root,
@@ -90,11 +94,14 @@ impl Vm {
         self.chunks = chunks;
         self.c_strs = strs;
         self.root = Rc::new(root);
+        self.install_signatures(signatures);
         let entry_chunk = &self.chunks[self.entry];
         let regs_count = entry_chunk.regs as usize;
         let entry_offset = entry_chunk.offset;
         let entry_body = self.entry;
         self.arena.mutate(|mc, state| {
+            let ctx = state.ctx(mc);
+            ctx.reset_roots();
             let mut t = state.thread.borrow_mut(mc);
             t.regs.clear();
             t.regs.resize(regs_count, Val::Null);
@@ -105,6 +112,19 @@ impl Vm {
                 return_reg: 0,
                 base: 0,
             });
+        });
+    }
+
+    /// Install `signatures` as the loaded program's table.
+    fn install_signatures(&mut self, signatures: IdVec<BodyId, Option<Function>>) {
+        self.signatures = Rc::new(signatures);
+        let signatures = Rc::clone(&self.signatures);
+        self.arena.mutate(|mc, state| {
+            *state
+                .ctx(mc)
+                .fixture::<crate::heap::Signatures>()
+                .0
+                .borrow_mut() = signatures;
         });
     }
 
@@ -128,6 +148,7 @@ impl Vm {
             let Vm {
                 code,
                 chunks,
+                signatures,
                 c_strs: strs,
                 arena,
                 sources,
@@ -136,7 +157,17 @@ impl Vm {
             let done = arena.mutate(|mc, state| {
                 let ctx = state.ctx(mc);
                 let mut thread = state.thread.borrow_mut(mc);
-                run_dispatch(ctx, code, chunks, strs, sources, &mut thread, FUEL, 1)
+                run_dispatch(
+                    ctx,
+                    code,
+                    chunks,
+                    signatures,
+                    strs,
+                    sources,
+                    &mut thread,
+                    FUEL,
+                    1,
+                )
             })?;
             if done {
                 #[cfg(feature = "op-count")]
@@ -185,6 +216,7 @@ enum Flow<'gc> {
 
 enum CallTarget<'gc> {
     Fn(BodyId),
+    Value(BodyId),
     Closure(Closure<'gc>),
 }
 
@@ -413,6 +445,7 @@ fn run_dispatch<'gc>(
     ctx: Ctx<'gc>,
     code: &mut Decoder,
     chunks: &IdVec<BodyId, Chunk>,
+    signatures: &IdVec<BodyId, Option<Function>>,
     strs: &StrInterner,
     sources: &Sources,
     thread: &mut ThreadState<'gc>,
@@ -439,6 +472,13 @@ fn run_dispatch<'gc>(
             Ok(Flow::Call { target, dst, args }) => {
                 let (body, captures): (BodyId, &[Val<'gc>]) = match &target {
                     CallTarget::Fn(b) => (*b, &[]),
+                    CallTarget::Value(b) => {
+                        if signatures.get(*b).and_then(Option::as_ref).is_none() {
+                            let kind = not_callable(Val::Fn(*b));
+                            return Err(locate(kind, op_ip, thread, chunks, sources));
+                        }
+                        (*b, &[])
+                    }
                     CallTarget::Closure(c) => {
                         let data = Gc::as_ref(c.0);
                         (data.function, &data.captures)
@@ -660,7 +700,7 @@ fn step_one<'gc>(
             let callee = Reg::decode(code);
             let len = code.u8() as usize;
             let target = match rd!(regs, callee) {
-                Val::Fn(body) => CallTarget::Fn(body),
+                Val::Fn(body) => CallTarget::Value(body),
                 Val::Closure(closure) => CallTarget::Closure(closure),
                 other => return Err(not_callable(other)),
             };
@@ -885,6 +925,65 @@ fn not_callable(callee: Val<'_>) -> RtErr {
     RtErr::NotCallable {
         callee: callee.capture(),
     }
+}
+
+/// The argument values of a host call, with any trailing parameter the caller left off filled from
+/// the fn's own default.
+fn call_args<'gc>(
+    ctx: Ctx<'gc>,
+    strs: &StrInterner,
+    f: &Function,
+    args: impl Args,
+) -> Vec<Val<'gc>> {
+    let mut values = args.into_values(ctx);
+    for default in f.defaults.iter().skip(values.len()).flatten() {
+        values.push(constant_to_val(default.clone(), ctx, strs));
+    }
+    values
+}
+
+/// Run `body` to its return as if the entry frame had called it and hand back what it returned.
+/// A fault unwinds to the pre-call depth so the Vm is still usable afterwards.
+#[allow(clippy::too_many_arguments)]
+fn inject_call<'gc>(
+    ctx: Ctx<'gc>,
+    code: &mut Decoder,
+    chunks: &IdVec<BodyId, Chunk>,
+    signatures: &IdVec<BodyId, Option<Function>>,
+    strs: &StrInterner,
+    sources: &Sources,
+    body: BodyId,
+    values: &[Val<'gc>],
+    captures: &[Val<'gc>],
+) -> Result<Val<'gc>, Error> {
+    let mut thread = ctx.thread().borrow_mut(&ctx);
+    let base = thread.frames.last().unwrap().base;
+    let (depth, regs, ip) = (thread.frames.len(), thread.regs.len(), code.ip);
+    // the callee returns into r0 of the entry body, which still needs its own value
+    let r0 = thread.regs[base];
+    // nothing is mutated before this fails, so the thread is untouched and needs no unwinding
+    enter_call(&mut thread, code, chunks, body, Reg::ZERO, values, captures).map_err(Error::msg)?;
+    let ran = run_dispatch(
+        ctx,
+        code,
+        chunks,
+        signatures,
+        strs,
+        sources,
+        &mut thread,
+        usize::MAX,
+        depth + 1,
+    );
+    // a fault returns without unwinding, so the callee's frames are still stacked
+    if ran.is_err() {
+        thread.frames.truncate(depth);
+        thread.regs.truncate(regs);
+        code.ip = ip;
+    }
+    let value = std::mem::replace(&mut thread.regs[base], r0);
+    drop(thread);
+    ran?;
+    Ok(value)
 }
 
 /// Attach a source location to a runtime fault. `op_ip` is the byte the faulting op was decoded
@@ -1350,6 +1449,12 @@ impl Vm {
         &self.registry
     }
 
+    /// The signature of a script fn or closure `body`, for a function value the host only knows
+    /// by its [`BodyId`]. `None` for a body with no fn type of its own.
+    pub fn signature(&self, body: BodyId) -> Option<&FnHeader> {
+        self.signatures.get(body)?.as_ref().map(|f| &f.header)
+    }
+
     /// Calls a fn by `::` path (`"update"`, `"game::tick"`) once the program has [run](Self::run).
     /// Arguments and `R` are checked against the signature first; trailing defaults may be left
     /// out; a fault leaves the Vm usable.
@@ -1400,6 +1505,7 @@ impl Vm {
         let Vm {
             code,
             chunks,
+            signatures,
             c_strs: strs,
             arena,
             sources,
@@ -1407,39 +1513,94 @@ impl Vm {
         } = self;
         let result = arena.mutate(|mc, state| {
             let ctx = state.ctx(mc);
-            let mut values = args.into_values(ctx);
-            for default in f.defaults.iter().skip(values.len()).flatten() {
-                values.push(constant_to_val(default.clone(), ctx, strs));
-            }
-
-            let mut thread = state.thread.borrow_mut(mc);
-            let base = thread.frames.last().unwrap().base;
-            let (depth, regs, ip) = (thread.frames.len(), thread.regs.len(), code.ip);
-            // the callee returns into r0 of the entry body, which still needs its own value
-            let r0 = thread.regs[base];
-            // nothing is mutated before this fails, so the thread is untouched and needs no
-            // unwinding
-            enter_call(&mut thread, code, chunks, f.body, Reg::ZERO, &values, &[])
-                .map_err(Error::msg)?;
-            let ran = run_dispatch(
+            let values = call_args(ctx, strs, f, args);
+            let value = inject_call(
                 ctx,
                 code,
                 chunks,
+                signatures,
                 strs,
                 sources,
-                &mut thread,
-                usize::MAX,
-                depth + 1,
-            );
-            // a fault returns without unwinding, so the callee's frames are still stacked
-            if ran.is_err() {
-                thread.frames.truncate(depth);
-                thread.regs.truncate(regs);
-                code.ip = ip;
+                f.body,
+                &values,
+                &[],
+            )?;
+            let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
+            Ok((value, then(ctx)))
+        });
+        self.arena.collect_debt();
+        result
+    }
+
+    /// [`call_function`](Self::call_function) for a function value the script handed over through
+    /// [`Ctx::stash`] -- a fn, or a closure, which is called with whatever it captured. Argument
+    /// and return types aren't checked: read the shape with [`signature`](Self::signature) first
+    /// if the value came from somewhere the host doesn't control.
+    pub fn call_value<R: for<'gc> MimasType<'gc>>(
+        &mut self,
+        f: &Stashed,
+        args: impl Args,
+    ) -> Result<R, Error> {
+        self.call_value_then(f, args, |_| ())
+            .map(|(value, ())| value)
+    }
+
+    /// [`call_value`](Self::call_value), then `then` with the arena still open, the way
+    /// [`call_then`](Self::call_then) follows [`call`](Self::call).
+    pub fn call_value_then<R, T>(
+        &mut self,
+        f: &Stashed,
+        args: impl Args,
+        then: impl for<'gc> FnOnce(Ctx<'gc>) -> T,
+    ) -> Result<(R, T), Error>
+    where
+        R: for<'gc> MimasType<'gc>,
+    {
+        let Vm {
+            code,
+            chunks,
+            c_strs: strs,
+            arena,
+            sources,
+            signatures,
+            ..
+        } = self;
+        let result = arena.mutate(|mc, state| {
+            let ctx = state.ctx(mc);
+            // a handle from a superseded program names a body that means something else now, so
+            // it's rejected here rather than left to `fetch`, which panics on one
+            if !ctx.holds(f) {
+                return Err(miette::miette!(
+                    "the host called a function value stashed against a program that is no longer \
+                     loaded"
+                ));
             }
-            let value = std::mem::replace(&mut thread.regs[base], r0);
-            drop(thread);
-            ran?;
+            let (body, captures) = match ctx.fetch(f) {
+                Val::Fn(body) => (body, &[] as &[_]),
+                Val::Closure(closure) => (
+                    closure.0.function,
+                    Gc::as_ref(closure.0).captures.as_slice(),
+                ),
+                other => {
+                    return Err(miette::miette!(
+                        "the host called `{}`, which isn't a function",
+                        ctx.display(other)
+                    ));
+                }
+            };
+            // a tuple struct's name is a `Val::Fn` too, carrying a header the solver synthesized
+            // and no body to enter -- having a signature is what tells a real fn apart
+            let Some(signature) = signatures.get(body).and_then(Option::as_ref) else {
+                return Err(miette::miette!(
+                    "the host called `{}`, which has no function body",
+                    ctx.display(ctx.fetch(f))
+                ));
+            };
+            // `enter_call` is what rejects a wrong argument count, for the host and script alike
+            let values = call_args(ctx, strs, signature, args);
+            let value = inject_call(
+                ctx, code, chunks, signatures, strs, sources, body, &values, captures,
+            )?;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))
         });
@@ -1485,6 +1646,22 @@ impl Vm {
     where
         F: for<'gc> FnOnce(&mut crate::api::Api<'_, 'gc>),
     {
+        let mut vm = Self::new();
+        let library = vm.install_library(install_lib);
+        let (program, sources) = Self::build_program(files, &library)?;
+
+        vm.load_program(program);
+        vm.set_sources(sources);
+        vm.registry = library.into_registry();
+        Ok(vm)
+    }
+
+    /// The entire compilation process -- parse, solve and compile `files` against `library`, which
+    /// is the set of natives the resulting program is built to line up with.
+    fn build_program(
+        files: &[(&str, &str)],
+        library: &::api::Library<()>,
+    ) -> std::result::Result<(Program, Sources), ExecuteError> {
         use parse::{Parser, lex::Lexer};
         use solve::{Resolutions, Solver};
 
@@ -1499,11 +1676,8 @@ impl Vm {
             );
         }
 
-        let mut vm = Self::new();
-        let library = vm.install_library(install_lib);
-
         let mut solver = Solver::new();
-        solver.install_library(&library);
+        solver.install_library(library);
         solver.set_sources(sources.clone());
         solver.solve_all(asts.iter())?;
 
@@ -1516,12 +1690,7 @@ impl Vm {
             library.intrinsics().iter().map(|(a, b)| (*a, *b)).collect(),
         );
         ir.lower(&stmts);
-        let program = compile::Compiler::new().compile(ir);
-
-        vm.load_program(program);
-        vm.set_sources(sources);
-        vm.registry = library.into_registry();
-        Ok(vm)
+        Ok((compile::Compiler::new().compile(ir), sources))
     }
 }
 

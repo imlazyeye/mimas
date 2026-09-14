@@ -19,8 +19,7 @@ pub struct Resolutions {
     pub root: ResolvedModule,
 }
 
-/// The fns and consts the script declares at the top of a file, and the `pub` ones of each
-/// module, in declaration order.
+/// Everything a file or module declares, in declaration order.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedModule {
     pub items: IndexMap<String, DecId>,
@@ -36,7 +35,6 @@ impl ResolvedModule {
             .into_iter()
             .flatten()
             .map(|(name, &dec)| (name.clone(), dec))
-            .filter(|&(_, dec)| root || solver.decs[dec].vis == Vis::Public)
             .collect();
         let children: Vec<(String, AdtId)> = if root {
             solver
@@ -69,6 +67,7 @@ pub struct ResolvedDecl {
     pub name: String,
     pub ty: Ty,
     pub kind: ResolvedDeclKind,
+    pub vis: Vis,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,6 +155,7 @@ impl From<Solver> for Resolutions {
 
         let mut resolved_decs: IdVec<DecId, ResolvedDecl> = IdVec::new();
         for ((id, dec), ty) in solver.decs.into_iter().zip(tys) {
+            let vis = dec.vis;
             let kind = match dec.kind {
                 DecKind::Local | DecKind::LoopVar => ResolvedDeclKind::Local,
                 DecKind::Item { defaults } => ResolvedDeclKind::Item {
@@ -179,6 +179,7 @@ impl From<Solver> for Resolutions {
                 name: dec.name,
                 ty,
                 kind,
+                vis,
             });
         }
 

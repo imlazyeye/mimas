@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use parse::AccessKind;
 use shared::{Error, FnHeader, IdVec, Location, Result, StrId, StrInterner, Ty};
 use solve::components::AdtId;
+pub use solve::components::Vis;
 
 use crate::{
     BinOp, BlockTarget, BodyId, Constant, ConstantCode, OpCode, OpFormatPart, OpFormatPartCode,
@@ -14,17 +15,19 @@ use crate::{
 pub struct Program {
     pub entry: BodyId,
     pub chunks: IdVec<BodyId, Chunk>,
+    pub signatures: IdVec<BodyId, Option<Function>>,
     pub strs: StrInterner,
     pub bytes: Vec<u8>,
     pub root: Module,
 }
 
-/// The items a host can reach in a script -- every fn and const at the root, and the `pub` ones of
-/// each module, in declaration order.
+/// Everything a script declares, in declaration order: the fns, consts, types, and modules of
+/// each scope.
 #[derive(Debug, Clone, Default)]
 pub struct Module {
     pub functions: IndexMap<String, Function>,
     pub constants: IndexMap<String, Constant>,
+    pub types: IndexMap<String, Type>,
     pub modules: IndexMap<String, Module>,
 }
 
@@ -37,15 +40,40 @@ impl Module {
         }
     }
 
+    /// Looks a type up by `::` path, so `"Foo"` and `"game::Foo"` both work.
+    pub fn ty(&self, path: &str) -> Option<&Type> {
+        match path.rsplit_once("::") {
+            Some((module, name)) => self.module(module)?.types.get(name),
+            None => self.types.get(path),
+        }
+    }
+
+    /// Looks a method up by `::` path, so `"Foo::bar"` and `"game::Foo::bar"` both work.
+    pub fn method(&self, path: &str) -> Option<&Function> {
+        let (ty, name) = path.rsplit_once("::")?;
+        self.ty(ty)?.methods.get(name)
+    }
+
     pub fn module(&self, path: &str) -> Option<&Module> {
         path.split("::")
             .try_fold(self, |module, name| module.modules.get(name))
     }
 }
 
+/// A struct or enum the script declared with whatever its `impl` blocks put on it.
+#[derive(Debug, Clone, Default)]
+pub struct Type {
+    pub vis: Vis,
+    /// Field names in declaration order, or the indices of a tuple struct. Empty for an enum.
+    pub fields: Vec<String>,
+    /// Sorted by name, since the solver doesn't keep impls in declaration order.
+    pub methods: IndexMap<String, Function>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Function {
     pub body: BodyId,
+    pub vis: Vis,
     pub header: FnHeader,
     pub defaults: Vec<Option<Constant>>,
 }

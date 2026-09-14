@@ -1,8 +1,19 @@
 use api::AdtBinding;
-use compile::BodyId;
-use gc_arena::{Collect, Gc, GcWeak, Mutation, lock::RefLock};
+use compile::{BodyId, Function};
+use gc_arena::{
+    Collect, DynamicRoot, DynamicRootSet, Gc, GcWeak, Mutation, Rootable,
+    lock::{Lock, RefLock},
+};
 use rustc_hash::FxHashMap;
-use std::{any::TypeId, fmt::Write as _, ops, sync::Arc};
+use shared::{FnHeader, IdVec};
+use std::{
+    any::TypeId,
+    cell::{Ref, RefCell},
+    fmt::Write as _,
+    ops,
+    rc::Rc,
+    sync::Arc,
+};
 
 use crate::{
     Fields,
@@ -67,6 +78,9 @@ pub struct State<'gc> {
     pub natives: Gc<'gc, RefLock<Vec<Option<crate::native::NativeRef<'gc>>>>>,
     pub mimas_bindings: Gc<'gc, RefLock<MimasBindings>>,
     pub fixtures: Gc<'gc, crate::fixtures::Fixtures>,
+    /// Swapped for a fresh set every time a program is loaded, which is what invalidates the
+    /// handles the host took out against the previous one -- see `Ctx::reset_roots`.
+    pub roots: Gc<'gc, Lock<DynamicRootSet<'gc>>>,
 }
 
 impl<'gc> State<'gc> {
@@ -87,6 +101,7 @@ impl<'gc> State<'gc> {
             natives,
             mimas_bindings,
             fixtures,
+            roots: Gc::new(mc, Lock::new(DynamicRootSet::new(mc))),
         }
     }
 
@@ -132,6 +147,58 @@ impl<'gc> Ctx<'gc> {
 
     pub fn thread(self) -> Thread<'gc> {
         self.state.thread
+    }
+
+    /// Hand a value to the host. The returned handle has no `'gc` of its own, so it can be held
+    /// across collections and later read back with [`Ctx::fetch`] or called with
+    /// [`Vm::call_value`](crate::Vm::call_value). It keeps the value -- and, for a closure,
+    /// everything it captured -- alive for as long as it lives.
+    pub fn stash(self, value: Val<'gc>) -> Stashed {
+        let rooted = Gc::new(self.mutation, value);
+        Stashed(
+            self.state
+                .roots
+                .get()
+                .stash::<Rootable![Val<'_>]>(self.mutation, rooted),
+        )
+    }
+
+    /// Read a [`Stashed`] value back. Panics if the handle isn't one this Vm can still honor --
+    /// either it was stashed into a different Vm, or the program it was taken against has since
+    /// been replaced by [`Vm::load_program`](crate::Vm::load_program). Check
+    /// [`holds`](Self::holds) first when the handle's provenance isn't certain.
+    pub fn fetch(self, stashed: &Stashed) -> Val<'gc> {
+        match self.state.roots.get().try_fetch(&stashed.0) {
+            Ok(value) => *value,
+            // gc-arena's own panic just says "mismatched root set", which doesn't hint at the
+            // reload -- by far the likelier of the two ways to get here
+            Err(_) => panic!(
+                "stashed handle doesn't belong to this Vm's loaded program: it was stashed into \
+                 another Vm, or taken against a program that has since been replaced"
+            ),
+        }
+    }
+
+    /// Whether [`fetch`](Self::fetch) would still honor `stashed`. False for a handle from another
+    /// Vm, and for one taken against a program that has since been replaced.
+    pub fn holds(self, stashed: &Stashed) -> bool {
+        self.state.roots.get().contains(&stashed.0)
+    }
+
+    /// Drop every root, invalidating all outstanding [`Stashed`] handles. A handle names a body in
+    /// the program it was taken against, which means something else entirely in the next one, so
+    /// loading a program resets the set rather than letting stale handles index into it.
+    pub(crate) fn reset_roots(self) {
+        self.state
+            .roots
+            .set(self.mutation, DynamicRootSet::new(self.mutation));
+    }
+
+    /// The signature of a script fn or closure `body`. `None` for a body with no fn type of its
+    /// own. Given a function value rather than a `BodyId`, reach for [`Val::signature`] instead.
+    pub fn signature(self, body: BodyId) -> Option<Ref<'gc, FnHeader>> {
+        let table = self.fixture::<Signatures>().0.borrow();
+        Ref::filter_map(table, |table| table.get(body)?.as_ref().map(|f| &f.header)).ok()
     }
 
     pub fn new_array(self, items: Vec<Val<'gc>>) -> Array<'gc> {
@@ -271,3 +338,19 @@ impl<'gc> Ctx<'gc> {
         }
     }
 }
+
+/// A [`Val`] the host is holding onto, from [`Ctx::stash`]. Dropping it lets the value be
+/// collected again.
+///
+/// A handle belongs to the program it was taken against. Loading another one invalidates every
+/// outstanding handle, and fetching or calling a stale one fails rather than reaching into
+/// whatever the new program happens to have at that body.
+pub struct Stashed(DynamicRoot<Rootable![Val<'_>]>);
+
+/// The loaded program's per-body signatures, shared between the Vm and any native that gets handed
+/// a function value. A per-Vm fixture, so a native can reach it from a [`Ctx`] alone.
+///
+/// The Vm holds the same `Rc`, and both are written only by `Vm::install_signatures` -- reading a
+/// table here that the Vm has moved on from would mean natives reporting the wrong signatures.
+#[derive(Default)]
+pub(crate) struct Signatures(pub RefCell<Rc<IdVec<BodyId, Option<Function>>>>);

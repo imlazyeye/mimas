@@ -55,6 +55,12 @@ impl<'a> HoistCtx<'a> {
             .solver
             .dec_id(ident, ty.clone(), DecKind::Adt(adt_id), self.vis);
         self.solver.ribs.module_mut().insert(ident.clone(), dec_id);
+        let module = self.solver.ribs.current_module();
+        self.solver
+            .module_items
+            .entry(module)
+            .or_default()
+            .insert(ident.lexeme.clone(), dec_id);
         if let Some(node_id) = self.node_id {
             self.solver.node_decs.insert(node_id, dec_id);
             let vid = self.solver.node_vid(node_id);

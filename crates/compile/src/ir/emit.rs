@@ -603,6 +603,7 @@ impl Emit for Closure {
             .collect();
 
         let bid = ir.bodies.push(crate::ir::Body::new());
+        ir.closure_bodies.insert(bid, id);
 
         ir.in_body(bid, |ir| {
             let capture_locals: Vec<_> = captured_decs.iter().map(|&d| ir.local_for(d)).collect();

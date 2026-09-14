@@ -431,6 +431,18 @@ impl Arg for &str {
     }
 }
 
+/// Passing back a value the host was handed earlier, which is the only way to reach one whose type
+/// only exists in the script -- a struct it declared, say.
+impl Arg for &crate::Stashed {
+    fn arg_ty(_: &Registry) -> Option<Ty> {
+        None
+    }
+
+    fn into_arg<'gc>(self, ctx: Ctx<'gc>) -> Val<'gc> {
+        ctx.fetch(self)
+    }
+}
+
 /// The arguments of a host call into a script, as a tuple of [`Arg`]s: `()`, `(a,)`, `(a, b)`,
 /// up to eight.
 pub trait Args {
