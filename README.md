@@ -28,7 +28,7 @@ syntax and ergonomics, reshaping the rest to deliver what a scripting layer is g
 iteration, quick compile times, and runtime flexibility — without trading away the safety that keeps
 you out of the debugger.
 
-```mimas
+```rust
 enum Shape {
     Circle(float),
     Rect(float, float),
