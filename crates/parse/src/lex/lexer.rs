@@ -423,9 +423,14 @@ impl<'s> Lex<'s, Tok<TokKind<'s>>, TokKind<'s>> for Lexer<'s> {
                     }
                 }
                 '!' => {
+                    // `!in` is the operator only when the `in` ends there: `!inside` is `!`
+                    // `inside`
+                    let rest = &self.source()[self.char_stream().peek_position()..];
+                    let not_in = rest.starts_with("in")
+                        && !rest[2..].starts_with(|c: char| c.is_alphanumeric() || c == '_');
                     if self.match_chomp('=') {
                         TokKind::BangEqual
-                    } else if self.chomp_pattern("in") {
+                    } else if not_in && self.chomp_pattern("in") {
                         TokKind::NotIn
                     } else {
                         TokKind::Bang

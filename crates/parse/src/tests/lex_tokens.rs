@@ -62,3 +62,8 @@ tok_test!(compound_assigns: "+= -= *= /= %= |= &= ^= ~/=" =>
 tok_test!(at_path: "@9" => At, Int(9));
 tok_test!(keyword_ident_boundary: "ifx" => Ident("ifx"));
 tok_test!(keyword_self: "self" => SelfKeyword);
+
+tok_test!(not_in_operator: "!in" => NotIn);
+tok_test!(not_in_before_space: "!in xs" => NotIn, Ident("xs"));
+tok_test!(bang_before_in_prefixed_ident: "!inside" => Bang, Ident("inside"));
+tok_test!(bang_before_in_ident: "!in_range" => Bang, Ident("in_range"));
