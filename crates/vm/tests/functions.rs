@@ -1,7 +1,7 @@
 #[macro_use]
 mod vm_test_utils;
 
-use vm::Captured::*;
+use vm::{Captured::*, Ctx, Val, Vm};
 
 test_vm!(
     return_int,
@@ -256,6 +256,34 @@ fn host_call_then_runs_in_the_arena_and_faults_recover() {
         assert!(faulted.is_err());
     }
     assert_eq!(vm.call::<i64>("seven", ()).unwrap(), 7);
+}
+
+#[test]
+fn dynamic_calls_fault() {
+    #[vm::native]
+    fn untyped<'gc>(_ctx: Ctx<'gc>, v: Val<'gc>) -> Val<'gc> {
+        v
+    }
+
+    fn dynamic_call(source: &str) -> Result<(), String> {
+        let result = Vm::execute(source, |api| api.add_named("untyped", untyped));
+        match result {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err.0.to_string()),
+        }
+    }
+
+    const F: &str = "let f = untyped(|n: int| { n + 1; });";
+    let many = dynamic_call(&format!("{F} f(1, 2, 3);")).unwrap_err();
+    assert!(many.contains("takes 1 arguments, got 3"), "{many}");
+    let few = dynamic_call(&format!("{F} f();")).unwrap_err();
+    assert!(few.contains("takes 1 arguments, got 0"), "{few}");
+    dynamic_call(&format!("{F} f(1);")).unwrap();
+
+    for source in ["let f = untyped(4); f();", "let f = untyped(null); f();"] {
+        let err = dynamic_call(source).unwrap_err();
+        assert!(err.contains("isn't a function"), "{source}: {err}");
+    }
 }
 
 // regression check for #10

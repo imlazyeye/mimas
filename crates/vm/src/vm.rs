@@ -444,7 +444,9 @@ fn run_dispatch<'gc>(
                         (data.function, &data.captures)
                     }
                 };
-                enter_call(thread, code, chunks, body, dst, &args, captures);
+                if let Err(kind) = enter_call(thread, code, chunks, body, dst, &args, captures) {
+                    return Err(locate(kind, op_ip, thread, chunks, sources));
+                }
                 (regs_ptr, regs_len) = window(thread, chunks);
             }
             Ok(Flow::Return(value)) => {
@@ -660,7 +662,7 @@ fn step_one<'gc>(
             let target = match rd!(regs, callee) {
                 Val::Fn(body) => CallTarget::Fn(body),
                 Val::Closure(closure) => CallTarget::Closure(closure),
-                _ => todo!(),
+                other => return Err(not_callable(other)),
             };
             let mut args = SmallVec::<[Val; 8]>::new();
             for _ in 0..len {
@@ -842,9 +844,16 @@ fn enter_call<'gc>(
     dst: Reg,
     args: &[Val<'gc>],
     captures: &[Val<'gc>],
-) {
+) -> Result<(), RtErr> {
     let chunk = &chunks[body];
-    debug_assert_eq!(args.len(), chunk.args as usize);
+    // a dynamic call reaches here with whatever the script had in hand, so this is a real check
+    // rather than an invariant -- entering with the wrong count would read foreign registers
+    if args.len() != chunk.args as usize {
+        return Err(RtErr::WrongArity {
+            wanted: chunk.args as usize,
+            got: args.len(),
+        });
+    }
     debug_assert_eq!(captures.len(), chunk.captures.len());
     let new_base = thread.regs.len();
     // hiiiiighwayyyyy toooo theeeee danger zone (be very careful now lol)
@@ -865,6 +874,17 @@ fn enter_call<'gc>(
         base: new_base,
     });
     code.ip = chunk.offset;
+    Ok(())
+}
+
+/// The callee of a dynamic call wasn't a fn or a closure. Cold so the `Call` arm's shared frame
+/// doesn't pay for the capture.
+#[cold]
+#[inline(never)]
+fn not_callable(callee: Val<'_>) -> RtErr {
+    RtErr::NotCallable {
+        callee: callee.capture(),
+    }
 }
 
 /// Attach a source location to a runtime fault. `op_ip` is the byte the faulting op was decoded
@@ -1397,7 +1417,10 @@ impl Vm {
             let (depth, regs, ip) = (thread.frames.len(), thread.regs.len(), code.ip);
             // the callee returns into r0 of the entry body, which still needs its own value
             let r0 = thread.regs[base];
-            enter_call(&mut thread, code, chunks, f.body, Reg::ZERO, &values, &[]);
+            // nothing is mutated before this fails, so the thread is untouched and needs no
+            // unwinding
+            enter_call(&mut thread, code, chunks, f.body, Reg::ZERO, &values, &[])
+                .map_err(Error::msg)?;
             let ran = run_dispatch(
                 ctx,
                 code,
