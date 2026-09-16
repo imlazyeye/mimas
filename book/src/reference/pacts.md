@@ -75,6 +75,35 @@ print(Dog { tag = "rex" }.hello()); // "hi, rex"
 
 A default body can call the pact's other methods through `self`, including ones the implementer supplies. An impl that defines the method itself overrides the default.
 
+## `Self`
+
+Inside a pact `Self` is the implementing type. A method that works on two values of the same type spells the second one `Self`, and each implementer puts its own type there:
+
+```mimas
+pact Plus {
+    fn plus(self, other: Self) -> Self;
+}
+
+struct V { x: int }
+impl Plus for V {
+    fn plus(self, other: V) -> V {
+        V { x = self.x + other.x }
+    }
+}
+
+struct W { y: int }
+impl Plus for W {
+    fn plus(self, other: W) -> W {
+        W { y = self.y + other.y }
+    }
+}
+
+V { x = 1 }.plus(V { x = 2 }); // V { x = 3 }
+V { x = 1 }.plus(W { y = 2 }); // error: expected Self but found W
+```
+
+`Self` is not the same as writing the pact's name. `other: Plus` means any implementer at all; `other: Self` means the receiver's own type, and an impl has to name exactly that type -- `impl Plus for V` can't take `other: W`. Inside a default body, `self` has type `Self`, so it can be passed wherever the pact asks for `Self`, and also wherever it asks for the pact itself, since a `Self` is always an implementer.
+
 ## Reaching pact methods through a value
 
 Without generics, mimas can't lean on Rust's `T::ITEM` syntax to reach an item on a constrained type. This is why [dot access reaches associated items](./types/structs.md#reaching-items-through-a-value) -- given a value known only by its pact, `.` is how you get at its methods.
@@ -123,6 +152,16 @@ pact Named {
 }
 ```
 
-**`Self::` doesn't resolve inside a default body.** A default body is compiled once and shared by every implementer, so `Self` there is still the abstract pact rather than a concrete type. `Self::CONST` and `Self::assoc_fn()` are both rejected inside one. Lowercase `self` -- fields, methods, parameters -- works normally, and `Self::` resolves as expected inside an ordinary `impl` block.
+**Methods that take `Self` can't be called through a pact.** `Self` in a parameter means "the same type as the receiver", and a value known only by its pact doesn't say what that is -- `a.plus(b)` with both typed `Plus` could pair a `V` with a `W`. The call is rejected wherever the receiver is only known by its bound, even when the arguments happen to match:
+
+```mimas
+fn combine(a: Plus, b: Plus) -> Plus {
+    a.plus(b) // error: pact method `plus` can't be called through `Plus`
+}
+```
+
+Call it on a concrete type instead (`fn combine(a: V, b: V) -> V`). The rule is per method, not per pact: the pact's other methods stay callable through the bound, a `Self` that appears only in the return type is fine (the result comes back as the bound), and inside a default body `self.plus(self)` works because every `Self` there is the same type.
+
+**`Self::` doesn't resolve inside a default body.** A default body is compiled once and shared by every implementer, so `Self` there is a type that hasn't been decided yet, and there's no single constant or associated function for `Self::` to reach. `Self::CONST` and `Self::assoc_fn()` are both rejected inside one. Lowercase `self` -- fields, methods, parameters -- works normally, and `Self::` resolves as expected inside an ordinary `impl` block.
 
 **No generics.** A pact bound is the only form of abstraction over types; there are no type parameters, associated types, or blanket impls, and none are planned for 0.1.0.

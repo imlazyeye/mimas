@@ -711,30 +711,40 @@ impl Solver {
     /// pollute the shared signature. A pact header holds vids minted once at hoist (notably the
     /// `self` slot, left unbound); without freshening, the first `impl Pact for A` binds those
     /// vids globally and a later `impl Pact for B` would unify against the stale binding.
-    pub(crate) fn instantiate_pact_fn(&mut self, header: &FnHeader) -> Ty {
+    ///
+    /// The header's `Self` becomes `self_ty` -- the impl target when checking or grafting an impl,
+    /// the bound when calling through one, or `Self` itself inside a default body.
+    pub(crate) fn instantiate_pact_fn(&mut self, header: &FnHeader, self_ty: &Ty) -> Ty {
         let mut memo: HashMap<Vid, Vid> = HashMap::new();
-        self.fresh_vids(&Ty::Fn(header.clone()), &mut memo)
+        self.fresh_vids(&Ty::Fn(header.clone()), self_ty, &mut memo)
     }
 
-    /// Normalize `t`, then replace any still-unbound vid with a fresh memoized one. Bound vids
-    /// resolve to their concrete types and stay put; only the open slots get fresh handles.
-    fn fresh_vids(&mut self, t: &Ty, memo: &mut HashMap<Vid, Vid>) -> Ty {
+    /// Normalize `t`, then replace any still-unbound vid with a fresh memoized one and any `Self`
+    /// with `self_ty`. Bound vids resolve to their concrete types and stay put; only the open
+    /// slots get fresh handles.
+    fn fresh_vids(&mut self, t: &Ty, self_ty: &Ty, memo: &mut HashMap<Vid, Vid>) -> Ty {
         match t.clone().normalized(self) {
             Ty::Vid(v) => Ty::Vid(*memo.entry(v).or_insert_with(|| self.vid())),
-            Ty::Array(inner) => Ty::Array(Box::new(self.fresh_vids(&inner, memo))),
-            Ty::Dict(inner) => Ty::Dict(Box::new(self.fresh_vids(&inner, memo))),
-            Ty::Option(inner) => Ty::Option(Box::new(self.fresh_vids(&inner, memo))),
-            Ty::Result(inner) => Ty::Result(Box::new(self.fresh_vids(&inner, memo))),
-            Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| self.fresh_vids(t, memo)).collect()),
+            Ty::Skolem(_) => self_ty.clone(),
+            Ty::Array(inner) => Ty::Array(Box::new(self.fresh_vids(&inner, self_ty, memo))),
+            Ty::Dict(inner) => Ty::Dict(Box::new(self.fresh_vids(&inner, self_ty, memo))),
+            Ty::Option(inner) => Ty::Option(Box::new(self.fresh_vids(&inner, self_ty, memo))),
+            Ty::Result(inner) => Ty::Result(Box::new(self.fresh_vids(&inner, self_ty, memo))),
+            Ty::Tuple(ts) => Ty::Tuple(
+                ts.iter()
+                    .map(|t| self.fresh_vids(t, self_ty, memo))
+                    .collect(),
+            ),
             Ty::Fn(h) => {
                 let parameters = h
                     .parameters
                     .iter()
                     .map(|p| {
-                        FnParam::new(p.name.clone(), self.fresh_vids(&p.ty, memo), p.has_default)
+                        let ty = self.fresh_vids(&p.ty, self_ty, memo);
+                        FnParam::new(p.name.clone(), ty, p.has_default)
                     })
                     .collect();
-                let return_ty = self.fresh_vids(&h.return_ty, memo);
+                let return_ty = self.fresh_vids(&h.return_ty, self_ty, memo);
                 Ty::Fn(FnHeader::new(parameters, return_ty, h.is_method))
             }
             other => other,
@@ -780,6 +790,7 @@ impl Solver {
             | Ty::Vid(_)
             | Ty::Adt(_)
             | Ty::Pacts(_)
+            | Ty::Skolem(_)
             | Ty::Identity(_) => t.clone(),
         }
     }
@@ -1680,9 +1691,10 @@ impl Solver {
 
     pub fn resolve_name(&mut self, ident: &Ident, read_location: Location) -> Result<Ty> {
         if ident.is_identity() {
-            // inside a pact, both `self` and `Self` resolve to the pact itself (any impl type)
+            // inside a pact, both `self` and `Self` are the implementing type -- one fixed but
+            // unknown type, so two `Self`s are known to match (unlike two values of the bound)
             if let Some(pid) = self.pact_self {
-                return Ok(Ty::pacts(vec![pid]));
+                return Ok(Ty::Skolem(pid));
             }
             return self.impl_target().map(Ty::Adt).ok_or_else(|| {
                 SelfOutOfContext {

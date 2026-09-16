@@ -13,6 +13,8 @@ impl Vid {
 /// user-facing -- a real mimas bug, not the user's fault. See [INTERNAL_TY_LEAK_NOTE].
 pub const INTERNAL_TY_MARKER: &str = "?mimas<";
 
+/// Every type that mimas works off of. Check the [book](https://mim.as/reference/basic-types.html)
+/// for more details.
 #[derive(Debug, Clone, Default)]
 pub enum Ty {
     /// The unit type, written `()`: truly nothing, the result of an expression that was never
@@ -137,6 +139,12 @@ pub enum Ty {
     ///
     /// See more in the [book](https://mim.as/reference/pacts.html).
     Pacts(Vec<PactId>),
+    /// `Self` inside a pact: the implementing type, whichever one it turns out to be. Unlike
+    /// `Pacts`, two skolems of the same pact are known to be the *same* type, which is what lets
+    /// `fn plus(self, other: Self)` mean "same type as the receiver" rather than "any implementer".
+    /// It never leaves the pact it belongs to: impl checks substitute the impl target, and calls
+    /// through a bound widen it back to the bound.
+    Skolem(PactId),
 }
 
 impl PartialEq for Ty {
@@ -153,6 +161,7 @@ impl PartialEq for Ty {
             (Self::Adt(l), Self::Adt(r)) => l == r,
             (Self::Identity(l), Self::Identity(r)) => l == r,
             (Self::Pacts(l), Self::Pacts(r)) => l == r,
+            (Self::Skolem(l), Self::Skolem(r)) => l == r,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -172,6 +181,16 @@ impl Ty {
         Ty::Pacts(pacts)
     }
 
+    /// The pacts a value of this type is known to implement without knowing its concrete type: a
+    /// bound's pacts, or the one pact a `Self` belongs to.
+    pub fn as_pacts(&self) -> Option<Vec<PactId>> {
+        match self {
+            Ty::Pacts(pacts) => Some(pacts.clone()),
+            Ty::Skolem(pact) => Some(vec![*pact]),
+            _ => None,
+        }
+    }
+
     pub fn as_single_pact(&self) -> Option<PactId> {
         match self {
             Ty::Pacts(pacts) if pacts.len() == 1 => Some(pacts[0]),
@@ -188,6 +207,32 @@ impl Ty {
 
     pub fn is_numeric(&self) -> bool {
         matches!(self, Ty::Float | Ty::Int)
+    }
+
+    /// Whether a pact's `Self` appears anywhere in this type, however deeply nested.
+    pub fn contains_skolem(&self) -> bool {
+        match self {
+            Ty::Skolem(_) => true,
+            Ty::Array(inner) | Ty::Dict(inner) | Ty::Option(inner) | Ty::Result(inner) => {
+                inner.contains_skolem()
+            }
+            Ty::Tuple(members) => members.iter().any(Ty::contains_skolem),
+            Ty::Fn(h) => {
+                h.parameters.iter().any(|p| p.ty.contains_skolem()) || h.return_ty.contains_skolem()
+            }
+            Ty::Unit
+            | Ty::Never
+            | Ty::Null
+            | Ty::Bool
+            | Ty::Int
+            | Ty::Float
+            | Ty::Str
+            | Ty::Vid(_)
+            | Ty::Anon(_)
+            | Ty::Adt(_)
+            | Ty::Identity(_)
+            | Ty::Pacts(_) => false,
+        }
     }
 }
 
@@ -320,7 +365,7 @@ impl std::fmt::Display for Ty {
             // diag emitter recognize either as a leak and attach an explanatory note.
             Ty::Vid(vid) => format!("{INTERNAL_TY_MARKER}T{}>", vid.index()),
             Ty::Anon(n) => format!("{INTERNAL_TY_MARKER}A{n}>"),
-            Ty::Identity(_) => "Self".into(),
+            Ty::Identity(_) | Ty::Skolem(_) => "Self".into(),
             Ty::Adt(id) => adt_display(id.index()).unwrap_or_else(|| "<adt>".into()),
             Ty::Option(inner) => format!("{inner}?"),
             Ty::Result(inner) => format!("{inner}!"),

@@ -404,3 +404,188 @@ test_ty!(
      fn f(m: Maker) -> int { m.make() }",
     "f(S { x = 1 })" => Int,
 );
+
+test_fail!(
+    pact_self_param_through_bound,
+    "pact Plus {
+         fn plus(self, other: Self) -> Self;
+     }
+
+     struct V { x: int }
+     struct W { y: int }
+
+     impl Plus for V {
+         fn plus(self, other: V) -> V {
+             V { x = self.x + other.x }
+         }
+     }
+
+     impl Plus for W {
+         fn plus(self, other: W) -> W {
+             W { y = self.y + other.y }
+         }
+     }
+
+     fn combine(a: Plus, b: Plus) -> Plus {
+         a.plus(b)
+     }"
+);
+
+test_fail!(
+    pact_self_param_bound_arg_in_default,
+    "pact Plus {
+         fn plus(self, other: Self) -> Self;
+
+         fn add_any(self, other: Plus) -> Self {
+             self.plus(other)
+         }
+     }
+
+     struct V { x: int }
+
+     impl Plus for V {
+         fn plus(self, other: V) -> V {
+             V { x = self.x + other.x }
+         }
+     }"
+);
+
+test_fail!(
+    pact_impl_narrows_self_to_other_implementer,
+    "pact Plus {
+         fn plus(self, other: Self) -> Self;
+     }
+
+     struct V { x: int }
+     struct W { y: int }
+
+     impl Plus for W {
+         fn plus(self, other: W) -> W {
+             W { y = self.y + other.y }
+         }
+     }
+
+     impl Plus for V {
+         fn plus(self, other: W) -> W {
+             other
+         }
+     }"
+);
+
+test_fail!(
+    pact_self_param_concrete_mismatch,
+    "pact Plus {
+         fn plus(self, other: Self) -> Self;
+     }
+
+     struct V { x: int }
+     struct W { y: int }
+
+     impl Plus for V {
+         fn plus(self, other: V) -> V {
+             V { x = self.x + other.x }
+         }
+     }
+
+     impl Plus for W {
+         fn plus(self, other: W) -> W {
+             W { y = self.y + other.y }
+         }
+     }
+
+     V { x = 1 }.plus(W { y = 2 });"
+);
+
+test_ty!(
+    pact_mixed_self_and_plain_methods_through_bound,
+    "pact Plus {
+         fn plus(self, other: Self) -> Self;
+         fn value(self) -> int;
+     }
+
+     struct V { x: int }
+
+     impl Plus for V {
+         fn plus(self, other: V) -> V {
+             V { x = self.x + other.x }
+         }
+
+         fn value(self) -> int {
+             self.x
+         }
+     }
+
+     fn total(a: Plus) -> int {
+         a.value()
+     }",
+    "total(V { x = 4 })" => Int,
+);
+
+test_ty!(
+    pact_self_return_through_bound,
+    "pact Dup {
+         fn dup(self) -> Self;
+     }
+
+     struct V { x: int }
+
+     impl Dup for V {
+         fn dup(self) -> V {
+             V { x = self.x }
+         }
+     }
+
+     let d: Dup = V { x = 7 };",
+    "d.dup()" => query!(Dup),
+);
+
+test_ty!(
+    pact_default_passes_self_as_bound,
+    "pact Plus {
+         fn value(self) -> int;
+
+         fn announced(self) -> int {
+             announce(self)
+         }
+     }
+
+     fn announce(p: Plus) -> int {
+         p.value()
+     }
+
+     struct V { x: int }
+
+     impl Plus for V {
+         fn value(self) -> int {
+             self.x
+         }
+     }",
+    "V { x = 2 }.announced()" => Int,
+);
+
+test_ty!(
+    pact_bound_param_through_bound,
+    "pact Collide {
+         fn hits(self, other: Collide) -> bool;
+     }
+
+     struct V { x: int }
+     struct W { y: int }
+
+     impl Collide for V {
+         fn hits(self, other: Collide) -> bool {
+             true
+         }
+     }
+
+     impl Collide for W {
+         fn hits(self, other: Collide) -> bool {
+             false
+         }
+     }
+
+     fn check(a: Collide, b: Collide) -> bool {
+         a.hits(b)
+     }",
+    "check(V { x = 1 }, W { y = 2 })" => Bool,
+);

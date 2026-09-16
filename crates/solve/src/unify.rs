@@ -42,6 +42,14 @@ impl Unification {
                 Ok(Substitution::None)
             }
 
+            // `Self` fulfills its own pact's bound (it's some implementer), but a bound never
+            // fulfills `Self`, as the value could be any implementer, not necessarily the
+            // receiver's type. Direction actually matters here, unlike the adt/pact
+            // rule below.
+            (Ty::Skolem(pid), Ty::Pacts(pids)) if pids.iter().all(|p| *p == *pid) => {
+                Ok(Substitution::None)
+            }
+
             (Ty::Adt(aid), Ty::Pacts(pids))
             | (Ty::Pacts(pids), Ty::Adt(aid))
             | (Ty::Identity(aid), Ty::Pacts(pids))

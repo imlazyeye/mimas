@@ -344,7 +344,7 @@ impl Hoist for Impl {
                     })?;
                 }
                 let header = ctx.solver.pacts[pid].functions[&name].0.clone();
-                let ty = ctx.solver.instantiate_pact_fn(&header);
+                let ty = ctx.solver.instantiate_pact_fn(&header, &Ty::Adt(adt));
                 let dec = ctx.solver.pact_default_decs[&(pid, name.clone())];
                 ctx.solver.adts[adt]
                     .impls

@@ -44,6 +44,7 @@ impl TyExt for Ty {
             Ty::Identity(_)
             | Ty::Anon(_)
             | Ty::Pacts(_) // annotations always required, never holds vids
+            | Ty::Skolem(_)
             | Ty::Unit
             | Ty::Never
             | Ty::Null
@@ -83,8 +84,7 @@ impl TyExt for Ty {
                         .map(|(pid, _)| *pid)
                         .collect(),
                 ),
-                Ty::Pacts(pids) => Some(pids.clone()),
-                _ => None,
+                _ => ty.as_pacts(),
             }
         }
 
@@ -210,6 +210,7 @@ impl TyExt for Ty {
             }
             Ty::Adt(adt) => Ty::Adt(adt),
             Ty::Pacts(pacts) => Ty::Pacts(pacts),
+            Ty::Skolem(pid) => Ty::Skolem(pid),
             Ty::Anon(n) => Ty::Anon(n),
             Ty::Identity(adt) => Ty::Identity(adt),
             Ty::Option(inner) => {
@@ -243,6 +244,7 @@ impl TyExt for Ty {
             Ty::Result(inner) => Ty::Result(Box::new(inner.filter_adt(adt))),
             Ty::Adt(_)
             | Ty::Pacts(_)
+            | Ty::Skolem(_)
             | Ty::Identity(_)
             | Ty::Anon(_)
             | Ty::Vid(_)

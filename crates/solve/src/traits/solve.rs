@@ -265,7 +265,7 @@ impl Solve for Access {
                             })
                         })?
                     }
-                    Ty::Pacts(pids) => {
+                    Ty::Pacts(_) | Ty::Skolem(_) => {
                         if let ExprKind::Literal(Literal::Int(_)) = right.kind() {
                             return Err(NotATuple {
                                 src: solver.src(location),
@@ -279,7 +279,9 @@ impl Solve for Access {
                         let mut con = None;
                         let mut fun = None;
                         let mut matches = 0;
-                        for pid in pids {
+                        // `self` in a default body is one implementer of its pact, not yet known
+                        // which, so it reaches members the same way a bound does
+                        for pid in &lhs.as_pacts().expect("narrowed by the outer arm") {
                             let pact = &solver.pacts[pid];
                             if let Some(c) = pact.constants.get(name) {
                                 con = Some(c.clone());
@@ -310,10 +312,38 @@ impl Solve for Access {
                             }
                             .into());
                         } else if let Some(header) = fun {
+                            // `Self` in a parameter is the receiver's concrete type (Skolem). a
+                            // bound doesn't pin that down, so any implementer would satisfy it and
+                            // the callee would read another type's fields by slot. only a concrete
+                            // receiver may call it -- or `self` in a default body, where every
+                            // `Self` is the same (unknown) type.
+                            if let Ty::Pacts(_) = &lhs
+                                && let Some(param) = header
+                                    .parameters
+                                    .iter()
+                                    .skip(usize::from(header.is_method))
+                                    .find(|p| p.ty.contains_skolem())
+                            {
+                                let param = match &param.name {
+                                    Some(name) => format!("{name}: {}", param.ty),
+                                    None => param.ty.to_string(),
+                                };
+                                return Err(PactMethodNotDispatchable {
+                                    src: solver.src(right.location()),
+                                    at: right.location().into(),
+                                    member: name.clone(),
+                                    param,
+                                    via: lhs.to_string(),
+                                }
+                                .into());
+                            }
+
                             // freshen so dispatch can't bind the pact header's shared self-slot
                             // vid, which would pollute every later use
-                            // and impl signature check.
-                            solver.instantiate_pact_fn(&header)
+                            // and impl signature check. through a bound, a `Self` return is some
+                            // implementer of it, so it widens to the bound and the skolem never
+                            // escapes its pact; on `self` in a default body it stays `Self`.
+                            solver.instantiate_pact_fn(&header, &lhs)
                         } else {
                             return Err(FieldNotFound {
                                 src: solver.src(location),
@@ -443,7 +473,7 @@ impl Solve for Access {
                         .into())
                     } else if let Some((header, _)) = pact.functions.get(&right.lexeme) {
                         let header = header.clone();
-                        Ok(solver.instantiate_pact_fn(&header))
+                        Ok(solver.instantiate_pact_fn(&header, &Ty::Skolem(pid)))
                     } else {
                         Err(FieldNotFound {
                             src: solver.src(right.location),
@@ -1356,7 +1386,9 @@ impl Solve for Impl {
                 // unify the whole function type against the (freshened) pact requirement --
                 // covers param count, per-param types, and the return type in one move.
                 let mut impl_ty = ty;
-                let mut pact_ty = solver.instantiate_pact_fn(&pact_header);
+                // `Self` is this impl's target: `other: Self` has to be exactly this adt, not
+                // just any implementer
+                let mut pact_ty = solver.instantiate_pact_fn(&pact_header, &Ty::Adt(aid));
                 impl_ty
                     .fulfill_ty(&mut pact_ty, solver)
                     .map_err(|e| e.into_type_mismatch(solver, function.name.location))?;

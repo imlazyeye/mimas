@@ -460,10 +460,12 @@ impl Emit for Call {
             // pact-typed receiver (`g: Greet`): no single concrete callee, so dispatch at runtime
             // over every implementor of the bound. a grafted default lands in each impl's table,
             // so default methods dispatch here for free.
-            let pact_pids = match ir.resolutions.node_tys.get(&left.id()) {
-                Some(Ty::Pacts(pids)) => Some(pids.clone()),
-                _ => None,
-            };
+            // `self` inside a default body counts too: one implementer, decided at runtime
+            let pact_pids = ir
+                .resolutions
+                .node_tys
+                .get(&left.id())
+                .and_then(Ty::as_pacts);
             if let Some(pids) = pact_pids {
                 let method = right
                     .as_ident()
