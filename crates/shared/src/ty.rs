@@ -15,24 +15,127 @@ pub const INTERNAL_TY_MARKER: &str = "?mimas<";
 
 #[derive(Debug, Clone, Default)]
 pub enum Ty {
+    /// The unit type, written `()`: truly nothing, the result of an expression that was never
+    /// going to hand back a value. An empty block, a `for` loop, and a function with no return all
+    /// yield `()`. This is not [Ty::Null], where there _could_ be a value but right now there
+    /// isn't.
+    ///
+    /// ```mimas
+    /// let a = {}; // `{}` yields nothing, so `a` is `()`.
+    /// ```
+    ///
+    /// See more in the [book](https://mim.as/reference/special-types.html#unit--).
     #[default]
     Unit,
+    /// The never type, written `!`: the type of an expression that diverges, meaning no code can
+    /// run after it. It arises from `return`, `panic`, `todo`, and a `loop {}` that never breaks.
+    /// Because a diverging branch can never actually supply a value, `!` coerces into any type.
+    ///
+    /// ```mimas
+    /// let a: int = if foo() {
+    ///     1
+    /// } else {
+    ///     return; // `return` is `!`, so it fits where an `int` is expected
+    /// };
+    /// ```
+    ///
+    /// See more in the [book](https://mim.as/reference/special-types.html#never--).
     Never,
+    /// The type of `null`: there _could_ be a value, but right now there isn't. It only lives
+    /// behind a [Ty::Option] -- where it meets another type, the two settle on that type's option,
+    /// so `[0, null]` is `[int?]`.
+    ///
+    /// See more in the [book](https://mim.as/reference/options.html#creating-options).
     Null,
+    /// `true` or `false`. Comparisons and logical operators produce `bool`s, and conditions in
+    /// `if`, `while`, and friends must be `bool`.
+    ///
+    /// See more in the [book](https://mim.as/reference/basic-types.html#booleans).
     Bool,
+    /// A 64-bit signed integer, an `i64` at runtime. Arithmetic is checked: overflowing the range
+    /// is a runtime error rather than silently wrapping.
+    ///
+    /// See more in the [book](https://mim.as/reference/basic-types.html#integers).
     Int,
+    /// A 64-bit IEEE-754 floating-point number, an `f64` at runtime. An `int` combined with a
+    /// `float` is promoted, so the result is a `float`, and `/` yields a `float` even between two
+    /// `int`s.
+    ///
+    /// See more in the [book](https://mim.as/reference/basic-types.html#floats).
     Float,
+    /// Text is always `str`. There's no split between Rust's `&str` and `String`, and no separate
+    /// character type -- a single character is a one-character `str`. All strings are interned in
+    /// the garbage collector.
+    ///
+    /// See more in the [book](https://mim.as/reference/basic-types.html#strings).
     Str,
+    /// A type variable: a type the solver hasn't narrowed yet. None should remain by the end of a
+    /// successful compilation.
     Vid(Vid),
+    /// A slot in a native signature that stands for one type, whichever it turns out to be at each
+    /// call. mimas has no generics, but native signatures still need to express things like "the
+    /// value pushed must match the array's element type." Scripts can't write these; the host
+    /// does, through `vm::anon`, whose `T`, `U`, `V`, and `W` are slots 0 through 3.
+    ///
+    /// ```rust,ignore
+    /// #[mimas]
+    /// fn push(arr: &mut Vec<anon::T<'gc>>, value: anon::T<'gc>) {
+    ///     arr.push(value);
+    /// }
+    /// ```
+    ///
+    /// Notice that both the inner type of the `Vec` and the type of `value` are `anon::T`. This is
+    /// what makes it different from an any-type -- the `T` enforces that they are the _same_ type,
+    /// regardless of what they may be. Slots are local to their call: the solver swaps each one for
+    /// a fresh [Ty::Vid], so an `anon::T` in one function has no relation to one in another.
+    ///
+    /// See more in the [book](https://mim.as/extension/working-with-types.html#anonymous-types).
     Anon(u32),
+    /// An ordered, growable sequence of values that all share one type, like a `Vec` in Rust.
+    /// Written `[T]`.
+    ///
+    /// See more in the [book](https://mim.as/reference/collections/arrays.html).
     Array(Box<Ty>),
+    /// A hash map from string keys to values of one type, like a `HashMap<String, T>` in Rust.
+    /// Written `~{T}`. Any key might be absent, so indexing one yields `T?`.
+    ///
+    /// See more in the [book](https://mim.as/reference/collections/dictionaries.html).
     Dict(Box<Ty>),
+    /// A fixed-length, heterogeneous sequence. Written as a parenthesized list, like `(int, str)`.
+    ///
+    /// See more in the [book](https://mim.as/reference/collections/tuples.html).
     Tuple(Vec<Ty>),
+    /// Anything callable: a top-level `fn`, a method or associated function from an `impl` block,
+    /// a closure, a native, or a tuple struct's constructor. Written `(A, B) -> R`.
+    ///
+    /// See more in the [book](https://mim.as/reference/functions.html).
     Fn(FnHeader),
+    /// A user-defined type: a `struct` (a product type) or an `enum` (a sum type). Modules are
+    /// adts internally too, flagged `IS_MODULE`.
+    ///
+    /// See more in the [book](https://mim.as/reference/types.html).
     Adt(AdtId),
+    /// A value that is either `T` or `null`, written `T?`. There's no option of an option: a `T??`
+    /// flattens to `T?`.
+    ///
+    /// See more in the [book](https://mim.as/reference/options.html).
     Option(Box<Ty>),
+    /// A recoverable failure, written `T!`: either a success carrying `T`, or an error produced by
+    /// `raise`. The error is always a `str` for now.
+    ///
+    /// See more in the [book](https://mim.as/reference/error-handling.html#results).
     Result(Box<Ty>),
+    /// `Self` inside an `impl` block: the adt being implemented. References to an adt within its
+    /// own impl items are rewritten to this by `filter_adt`, and it's otherwise interchangeable
+    /// with a [Ty::Adt] of the same id.
+    ///
+    /// See more in the [book](https://mim.as/reference/types/structs.html#methods-and-associated-items).
     Identity(AdtId),
+    /// A pact bound: any value whose type implements every pact listed. Written as a pact's name,
+    /// or several joined with `+` (`Named + Aged`). The concrete type isn't known statically, so
+    /// method calls through a bound dispatch at runtime.
+    ///
+    /// See more in the [book](https://mim.as/reference/pacts.html).
     Pacts(Vec<PactId>),
 }
 
