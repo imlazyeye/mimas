@@ -200,7 +200,8 @@ test_fail!(single_quoted_string_rejected, "a = 'foo';");
 // (a solver error, NotATuple, catches it later) so it PARSES
 test_ok!(malformed_number_parses_as_tuple_index, "a = 1.2.3;");
 
-// access target permissiveness — nonsensical receivers parse fine; the solver lints, not the parser
+// access target permissiveness -- nonsensical receivers parse fine; the solver lints, not the
+// parser
 test_ok!(
     access_targets,
     "a = b.c.d;",

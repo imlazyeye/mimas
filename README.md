@@ -23,10 +23,7 @@
 
 ---
 
-mimas is a statically typed, embeddable scripting language for Rust. It carries over much of Rust's
-syntax and ergonomics, reshaping the rest to deliver what a scripting layer is good for: fast
-iteration, quick compile times, and runtime flexibility — without trading away the safety that keeps
-you out of the debugger.
+mimas is a statically typed, embeddable scripting language for Rust. It carries over much of Rust's syntax and ergonomics, reshaping the rest to deliver what a scripting layer is good for: fast iteration, quick compile times, and runtime flexibility -- without trading away the safety that keeps you out of the debugger.
 
 ```rust
 enum Shape {
@@ -35,7 +32,7 @@ enum Shape {
 }
 
 fn area(shape: Shape) -> float {
-    match shape {                          // exhaustive — miss a variant and it won't compile
+    match shape {                          // exhaustive -- miss a variant and it won't compile
         Shape::Circle(r) => r * r * std::math::PI,
         Shape::Rect(w, h) => w * h,
     }
@@ -51,16 +48,16 @@ print(f"area of {shapes.len()} shapes: {total}");
 
 | | |
 | --- | --- |
-| 🪶&nbsp;&nbsp;**Flexible** | Inference writes your types, compiles stay fast, and errors point toward the fix instead of just turning you away. Garbage collected — no borrow checker, no lifetimes. |
-| 🛡️&nbsp;&nbsp;**Typed** | Static typing with inference, user-defined types, exhaustive [pattern matching](https://mim.as/reference/control-flow/match.html), and `T?` option safety so an unexpected `null` can't reach you. |
-| 🧩&nbsp;&nbsp;**Extendable** | Share Rust types and functions with the `#[mimas]` macro — they're type-checked just like native ones. |
-| ✅&nbsp;&nbsp;**Robust** | Every panic is treated as a bug, top to bottom. Over **1,700 tests** (the tests are tested, via [cargo mutants](https://mutants.rs)), with clear diagnostics powered by [miette](https://github.com/zkat/miette). |
+| 🪶 **Flexible** | Inference writes your types, compiles stay fast, and errors point toward the fix instead of just turning you away. Garbage collected -- no borrow checker, no lifetimes. |
+| 🛡️ **Typed** | Static typing with inference, user-defined types, exhaustive [pattern matching](https://mim.as/reference/control-flow/match.html), and `T?` option safety so an unexpected `null` can't reach you. |
+| 🧩 **Extendable** | Share Rust types and functions with the `#[mimas]` macro -- they're type-checked just like native ones. |
+| ✅ **Robust** | Every panic is treated as a bug, top to bottom. Over **1,700 tests** (the tests are tested, via [cargo mutants](https://mutants.rs)), with clear diagnostics powered by [miette](https://github.com/zkat/miette). |
 
 Read the [full tour](https://mim.as/introduction/tour.html) for a quick pass over the whole language.
 
 ## Quick start
 
-**At the command line** — mirroring cargo, with `check`, `build`, and `run`:
+**At the command line** -- mirroring cargo, with `check`, `build`, and `run`:
 
 ```sh
 cargo install mimas-cli
@@ -68,9 +65,10 @@ cargo install mimas-cli
 mimas check my_script.mim   # parse + type-check
 mimas run my_script.mim     # execute (or just `mimas my_script.mim`)
 mimas run my_project        # runs the project's main.mim
+mimas my_project            # running with no subcommand defaults to `run`
 ```
 
-**Embedded in a Rust project** — add `mimas` and compile a script in two lines:
+**Embedded in a Rust project** -- add `mimas` and compile a script in two lines:
 
 ```rust
 const SOURCE: &str = include_str!("my_script.mim");
@@ -100,53 +98,39 @@ The full embedding guide lives at [Extension with Rust](https://mim.as/extension
 
 ## Performance
 
-mimas compiles `.mim` source to bytecode for a register-based VM with a lifetime-safe
-([gc-arena](https://github.com/kyren/gc-arena)) heap. It's ahead of Rune and Rhai on every test we
-run, and within shooting range of Luau, a mature C++ runtime. See the
-[full benchmarks](https://mim.as/introduction/benchmarks.html) for the methodology and numbers.
+mimas compiles `.mim` source to bytecode for a register-based VM with a lifetime-safe ([gc-arena](https://github.com/kyren/gc-arena)) heap. It outpaces the other pure Rust languages in most tests and is within shooting range of Luau, a mature C++ runtime. See the [full benchmarks](https://mim.as/introduction/benchmarks.html) for the methodology and numbers.
 
-The compiler is quick too: the whole pipeline (parse, type-check, lower, emit bytecode) runs at
-roughly **400,000 lines per second**, so for scripts there's effectively no compile step you'd notice.
+The compiler is quick too: the whole pipeline (parse, type-check, lower, emit bytecode) runs at roughly **500,000 lines per second**, so for scripts there's effectively no compile step you'd notice.
 
 ## Examples
 
 Runnable projects live in [`examples/`](examples):
 
-- [`extension`](examples/extension) — sharing Rust structs, enums, methods, and fallible functions with a script via `#[mimas]`.
-- [`game-loop`](examples/game-loop) — driving a script from a host game loop, using fixtures and `FreezeCell` to safely hand mimas a `&mut` to host state.
+- [`extension`](examples/extension) -- sharing Rust structs, enums, methods, and fallible functions with a script via `#[mimas]`.
+- [`game-loop`](examples/game-loop) -- driving a script from a host game loop, using fixtures and `FreezeCell` to safely hand mimas a `&mut` to host state.
 
 ## Editor support
 
-A VS Code extension lives in [`tools/vscode`](tools/vscode) — syntax highlighting, snippets, and
-language configuration for `.mim` files. Build it with `vsce package` and install the `.vsix`. The TextMate grammar it uses
-([`tools/highlighter`](tools/highlighter)) is written in mimas, and is the same one that colors the
-docs.
+A VS Code extension lives in [`tools/vscode`](tools/vscode) -- syntax highlighting, snippets, and language configuration for `.mim` files. Build it with `vsce package` and install the `.vsix`. The TextMate grammar it uses ([`tools/highlighter`](tools/highlighter)) is written in mimas, and is the same one that colors the docs.
 
 ## Status
 
-mimas is `0.1.0` and a young side project. The design is committed and the language compiles,
-type-checks, and runs end-to-end, but nothing beyond the design is promised to be stable yet. Expect
-sharp edges, expect things to move — and if a little language taking on a big problem sounds fun,
-[stubborn thoughts and contributions](https://mim.as/introduction/why-mimas.html) are very welcome.
+mimas is early in development. It compiles, type-checks, and runs end-to-end, but nothing is promised to be stable yet. Expect sharp edges, expect things to move, and feel most welcome to [contribute](./CONTRIBUTING.md).
 
 ## How it's built
 
-A single pipeline turns source into a running program, split across a handful of crates in
-[`crates/`](crates):
+A single pipeline turns source into a running program, split across a handful of crates in [`crates/`](crates):
 
 ```
 .mim -> parse -> solve (type check) -> compile (lower + bytecode) -> vm (register VM)
 ```
 
-`shared` carries the common vocabulary, `api` and `macros` back the `#[mimas]` embedding surface,
-`library` is the standard library, and `cli` is the `mimas` binary.
+`shared` carries the common vocabulary, `api` and `macros` back the `#[mimas]` embedding surface, `library` is the standard library, and `cli` is the `mimas` binary.
 
 ## License
 
 Dual licensed under your choice of [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE).
 
-Built on the shoulders of [gc-arena](https://github.com/kyren/gc-arena),
-[miette](https://github.com/zkat/miette), and [chompy](https://github.com/imlazyeye/chompy); the
-`gc-arena` singleton and freeze patterns are adapted from [fabricator](https://github.com/kyren/fabricator).
+Built on the shoulders of [gc-arena](https://github.com/kyren/gc-arena), [miette](https://github.com/zkat/miette), and [chompy](https://github.com/imlazyeye/chompy); the `gc-arena` singleton and freeze patterns are adapted from [fabricator](https://github.com/kyren/fabricator).
 </content>
 </invoke>

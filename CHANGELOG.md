@@ -13,7 +13,7 @@ already exists.
 
 Static typing with inference, `struct`/`enum` user-defined types, exhaustive pattern matching,
 `T?` options and `T!` results, closures, modules with privacy, and pacts (a scoped stand-in for
-traits). Garbage collected via [gc-arena](https://github.com/kyren/gc-arena) —- no borrow checker,
+traits). Garbage collected via [gc-arena](https://github.com/kyren/gc-arena) -- no borrow checker,
 no lifetimes.
 
 ### The tooling
@@ -28,7 +28,7 @@ no lifetimes.
 These are rejected with a clear error rather than misbehaving, and are documented where they'd
 otherwise surprise you:
 
-- Pact **constants** don't dispatch — they can only be read off a concrete type, not a pact-typed
+- Pact **constants** don't dispatch -- they can only be read off a concrete type, not a pact-typed
   value. Pact methods do dispatch normally.
 - `Self::` doesn't resolve inside a pact default body. Lowercase `self` works, as does `Self::`
   inside an ordinary `impl`.

@@ -6,7 +6,7 @@ use ty;
 
 /// Interface for building a new fodder file. Each `with_*` appends to `out` and hands the
 /// builder back, so calls chain. `counter` keeps every minted identifier unique (the word
-/// banks are only flavor — they'd exhaust on a large file otherwise).
+/// banks are only flavor -- they'd exhaust on a large file otherwise).
 pub struct Builder {
     id: str,
     items: [str],

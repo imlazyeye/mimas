@@ -279,7 +279,7 @@ a:hover {
     filter: none !important;
 }
 
-/* benchmarks — per-test cards; Charts.css draws the bars. each bar's --size is a 0–1 fraction of
+/* benchmarks -- per-test cards; Charts.css draws the bars. each bar's --size is a 0–1 fraction of
    the slowest run in that card. bar color derives from the theme --fg so it adapts light/dark; the
    mimas bar (td.me) uses the brand accent. */
 .bench {

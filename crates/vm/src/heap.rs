@@ -276,7 +276,7 @@ impl<'gc> Ctx<'gc> {
         match value {
             Val::Null => out.push_str("null"),
             Val::Bool(b) => out.push_str(if b { "true" } else { "false" }),
-            // — alloc
+            // -- alloc
             Val::Int(i) => out.push_str(itoa::Buffer::new().format(i)),
             Val::Float(f) => {
                 let _ = write!(out, "{f}");

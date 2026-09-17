@@ -1,34 +1,71 @@
 # Contributing
 
-mimas is a young side project with one maintainer, so consider this a friendly note rather than a
-real process. If something here looks fun to work on — a bug, a rough error message, a missing
-stdlib method — go for it and open a PR. Reviews may be slow, but they'll come.
+mimas is a young side project with one maintainer, but contributions are very welcome. Please feel free to reach out for any questions if there is something you'd like to work on and/or if you need help figuring out how.
 
-## The lay of the land
+In the future we'll have a more robust documentation of each crate, but in the meantime, this serves as a basic guide.
 
-Source lives in [`crates/`](crates), one crate per stage of the pipeline:
+**Please be sure to review our [Code of Conduct](./CODE_OF_CONDUCT.md) and our [LLM Usage Policy](./LLM_POLICY.md) before opening any issues or pull requests.**
 
-```
-.mim -> parse -> solve -> compile -> vm
-```
+## Basic structure
 
-- **`shared`** — common vocabulary (types, ids, spans) every crate depends on.
-- **`parse`** — lexer + parser; source text to an AST.
-- **`solve`** — the type checker; name resolution and inference.
-- **`compile`** — lowers the checked program to bytecode.
-- **`vm`** — the register-based VM that runs the bytecode.
-- **`api`** / **`macros`** — the `#[mimas]` embedding surface for sharing Rust types.
-- **`library`** — mimas's standard library.
-- **`cli`** — the `mimas` binary.
-- **`mimas`** — umbrella crate that re-exports the rest for host programs.
+Source lives in [`crates/`](crates). Each stage in the pipeline has its own crate.
 
-The [reference docs](https://mim.as) cover the language itself if you want to get a feel for it first.
+- **`shared`** -- common vocabulary (types, ids, spans) every crate depends on.
+- **`parse`** -- lexer + parser; source text to an AST.
+- **`solve`** -- the type checker; name resolution and inference.
+- **`compile`** -- lowers the checked program to bytecode.
+- **`vm`** -- the register-based VM that runs the bytecode.
+- **`api`** / **`macros`** -- the `#[mimas]` embedding surface for sharing Rust types.
+- **`library`** -- mimas's standard library.
+- **`cli`** -- the `mimas` binary.
+- **`mimas`** -- umbrella crate that re-exports the rest for host programs.
 
-## Working on it
+The [reference docs](https://mim.as) cover the language itself, though we don't yet have proper docs to cover the entire API.
+
+## Running mimas
 
 ```sh
-cargo test                       # run the suite
-cargo install --path crates/cli  # build the `mimas` binary locally
+cargo test                       # run the suite (though cargo nextest is recommended)
+cargo bench                      # runs our benchmarks
+cargo install --path crates/cli  # install the `mimas` binary locally
 ```
 
-That's it — branch, change something, PR it. Thanks for taking a look.
+## Tools
+
+We also have some tools that are useful for development. They are written in `mimas`, so install it first!
+
+### Fodder
+
+Generates a randomized corpus of mimas code. Useful for benchmarking and stress testing the compiler.
+
+```sh
+mimas tools/fodder -- [line-count-target] [out-dir]
+```
+
+### Highlighter
+
+Replaces blocks of mimas code in the book with rendered, colorized SVGs. This is ran as a preprocessor for `mdbook`, so you'd rarely call it manually.
+
+### Token test generator
+
+All of the tokens get tests automatically generated for them, so if you ever add/remove/change one, be sure to run this after.
+
+```sh
+mimas tools/autogen.mim
+```
+
+### Language benchmarking
+
+Our suite for creating the [benchmarks in the book](./book/src/introduction/benchmarks.md) uses two shell scripts and a mimas script.
+
+```sh
+./benchmarks/compile-bench.sh                    # benchmarks compile times
+./benchmarks/compare.sh [languages_to_run]       # benchmarks runtimes. they must be installed locally
+mimas tools/inscribe_benchmarks.mim              # updates the graphs in the book
+```
+
+That said, the benchmarks are always ran on the same machine, so you shouldn't need to do this yourself beyond your own curiosity.
+
+### Cargo mutants
+
+You can run `cargo mutants` via `tools/test_mutants.sh`. Make sure you have it installed first!

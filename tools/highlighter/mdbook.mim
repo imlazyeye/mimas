@@ -5,7 +5,7 @@ use shiki::Shiki;
 
 pub const BLOCK_PATTERN = "```mimas[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
 
-/// A deserialized mdBook Book — the second element of the `[context, book]` payload mdBook hands
+/// A deserialized mdBook Book -- the second element of the `[context, book]` payload mdBook hands
 /// a preprocessor through stdin.
 pub struct MdBook {
     sections: [BookItem],

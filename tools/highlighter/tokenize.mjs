@@ -17,7 +17,7 @@ const hl = await createHighlighterCore({
 })
 
 // Emit one entry per scope-run: { content, color, fontStyle, scopes }. The SVG
-// path uses color/fontStyle, the HTML path uses scopes — one shape feeds both.
+// path uses color/fontStyle, the HTML path uses scopes -- one shape feeds both.
 const out = sources.map(src => {
   const { tokens, bg, fg } = hl.codeToTokens(src.replace(/\n$/, ''), { lang: grammar.name, theme, includeExplanation: true })
   const lines = tokens.map(line => line.flatMap(tok =>
