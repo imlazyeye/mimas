@@ -1,3 +1,4 @@
+use crate::{Literal, UnaryOp};
 use chompy::lex::TokenKind;
 use std::fmt::Display;
 
@@ -93,6 +94,8 @@ pub enum TokKind<'s> {
     FString(&'s str),
     Hex(&'s str),
     Invalid(&'s str),
+    /// Ends every token stream the parser reads. The lexer never produces one.
+    Eof,
 }
 
 #[mutants::skip]
@@ -188,6 +191,7 @@ impl Display for TokKind<'_> {
             TokKind::FString(s) => return f.pad(&format!("f\"{s}\"")),
             TokKind::Hex(hex) => hex,
             TokKind::Invalid(_) => "INVALID_TOKEN",
+            TokKind::Eof => return f.pad("end of input"),
         };
         f.pad(s)
     }
@@ -212,5 +216,131 @@ impl std::fmt::Display for TyKw {
             TyKw::Str => f.pad("str"),
             TyKw::Bool => f.pad("bool"),
         }
+    }
+}
+
+// Parsing logic
+impl TokKind<'_> {
+    /// Returns if this can start a statement.
+    pub(crate) fn starts_stmt(self) -> bool {
+        self.is_stmt_keyword() || self.starts_expr()
+    }
+
+    /// Returns if this can start an item.
+    pub(crate) fn starts_item(self) -> bool {
+        matches!(
+            self,
+            TokKind::Pub
+                | TokKind::Fn
+                | TokKind::Struct
+                | TokKind::Pact
+                | TokKind::Enum
+                | TokKind::Impl
+                | TokKind::Const
+                | TokKind::Use
+        )
+    }
+
+    /// Returns if this can start an expression.
+    pub(crate) fn starts_expr(self) -> bool {
+        Literal::try_from(self).is_ok()
+            || UnaryOp::try_from(self).is_ok()
+            || matches!(
+                self,
+                TokKind::Ident(_)
+                    | TokKind::SelfKeyword
+                    | TokKind::TyKw(_)
+                    | TokKind::FString(_)
+                    | TokKind::LeftParenthesis
+                    | TokKind::LeftSquare
+                    | TokKind::LeftBrace
+                    | TokKind::TildeLeftBrace
+                    | TokKind::Pipe
+                    | TokKind::DoublePipe
+                    | TokKind::Loop
+                    | TokKind::While
+                    | TokKind::For
+                    | TokKind::If
+                    | TokKind::Match
+                    | TokKind::Return
+                    | TokKind::Raise
+                    | TokKind::Break
+                    | TokKind::Collect
+                    | TokKind::Continue
+            )
+    }
+
+    /// Returns if this can start a pattern.
+    pub(crate) fn starts_pattern(self) -> bool {
+        Literal::try_from(self).is_ok()
+            || matches!(
+                self,
+                TokKind::Ident(_) | TokKind::LeftParenthesis | TokKind::Minus
+            )
+    }
+
+    /// Returns if this can start a type annotation.
+    pub(crate) fn starts_annotation(self) -> bool {
+        matches!(
+            self,
+            TokKind::Ident(_)
+                | TokKind::TyKw(_)
+                | TokKind::LeftParenthesis
+                | TokKind::LeftSquare
+                | TokKind::TildeLeftBrace
+        )
+    }
+
+    /// Returns if this is an identifier.
+    pub(crate) fn is_ident(self) -> bool {
+        matches!(self, TokKind::Ident(_))
+    }
+
+    /// Returns if this is a keyword that starts a statement wherever it shows up. Recovery
+    /// never skips these.
+    pub(crate) fn is_stmt_keyword(self) -> bool {
+        matches!(self, TokKind::Let | TokKind::Module) || self.starts_item()
+    }
+
+    /// Returns if this closes a group.
+    pub(crate) fn is_closer(self) -> bool {
+        matches!(
+            self,
+            TokKind::RightParenthesis | TokKind::RightSquare | TokKind::RightBrace
+        )
+    }
+
+    /// Returns if this is a token recovery leaves where it is, for whatever's waiting on it.
+    pub(crate) fn is_anchor(self) -> bool {
+        self.ends_list() || self == TokKind::Comma
+    }
+
+    /// Returns if a list that finds this where an element should start is over. These can't
+    /// be part of a list unless an element takes them, so something further out is waiting
+    /// for each.
+    pub(crate) fn ends_list(self) -> bool {
+        self.is_boundary()
+            || matches!(
+                self,
+                TokKind::Equal
+                    | TokKind::Arrow
+                    | TokKind::FatArrow
+                    | TokKind::LeftBrace
+                    | TokKind::In
+                    | TokKind::Else
+            )
+    }
+
+    /// Returns if no skip inside a list runs past this.
+    pub(crate) fn is_boundary(self) -> bool {
+        self.ends_stmt() || self.is_closer()
+    }
+
+    /// Returns if a broken statement never runs past this.
+    pub(crate) fn ends_stmt(self) -> bool {
+        matches!(
+            self,
+            TokKind::SemiColon | TokKind::RightBrace | TokKind::Eof
+        ) || self.is_stmt_keyword()
     }
 }

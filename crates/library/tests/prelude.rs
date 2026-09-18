@@ -13,3 +13,12 @@ test_run!(
     r#"let x: int = if true { 5 } else { panic("nope") };"#,
     "x" => "5",
 );
+
+test_fail!(
+    library_names_are_not_values,
+    "std;",
+    "array;",
+    "dict;",
+    "let a = std::fs;",
+    r#"f"{std}";"#,
+);

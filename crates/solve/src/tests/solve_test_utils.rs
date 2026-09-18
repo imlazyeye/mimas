@@ -28,7 +28,7 @@ impl TestSession {
         self.0.set_sources(sources);
         let lexer = Lexer::new(source, 0, file_name);
         let parser = Parser::new(lexer);
-        let ast = parser.into_ast().unwrap();
+        let ast = parser.try_into_ast().unwrap();
         self.0.solve(&ast)?;
         Ok(())
     }
@@ -368,7 +368,8 @@ macro_rules! test_multi_file {
                 let source = Box::leak(Box::new($file_src.to_string()));
                 let lexer = parse::lex::Lexer::new(source, 0, stringify!($file_name).into());
                 let parser = parse::Parser::new(lexer);
-                asts.push(parser.into_ast().unwrap());
+                let ast = parser.try_into_ast().unwrap();
+                asts.push(ast);
             )+
             TEST_SESSION
                 .with(|s| s.borrow_mut().0.solve_all(asts.iter()))
@@ -399,7 +400,8 @@ macro_rules! test_multi_file_fail {
                 let source = Box::leak(Box::new($file_src.to_string()));
                 let lexer = parse::lex::Lexer::new(source, 0, stringify!($file_name).into());
                 let parser = parse::Parser::new(lexer);
-                asts.push(parser.into_ast().unwrap());
+                let ast = parser.try_into_ast().unwrap();
+                asts.push(ast);
             )+
             let result = TEST_SESSION.with(|s| s.borrow_mut().0.solve_all(asts.iter()));
             assert!(result.is_err(), "expected multi-file program to fail solve");
@@ -418,7 +420,8 @@ macro_rules! test_reduction {
             let _t = TestResetter;
             let lexer = parse::lex::Lexer::new($src, 0, "test".into());
             let mut parser = parse::Parser::new(lexer);
-            let outputed = parser.expr().unwrap();
+            let outputed = parser.expr();
+            assert!(parser.errors().is_empty(), "{:?}", parser.errors());
             let got = reduce_simple(&outputed).unwrap();
             pretty_assertions::assert_eq!(got, None);
         }
@@ -434,7 +437,8 @@ macro_rules! test_reduction {
             $({
                 let lexer = parse::lex::Lexer::new($src, 0, "test".into());
                 let mut parser = parse::Parser::new(lexer);
-                let outputed = parser.expr().unwrap();
+                let outputed = parser.expr();
+                assert!(parser.errors().is_empty(), "{:?}", parser.errors());
                 let got = reduce_simple(&outputed).unwrap();
                 if got != Some($should_be) {
                     println!("Failed on `{}`", $src);

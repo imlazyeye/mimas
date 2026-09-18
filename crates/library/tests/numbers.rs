@@ -309,3 +309,10 @@ test_run!(
     "(-3.0).signum()" => "-1",
     "std::math::TAU == 2.0 * std::math::PI" => "true",
 );
+
+test_fail!(
+    number_method_without_call_is_not_a_value,
+    "1.max;",
+    "1.5.min;",
+    r#"f"{3.max}";"#,
+);

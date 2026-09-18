@@ -1,4 +1,4 @@
-use crate::{IntoStmt, NodeId, StmtKind};
+use crate::{IntoStmt, NodeId, StmtKind, components::Poison};
 
 use super::*;
 use shared::{Located, Location};
@@ -36,6 +36,7 @@ declare_item_kinds!(
         Impl,
         Const,
         Use,
+        Poison,
     }
 );
 

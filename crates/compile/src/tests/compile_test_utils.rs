@@ -1,7 +1,7 @@
 #[cfg(test)]
 pub(crate) fn lower_ir(src: &str) -> String {
     let lexer = parse::lex::Lexer::new(src, 0, String::new());
-    let ast = parse::Parser::new(lexer).into_ast().unwrap();
+    let ast = parse::Parser::new(lexer).try_into_ast().unwrap();
     let mut solver = solve::Solver::new();
     solver.solve(&ast).unwrap();
     let resolutions = solver.into();
@@ -15,7 +15,7 @@ pub(crate) fn lower_ir(src: &str) -> String {
 #[cfg(test)]
 pub(crate) fn compile_ops(src: &str) -> Vec<crate::Op> {
     let lexer = parse::lex::Lexer::new(src, 0, String::new());
-    let ast = parse::Parser::new(lexer).into_ast().unwrap();
+    let ast = parse::Parser::new(lexer).try_into_ast().unwrap();
     let mut solver = solve::Solver::new();
     solver.solve(&ast).unwrap();
     let resolutions = solver.into();
@@ -38,7 +38,7 @@ macro_rules! test_compile {
 
             $(
                 let lexer = parse::lex::Lexer::new($source, 0, stringify!($file_name).into());
-                let ast = parse::Parser::new(lexer).into_ast().unwrap();
+                let ast = parse::Parser::new(lexer).try_into_ast().unwrap();
                 solver.solve(&ast).unwrap();
                 stmts.extend(ast.unpack());
             )+
@@ -58,7 +58,7 @@ macro_rules! test_compile {
         fn $name() {
 
             let lexer = parse::lex::Lexer::new($source, 0, String::new());
-            let ast = parse::Parser::new(lexer).into_ast().unwrap();
+            let ast = parse::Parser::new(lexer).try_into_ast().unwrap();
             let mut solver = solve::Solver::new();
             solver.solve(&ast).unwrap();
             let resolutions = solver.into();

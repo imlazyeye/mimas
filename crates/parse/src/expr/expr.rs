@@ -1,4 +1,4 @@
-use crate::{IntoStmt, NodeId, StmtKind};
+use crate::{IntoStmt, NodeId, StmtKind, components::Poison};
 
 use super::*;
 use shared::{Located, Location};
@@ -56,6 +56,7 @@ declare_expr_kinds!(
         Unary,
         Unwrap,
         While,
+        Poison,
     }
 );
 

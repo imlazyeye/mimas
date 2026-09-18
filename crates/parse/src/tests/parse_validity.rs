@@ -116,7 +116,7 @@ test_ok!(nested_module_path_ok, "module a::b;");
 #[test]
 fn already_inside_module() {
     let lexer = crate::lex::Lexer::new("module a; module b;", 0, "test".into());
-    let ast = crate::Parser::new(lexer).into_ast().unwrap();
+    let ast = crate::Parser::new(lexer).try_into_ast().unwrap();
     assert!(
         ast.module_name().is_err(),
         "second `module` decl should be rejected"
@@ -126,7 +126,7 @@ fn already_inside_module() {
 #[test]
 fn single_module_name_ok() {
     let lexer = crate::lex::Lexer::new("module a;", 0, "test".into());
-    let ast = crate::Parser::new(lexer).into_ast().unwrap();
+    let ast = crate::Parser::new(lexer).try_into_ast().unwrap();
     assert!(ast.module_name().is_ok());
 }
 
@@ -292,6 +292,14 @@ test_ok!(
     struct_literal_in_if_body,
     "a = if true { Foo {} } else { Foo {} };"
 );
+test_ok!(
+    struct_literal_inside_a_condition_bracket,
+    "if foo(Bar { a = 1 }) { c(); }",
+    "if a == (if b { 1 } else { 2 }) { c(); }",
+    "if a[Bar { x = 1 }] { c(); }",
+    "while foo(Bar { a = 1 }) { c(); }",
+    "for i in foo(Bar { a = 1 }) { c(); }"
+);
 test_ok!(pattern_match_or, "match x { 0 | 1 | 2 => 1, _ => 2 }");
 test_ok!(match_arm_with_guard, "match x { 0 if true => 1, _ => 2 }");
 test_ok!(struct_literal_trailing_comma, "a = Foo { a = 1, };");
@@ -299,7 +307,16 @@ test_ok!(
     fstring_valid,
     r#"a = f"hello";"#,
     r#"a = f"hello {name}";"#,
-    r#"a = f"{1 + 2}";"#
+    r#"a = f"{1 + 2}";"#,
+    r#"a = f"{foo("multi
+     line")}";"#
+);
+test_ok!(
+    valueless_break_before_statement,
+    "loop {
+         break
+         let x = 1;
+     }"
 );
 test_ok!(closure_with_return_type, "a = |a: int| -> int { a };");
 test_ok!(
@@ -308,18 +325,27 @@ test_ok!(
     "pact Foo { fn a() { 0 } fn b(); fn c() -> int { 1 } }"
 );
 
-#[test]
-fn deep_nesting_does_not_overflow_the_stack() {
-    let src: &'static str = Box::leak(
-        format!(
-            "fn main() {{ let x = {}1{}; }}",
-            "(".repeat(4000),
-            ")".repeat(4000)
-        )
-        .into_boxed_str(),
-    );
-    crate::tests::utils::assert_rejects(src);
-}
+test_ok!(
+    long_else_if_ladder_parses,
+    format!(
+        "fn f(x) {{ if x == 0 {{ 0 }}{} else {{ -1 }} }}",
+        (1..80)
+            .map(|i| format!(" else if x == {i} {{ {i} }}"))
+            .collect::<String>()
+    )
+);
+test_ok!(
+    deeply_nested_blocks_parse,
+    format!("fn main() {{ {}{} }}", "if a { ".repeat(40), "}".repeat(40))
+);
+test_fail!(
+    deep_nesting_does_not_overflow_the_stack,
+    format!(
+        "fn main() {{ let x = {}1{}; }}",
+        "(".repeat(4000),
+        ")".repeat(4000)
+    )
+);
 
 // `T??` lexes as DoubleHook; the annotation loop turns it into a targeted diagnostic
 test_fail!(doubled_option_annotation, "let a: int?? = 5;");
@@ -333,9 +359,8 @@ test_fail!(misdirect_if_assign, "if x = 5 {}");
 
 #[test]
 fn misdirection_renders_spelling() {
-    let lexer = crate::lex::Lexer::new("if a and b {}", 0, "test".into());
-    let err = crate::Parser::new(lexer).into_ast().unwrap_err();
-    let rendered = format!("{err:?}");
+    let (_, errors) = crate::tests::utils::parse("if a and b {}");
+    let rendered = format!("{:?}", errors[0]);
     assert!(
         rendered.contains("&&"),
         "the `and` hint should teach `&&`: {rendered}"

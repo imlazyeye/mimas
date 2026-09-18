@@ -397,6 +397,7 @@ impl BlockWriter<'_> {
         fail_block: BlockId,
     ) -> Option<()> {
         match pat.kind() {
+            PatKind::Poison(poison) => poison.escaped(),
             PatKind::Ident(_) => {
                 let dec = self.ir.node_dec(pat.id());
                 let local = self.ir.local_for(dec);

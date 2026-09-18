@@ -457,6 +457,17 @@ test_fail!(
 );
 test_fail!(field_on_scalar, "let x = 5; let y = x.field;");
 test_fail!(method_on_scalar, "let x = 5; let y = x.nope();");
+test_fail!(
+    method_without_call_is_not_a_value,
+    "struct S {}
+     impl S {
+         fn f(self) -> int {
+             1
+         }
+     }
+     let s = S {};
+     let g = s.f;"
+);
 
 // struct construction arity
 test_fail!(

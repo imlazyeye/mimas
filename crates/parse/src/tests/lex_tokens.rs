@@ -34,6 +34,7 @@ tok_test!(invalid_backtick: "`" => Invalid("`"));
 tok_test!(invalid_hash: "#" => Invalid("#"));
 tok_test!(invalid_dollar: "$" => Invalid("$"));
 tok_test!(invalid_backslash: "\\" => Invalid("\\"));
+tok_test!(invalid_multibyte: "a § b" => Ident("a"), Invalid("§"), Ident("b"));
 
 tok_test!(line_comment_skipped: "1 // a comment\n2" => Int(1), Int(2));
 tok_test!(comment_only: "// nothing here" =>);

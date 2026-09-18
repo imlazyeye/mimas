@@ -21,9 +21,11 @@ pub mod components {
     mod binding;
     mod macros;
     mod pat;
+    mod poison;
     pub use annotation::*;
     pub use binding::*;
     pub use pat::*;
+    pub use poison::*;
 }
 
 pub mod expr {
@@ -144,6 +146,7 @@ mod tests {
     mod autogen_tok_tests;
     mod lex_tokens;
     mod parse_exprs;
+    mod parse_poison;
     mod parse_stmts;
     mod parse_validity;
 }

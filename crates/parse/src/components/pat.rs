@@ -4,7 +4,10 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use shared::{Located, Location};
 
-use crate::{Expr, Ident, Literal, NodeId};
+use crate::{
+    Expr, Ident, Literal, NodeId,
+    components::{POISON, Poison},
+};
 
 #[derive(Debug, Clone)]
 pub struct Pat {
@@ -61,6 +64,7 @@ pub enum PatKind {
     Or(Vec<Pat>),
     Literal(Literal),
     NullBind(Box<Pat>),
+    Poison(Poison),
 }
 
 #[mutants::skip]
@@ -84,6 +88,7 @@ impl Display for PatKind {
             PatKind::Or(pats) => f.pad(&pats.iter().map(ToString::to_string).join(" | ")),
             PatKind::Literal(lit) => f.pad(&lit.to_string()),
             PatKind::NullBind(ident) => f.pad(&format!("{ident}?")),
+            PatKind::Poison(_) => f.pad(POISON),
         }
     }
 }

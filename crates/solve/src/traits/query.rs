@@ -64,6 +64,7 @@ impl Query for Expr {
                 ExprKind::Unary(v) => v,
                 ExprKind::Unwrap(v) => v,
                 ExprKind::While(v) => v,
+                ExprKind::Poison(poison) => poison.escaped(),
             }
         }
 

@@ -100,6 +100,7 @@ impl TyExt for Ty {
     fn from_annotation(annotation: Annotation, solver: &mut Solver) -> Result<Ty> {
         match annotation {
             Annotation::Unit => Ok(Ty::Unit),
+            Annotation::Poison(poison) => poison.escaped(),
             Annotation::Kw(kw) => Ok(ty_from_kw(kw)),
             Annotation::Option(ty) => Ok(Ty::Option(Box::new(Ty::from_annotation(*ty, solver)?))),
             Annotation::Result(ty) => Ok(Ty::Result(Box::new(Ty::from_annotation(*ty, solver)?))),

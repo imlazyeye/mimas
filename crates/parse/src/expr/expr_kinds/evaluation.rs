@@ -62,16 +62,6 @@ impl EvaluationOp {
     pub(crate) fn is_additive(&self) -> bool {
         matches!(self, EvaluationOp::Plus | EvaluationOp::Minus)
     }
-
-    pub(crate) fn is_multiplicative(&self) -> bool {
-        matches!(
-            self,
-            EvaluationOp::Divide
-                | EvaluationOp::Multiply
-                | EvaluationOp::Div
-                | EvaluationOp::Modulo
-        )
-    }
 }
 
 #[mutants::skip]

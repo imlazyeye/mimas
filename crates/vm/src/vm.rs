@@ -1670,7 +1670,11 @@ impl Vm {
         let mut sources = Sources::with_capacity(files.len());
         for (file_id, (name, source)) in files.iter().enumerate() {
             let lexer = Lexer::new(source, file_id, (*name).into());
-            asts.push(Parser::new(lexer).into_ast()?);
+            // todo: only the first parse error makes it out
+            let ast = Parser::new(lexer)
+                .try_into_ast()
+                .map_err(|mut errors| errors.swap_remove(0))?;
+            asts.push(ast);
             sources.insert(
                 file_id,
                 miette::NamedSource::new(*name, std::sync::Arc::from(*source)),

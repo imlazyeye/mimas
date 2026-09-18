@@ -644,6 +644,25 @@ pub struct PactIsNotAValue {
 }
 
 #[derive(Error, Debug, Diagnostic)]
+#[error("`{name}` is not a value")]
+pub struct NotAValue {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("this names a module or a type -- reach into it with `::` instead")]
+    pub at: SourceSpan,
+    pub name: String,
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("methods are not values")]
+pub struct MethodIsNotAValue {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("call it -- a method can't be bound or passed around on its own")]
+    pub at: SourceSpan,
+}
+
+#[derive(Error, Debug, Diagnostic)]
 #[error("integer arithmetic overflows")]
 pub struct ConstOverflow {
     #[source_code]

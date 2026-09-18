@@ -68,9 +68,9 @@ pub fn solve(path: &Path) -> (vm::Vm, SolveSummary) {
         // full path, not the stem: this is the name parse diagnostics render, and solve/runtime
         // already use the full path -- `module @` stem-ifies it on its own
         let lexer = Lexer::new(&mimas, file_id, file_path.to_str().unwrap().to_string());
-        match Parser::new(lexer).into_ast() {
+        match Parser::new(lexer).try_into_ast() {
             Ok(ast) => files.push((file_path.to_path_buf(), ast)),
-            Err(e) => errors.push(e),
+            Err(parse_errors) => errors.extend(parse_errors),
         }
     }
 

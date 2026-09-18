@@ -2373,7 +2373,6 @@ dependencies = [
 name = "mimas-parse"
 version = "0.2.0"
 dependencies = [
- "bitflags 1.3.2",
  "chompy",
  "hashbrown 0.13.2",
  "itertools 0.10.5",

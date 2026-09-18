@@ -16,7 +16,7 @@ impl MimasScript {
     /// Whether the file's first token is `module`.
     pub(crate) fn is_module(&self) -> bool {
         let mut lexer = Lexer::new(&self.source, 0, self.path.clone());
-        matches!(lexer.next(), Some(Ok(tok)) if matches!(tok.kind, TokKind::Module))
+        matches!(lexer.next(), Some(tok) if matches!(tok.kind, TokKind::Module))
     }
 }
 

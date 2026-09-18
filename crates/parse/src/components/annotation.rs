@@ -1,7 +1,10 @@
 use crate::lex::TyKw;
 use itertools::Itertools;
 
-use crate::expr::Ident;
+use crate::{
+    components::{POISON, Poison},
+    expr::Ident,
+};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Annotation {
@@ -16,6 +19,7 @@ pub enum Annotation {
     Ty(Ident),
     Path(Vec<Ident>),
     Bounds(Vec<Ident>),
+    Poison(Poison),
 }
 
 #[mutants::skip]
@@ -39,6 +43,7 @@ impl std::fmt::Display for Annotation {
             Annotation::Ty(ident) => f.pad(&format!("{ident}")),
             Annotation::Path(idents) => f.pad(&idents.iter().map(|i| i.to_string()).join("::")),
             Annotation::Bounds(idents) => f.pad(&idents.iter().map(|i| i.to_string()).join(" + ")),
+            Annotation::Poison(_) => f.pad(POISON),
         }
     }
 }

@@ -13,31 +13,56 @@ macro_rules! tok_test {
         fn $name() {
             use chompy::lex::Token;
             let expected = vec![$($should_be, )*];
-            let lexer = $crate::lex::Lexer::new($src, 0, "test".into());
+            let mut lexer = $crate::lex::Lexer::new($src, 0, "test".into());
             let outputed = lexer
-                .map(|tok| tok.unwrap().kind().clone())
+                .by_ref()
+                .map(|tok| tok.kind().clone())
                 .collect::<Vec<$crate::lex::TokKind>>();
+            let errors = lexer.take_errors();
+            assert!(errors.is_empty(), "`{}` reported {:?}", $src, errors);
             pretty_assertions::assert_eq!(*outputed, expected)
         }
     };
 }
 
+/// Parses `source` into whatever Ast comes out, along with every error.
 #[cfg(test)]
-pub(crate) fn assert_parses(source: &'static str) {
+pub(crate) fn parse(source: &str) -> (crate::Ast, Vec<shared::Error>) {
     let lexer = crate::lex::Lexer::new(source, 0, "test".into());
-    let parsed = crate::Parser::new(lexer).into_ast();
+    crate::Parser::new(lexer).into_ast()
+}
+
+/// Parses `source`, giving back each top-level stmt and error as a string.
+#[cfg(test)]
+pub(crate) fn parse_to_strings(source: &str) -> (Vec<String>, Vec<String>) {
+    let (ast, errors) = parse(source);
+    (
+        ast.stmts().iter().map(ToString::to_string).collect(),
+        errors.iter().map(ToString::to_string).collect(),
+    )
+}
+
+/// The text `err`'s first label points at.
+#[cfg(test)]
+pub(crate) fn label_text<'a>(source: &'a str, err: &shared::Error) -> &'a str {
+    let label = err.labels().unwrap().next().unwrap();
+    &source[label.offset()..label.offset() + label.len()]
+}
+
+#[cfg(test)]
+pub(crate) fn assert_parses(source: &str) {
+    let (stmts, errors) = parse_to_strings(source);
     assert!(
-        parsed.as_ref().is_ok_and(|v| v.stmts().len() == 1),
-        "`{source}` should parse to one stmt but did not ({parsed:?})"
+        errors.is_empty() && stmts.len() == 1,
+        "`{source}` should parse to one stmt but did not ({stmts:?}, {errors:?})"
     );
 }
 
 #[cfg(test)]
-pub(crate) fn assert_rejects(source: &'static str) {
-    let lexer = crate::lex::Lexer::new(source, 0, "test".into());
-    let parsed = crate::Parser::new(lexer).into_ast();
+pub(crate) fn assert_rejects(source: &str) {
+    let (stmts, errors) = parse_to_strings(source);
     assert!(
-        parsed.map_or(true, |v| v.stmts().len() != 1),
+        !errors.is_empty() || stmts.len() != 1,
         "`{source}` should have been rejected but parsed"
     );
 }
@@ -48,7 +73,7 @@ macro_rules! test_ok {
         #[cfg(test)]
         #[test]
         fn $name() {
-            $( $crate::tests::utils::assert_parses($src); )+
+            $( $crate::tests::utils::assert_parses(&$src); )+
         }
     };
 }
@@ -59,7 +84,7 @@ macro_rules! test_fail {
         #[cfg(test)]
         #[test]
         fn $name() {
-            $( $crate::tests::utils::assert_rejects($src); )+
+            $( $crate::tests::utils::assert_rejects(&$src); )+
         }
     };
 }

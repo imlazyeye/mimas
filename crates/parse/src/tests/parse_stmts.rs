@@ -15,7 +15,8 @@ macro_rules! stmt_test {
             let expected = kind.into_stmt();
             let lexer = crate::lex::Lexer::new($source, 0, "test".into());
             let mut parser = crate::Parser::new(lexer);
-            let output = parser.stmt().unwrap();
+            let output = parser.stmt();
+            assert!(parser.errors().is_empty(), "{:?}", parser.errors());
             assert_eq!(output.kind(), expected.kind(), "`{}` failed!", $source);
         }
     };

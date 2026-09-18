@@ -47,6 +47,7 @@ pub struct Solver {
     pub(crate) ribs: Ribs,
     pub(crate) loop_stack: Vec<LoopRun>,
     pub(crate) fn_stack: Vec<FnRun>,
+    pub(crate) non_value: Option<NodeId>,
 }
 
 // Public impls
@@ -75,6 +76,7 @@ impl Solver {
             module_items: IndexMap::new(),
             sources: HashMap::new(),
             dec_to_native: HashMap::new(),
+            non_value: None,
         };
         solver.ribs.push_import();
         solver.ribs.push_block();
@@ -1281,6 +1283,7 @@ impl Solver {
                 PatKind::Struct(_, fields) => stack.extend(fields.values()),
                 PatKind::NullBind(inner) => stack.push(inner),
                 PatKind::Variant(_) | PatKind::Literal(_) => {}
+                PatKind::Poison(poison) => poison.escaped(),
             }
         }
         out
@@ -1320,6 +1323,7 @@ impl Solver {
                 unify(self, Ty::Vid(self.decs[dec].vid), ty, pat.location())
             }
             PatKind::Ident(ident) => self.declare(ident, pat.id(), ty).map(|_| ()),
+            PatKind::Poison(poison) => poison.escaped(),
             PatKind::Literal(lit) => unify(
                 self,
                 ty,
@@ -1392,7 +1396,7 @@ impl Solver {
                         (adt, None)
                     }
                     ExprKind::Access(Access::DoubleColon { left, right }) => {
-                        let adt = match left.query(self)? {
+                        let adt = match self.resolve_path_head(left)? {
                             Ty::Adt(adt) | Ty::Identity(adt) => adt,
                             lty => Err(bad(&lty))?,
                         };
@@ -1615,6 +1619,7 @@ impl Solver {
                 // re-runs `process_use` so the imports land in the body-solve phase's fresh
                 // import rib (hoist_uses pushed them, but its rib was popped at phase end).
                 ItemKind::Use(us) => self.process_use(us, item.location())?,
+                ItemKind::Poison(poison) => poison.escaped(),
                 // all we need to do at this point is process the fn defaults
                 ItemKind::Pact(pact) => {
                     let Some(pid) = self
@@ -1687,6 +1692,23 @@ impl Solver {
             },
         }
         Ok(())
+    }
+
+    /// Resolves the left of a `::` path (or a struct literal's name) at the type level. Unlike
+    /// [Solve for Ident], a bare ident here may name a module or a builtin namespace.
+    pub(crate) fn resolve_path_head(&mut self, expr: &parse::Expr) -> Result<Ty> {
+        match expr.kind() {
+            parse::ExprKind::Ident(ident) => self.resolve_name(ident, expr.location()),
+            _ => self.query_non_value(expr),
+        }
+    }
+
+    /// Queries `expr` somewhere it doesn't have to be a value. See [Self::non_value].
+    pub(crate) fn query_non_value(&mut self, expr: &parse::Expr) -> Result<Ty> {
+        let outer = self.non_value.replace(expr.id());
+        let ty = expr.query(self);
+        self.non_value = outer;
+        ty
     }
 
     pub fn resolve_name(&mut self, ident: &Ident, read_location: Location) -> Result<Ty> {

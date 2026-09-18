@@ -22,9 +22,8 @@ pub struct LexError {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
     pub diag: chompy::diagnostics::DiagBox,
-    // None when the diag's location is synthetic
     #[label("here")]
-    pub at: Option<SourceSpan>,
+    pub at: SourceSpan,
 }
 
 impl LexError {
@@ -65,13 +64,15 @@ pub struct MissingSemiColon {
     pub at: SourceSpan,
 }
 
+/// Something the grammar needs next (an expression, a pattern, ...) isn't there.
 #[derive(Error, Debug, Diagnostic)]
-#[error("expected identifier")]
-pub struct ExpectedIdentifier {
+#[error("expected {what}")]
+pub struct Expected {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
-    #[label("expected an identifier in this position")]
+    #[label("expected {what} here")]
     pub at: SourceSpan,
+    pub what: &'static str,
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -104,16 +105,6 @@ pub struct SingleTypeParens {
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("expected either")]
-pub struct ExpectedPossibleTokens {
-    #[source_code]
-    pub src: NamedSource<Arc<str>>,
-    #[label("expected this to be one of the following toks: {options}")]
-    pub at: SourceSpan,
-    pub options: String,
-}
-
-#[derive(Error, Debug, Diagnostic)]
 #[error("doubled option")]
 pub struct DoubledOption {
     #[source_code]
@@ -127,7 +118,7 @@ pub struct DoubledOption {
 pub struct NestingTooDeep {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
-    #[label("code can nest at most 64 levels deep")]
+    #[label("this is nested too deeply to parse")]
     pub at: SourceSpan,
 }
 
@@ -219,16 +210,6 @@ pub struct ExpectedToken {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
     #[label("expected `{expected}` here")]
-    pub at: SourceSpan,
-    pub expected: String,
-}
-
-#[derive(Error, Debug, Diagnostic)]
-#[error("parser misdirection")]
-pub struct ParserMisdirection {
-    #[source_code]
-    pub src: NamedSource<Arc<str>>,
-    #[label("the parser was confident `{expected}` would be here -- this is a bug!")]
     pub at: SourceSpan,
     pub expected: String,
 }

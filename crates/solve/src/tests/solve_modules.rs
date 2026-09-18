@@ -157,3 +157,15 @@ test_multi_file_fail!(
     foo => "module @; pub enum Color { Red, Blue, Green }",
     fizz => "module @; use foo::Color; pub fn pick(c: Color) -> int { match c { Color::Red => 0, Color::Blue => 1 } }";
 );
+
+test_multi_file_fail!(
+    module_is_not_a_value,
+    foo => "module @; pub const BAR: int = 0;",
+    fizz => "module @; pub fn buzz() { let x = foo; }";
+);
+
+test_multi_file_fail!(
+    imported_module_is_not_a_value,
+    foo => "module @; pub const BAR: int = 0;",
+    fizz => "module @; use foo; pub fn buzz() { let x = foo; }";
+);

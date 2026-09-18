@@ -1,17 +1,11 @@
-use std::sync::Arc;
-
 use chompy::{
     define_error,
-    diagnostics::{Builder, Result as ChompyResult},
+    diagnostics::{Builder, DiagBox, Result as ChompyResult},
     lex::{CharStream, Lex, Tok, UnterminatedString},
     utils::*,
 };
-use miette::NamedSource;
 
-use crate::{
-    errors::LexError,
-    lex::{TokKind, TyKw},
-};
+use crate::lex::{TokKind, TyKw};
 
 /// Lexing error for a `/*` that never meets its `*/`.
 pub struct UnterminatedBlockComment(pub Location);
@@ -27,12 +21,29 @@ define_error!(
     }
 );
 
-#[derive(Debug, Clone)]
+/// Lexing error for a whole number too big to hold.
+pub struct IntegerOutOfRange(pub Location);
+define_error!(
+    IntegerOutOfRange {
+        fn build(&self, builder: Builder) -> Builder {
+            builder.label(self.0.primary("this number doesn't fit in an int"))
+        }
+
+        fn location(&self) -> Location {
+            self.0
+        }
+    }
+);
+
+#[derive(Debug)]
 pub struct Lexer<'s> {
     source: &'s str,
     char_stream: CharStream<'s>,
     file_id: FileId,
     file_name: String,
+    offset: usize,
+    errors: Vec<(DiagBox, Location)>,
+    cut_short: bool,
 }
 
 impl<'s> Lexer<'s> {
@@ -43,26 +54,86 @@ impl<'s> Lexer<'s> {
             char_stream: CharStream::new(source),
             file_id,
             file_name,
+            offset: 0,
+            errors: vec![],
+            cut_short: false,
         }
+    }
+
+    /// Shifts every location the lexer produces by `offset`. For lexing a slice of a larger
+    /// source (an f-string's interpolation) with spans that still point into the whole thing.
+    pub(crate) fn with_offset(mut self, offset: usize) -> Self {
+        self.offset = offset;
+        self
     }
 
     pub(crate) fn file_name(&self) -> &str {
         &self.file_name
     }
 
-    fn is_fstring_start(&self) -> bool {
-        let bytes = self.source.as_bytes();
-        let pos = self.char_stream.position();
-        bytes.get(pos).copied() == Some(b'f') && bytes.get(pos + 1).copied() == Some(b'"')
+    /// Takes the errors found since the last call, each with where it happened.
+    pub fn take_errors(&mut self) -> Vec<(DiagBox, Location)> {
+        std::mem::take(&mut self.errors)
+    }
+
+    /// Whether a string or comment that never closed took the rest of the source with it.
+    pub(crate) fn cut_short(&self) -> bool {
+        self.cut_short
+    }
+
+    /// Where the source ends.
+    pub(crate) fn end(&self) -> Location {
+        self.location(self.source.len(), self.source.len())
+    }
+
+    /// `start..end` of our own source, as a location in the whole thing.
+    fn location(&self, start: usize, end: usize) -> Location {
+        Location::new(
+            self.file_id,
+            Span::new(self.offset + start, self.offset + end),
+        )
+    }
+
+    /// Reports whatever `start..body` opened as never closed. Only the opener is marked (the
+    /// rest of the file would be otherwise).
+    fn unterminated(&mut self, start: usize, body: usize, diag: impl FnOnce(Location) -> DiagBox) {
+        let location = self.location(start, body);
+        self.errors.push((diag(location), location));
+        self.cut_short = true;
+    }
+
+    /// Chomps the string or f-string opened at `start`. `body` is everything after the opening
+    /// quote, and `end` is where in it the closing quote is (when there is one). Returns what's
+    /// between the quotes.
+    fn construct_quoted(&mut self, start: usize, body: &'s str, end: Option<usize>) -> &'s str {
+        fn chomp_to(stream: &mut CharStream, end: usize) {
+            while stream.position() < end {
+                stream.chomp();
+            }
+        }
+        let body_start = self.source.len() - body.len();
+        match end {
+            Some(end) => {
+                chomp_to(&mut self.char_stream, body_start + end + 1);
+                &body[..end]
+            }
+            None => {
+                self.unterminated(start, body_start, |location| {
+                    UnterminatedString(location).into()
+                });
+                chomp_to(&mut self.char_stream, self.source.len());
+                body
+            }
+        }
     }
 
     /// Chomp a `/* ... */` block comment if one starts at the cursor. Nests like Rust's, so
     /// commenting out a region that already contains a block comment closes at the right `*/`.
-    /// Returns `None` when the cursor isn't on a `/*` at all.
-    fn construct_block_comment(&mut self) -> Option<ChompyResult<()>> {
+    /// Returns whether the cursor is actually on an `/*`.
+    fn construct_block_comment(&mut self) -> bool {
         if !(self.char_stream.match_peek('/') && self.char_stream.match_peek('*')) {
             self.char_stream.reset_peeks();
-            return None;
+            return false;
         }
         let start = self.char_stream.position();
         self.char_stream.chomp_peeks();
@@ -71,13 +142,12 @@ impl<'s> Lexer<'s> {
         // `/*/` must not open-and-close, matching rustc.
         let mut depth = 1usize;
         let mut prev = None;
-        loop {
+        while depth > 0 {
             let Some(c) = self.char_stream.chomp() else {
-                let location = Location::new(
-                    self.file_id,
-                    Span::new(start, self.char_stream.position().min(self.source.len())),
-                );
-                return Some(Err(UnterminatedBlockComment(location).into()));
+                self.unterminated(start, start + 2, |location| {
+                    UnterminatedBlockComment(location).into()
+                });
+                break;
             };
             match (prev, c) {
                 (Some('/'), '*') => {
@@ -86,119 +156,21 @@ impl<'s> Lexer<'s> {
                 }
                 (Some('*'), '/') => {
                     depth -= 1;
-                    if depth == 0 {
-                        return Some(Ok(()));
-                    }
                     prev = None;
                 }
                 _ => prev = Some(c),
             }
         }
-    }
-
-    /// Lex the body of an f-string `f"..."`. Caller has already chomped the `f`;
-    /// the cursor must be on the opening `"`.
-    ///
-    /// Unlike chompy's `construct_string`, this tracks `{...}` interpolation
-    /// depth so that a `"` *inside* an interp (e.g. `f"{m["k"]}"`) opens a
-    /// nested string instead of terminating the f-string. The literal portion
-    /// still honors `\"` and `{{` / `}}` escapes.
-    fn construct_fstring(&mut self) -> ChompyResult<&'s str> {
-        let file_id = self.file_id;
-        let stream = &mut self.char_stream;
-        let start = stream.position();
-        let opening = stream.peek_move().expect("called with `\"` at the cursor");
-        debug_assert_eq!(opening, '"');
-
-        let mut brace_depth: u32 = 0;
-        let mut in_escape = false;
-        loop {
-            let Some(c) = stream.peek_move() else {
-                let location = Location::new(file_id, Span::new(start, stream.peek_position()));
-                return Err(UnterminatedString(location).into());
-            };
-            if brace_depth == 0 {
-                if in_escape {
-                    in_escape = false;
-                    continue;
-                }
-                match c {
-                    '\\' => in_escape = true,
-                    '"' => {
-                        let open_w = opening.len_utf8();
-                        let close_w = c.len_utf8();
-                        let slice =
-                            stream.slice((start + open_w)..(stream.peek_position() - close_w));
-                        stream.chomp_peeks();
-                        return Ok(slice);
-                    }
-                    '{' => {
-                        if stream.peek() == Some('{') {
-                            stream.advance();
-                        } else {
-                            brace_depth = 1;
-                        }
-                    }
-                    '}' if stream.peek() == Some('}') => stream.advance(),
-                    _ => {}
-                }
-            } else {
-                match c {
-                    '{' => brace_depth += 1,
-                    '}' => brace_depth -= 1,
-                    '"' => {
-                        let mut esc = false;
-                        loop {
-                            let Some(ic) = stream.peek_move() else {
-                                let location = Location::new(
-                                    file_id,
-                                    Span::new(start, stream.peek_position()),
-                                );
-                                return Err(UnterminatedString(location).into());
-                            };
-                            if esc {
-                                esc = false;
-                                continue;
-                            }
-                            match ic {
-                                '\\' => esc = true,
-                                '"' => break,
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        true
     }
 }
 
 impl<'s> Iterator for Lexer<'s> {
-    type Item = shared::Result<Tok<TokKind<'s>>>;
+    type Item = Tok<TokKind<'s>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.lex() {
-            Ok(Some(item)) => Some(Ok(item)),
-            Err(diag) => {
-                let src = NamedSource::new(self.file_name.clone(), Arc::<str>::from(self.source));
-                // todo, use diag.location() once the chompy pin carries Diag locations;
-                // until then the cursor at failure time is the best anchor we have
-                let pos = self.char_stream.position().min(self.source.len());
-                let at = if pos >= self.source.len() {
-                    self.source.len().saturating_sub(1)..self.source.len()
-                } else {
-                    pos..pos + 1
-                };
-                Some(Err(LexError {
-                    src,
-                    diag,
-                    at: Some(at.into()),
-                }
-                .into()))
-            }
-            _ => None,
-        }
+        // chompy's trait makes `lex` a result, but ours has no way to fail
+        self.lex().ok().flatten()
     }
 }
 
@@ -217,32 +189,39 @@ impl<'s> Lex<'s, Tok<TokKind<'s>>, TokKind<'s>> for Lexer<'s> {
 
     fn lex(&mut self) -> ChompyResult<Option<Tok<TokKind<'s>>>> {
         // whitespace in one go -- massive amounts of whitespace can cause enormously deep stacks
-        loop {
-            if self.char_stream.match_chomp_with(|c| c.is_whitespace())
-                || self.construct_comment(&["//"]).is_some()
-            {
-                continue;
-            }
-            match self.construct_block_comment() {
-                Some(Ok(())) => continue,
-                Some(Err(diag)) => return Err(diag),
-                None => break,
-            }
-        }
-        let start_pos = self.char_stream.position();
+        while self.char_stream.match_chomp_with(|c| c.is_whitespace())
+            || self.construct_comment(&["//"]).is_some()
+            || self.construct_block_comment()
+        {}
+        let start = self.char_stream.position();
+        let rest = &self.source[start..];
         let kind = if let Some(hex) = self.construct_hex("0x") {
-            TokKind::Hex(hex?)
+            match hex {
+                Ok(hex) => TokKind::Hex(hex),
+                // a `0x` with no digits after it is still a hex literal, just an empty one
+                Err(diag) => {
+                    let location = self.location(start, self.char_stream.position());
+                    self.errors.push((diag, location));
+                    TokKind::Hex("")
+                }
+            }
         } else if let Some(float) = self.construct_float(true, true) {
             TokKind::Float(float)
-        } else if let Some(int) = self.construct_integer(true) {
-            TokKind::Int(int)
-        } else if self.is_fstring_start() {
-            // chomp the leading `f`
-            self.char_stream.chomp();
-            let string = self.construct_fstring()?;
-            TokKind::FString(string)
-        } else if let Some(string) = self.construct_string(&['"'], &['\\']) {
-            TokKind::String(string?)
+        } else if rest.starts_with(|c: char| c.is_ascii_digit()) {
+            match self.construct_integer(true) {
+                Some(int) => TokKind::Int(int),
+                // on a digit, the only way for that to fail is a number too big to hold
+                None => {
+                    let location = self.location(start, self.char_stream.position());
+                    self.errors
+                        .push((IntegerOutOfRange(location).into(), location));
+                    TokKind::Int(0)
+                }
+            }
+        } else if let Some(body) = rest.strip_prefix("f\"") {
+            TokKind::FString(self.construct_quoted(start, body, fstring_end(body)))
+        } else if let Some(body) = rest.strip_prefix('"') {
+            TokKind::String(self.construct_quoted(start, body, string_end(body)))
         } else if let Some(ident) = self.construct_ident() {
             match ident {
                 "self" => TokKind::SelfKeyword,
@@ -443,21 +422,67 @@ impl<'s> Lex<'s, Tok<TokKind<'s>>, TokKind<'s>> for Lexer<'s> {
                         TokKind::Slash
                     }
                 }
-                invalid => {
-                    // this is chill, I promise
-                    let tmp = Box::leak(Box::new([0u8; 4]));
-                    let invalid = invalid.encode_utf8(tmp);
-                    TokKind::Invalid(invalid)
-                }
+                _ => TokKind::Invalid(&self.source[start..self.char_stream.position()]),
             }
         };
 
-        Ok(Some(Tok::new(
-            kind,
-            Location::new(
-                self.file_id,
-                Span::new(start_pos, self.char_stream.position()),
-            ),
-        )))
+        let location = self.location(start, self.char_stream.position());
+        Ok(Some(Tok::new(kind, location)))
+    }
+}
+
+/// Where the string whose body is the start of `text` has its closing quote.
+fn string_end(text: &str) -> Option<usize> {
+    let mut chars = text.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '"' => return Some(at),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Where the f-string whose body is the start of `text` has its closing quote. A `"` inside an
+/// interpolation (`f"{m["k"]}"`) opens a nested string rather than closing the f-string.
+fn fstring_end(text: &str) -> Option<usize> {
+    let mut at = 0;
+    loop {
+        let rest = &text[at..];
+        let mut chars = rest.chars();
+        match chars.next()? {
+            '"' => return Some(at),
+            '\\' => at += 1 + chars.next().map_or(0, char::len_utf8),
+            '{' if rest.starts_with("{{") => at += 2,
+            '{' => match interp_end(&rest[1..]) {
+                Some(end) => at += 1 + end + 1,
+                // an interpolation that never closes holds no strings, so the next quote is ours
+                None => return rest.find('"').map(|quote| at + quote),
+            },
+            c => at += c.len_utf8(),
+        }
+    }
+}
+
+/// Where the `}` closing an f-string interpolation is, given the text right after its `{`.
+/// Braces nest, and one inside a nested string doesn't count.
+pub(crate) fn interp_end(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut at = 0;
+    loop {
+        let c = text[at..].chars().next()?;
+        at += c.len_utf8();
+        match c {
+            '}' if depth == 0 => return Some(at - 1),
+            '}' => depth -= 1,
+            '{' => depth += 1,
+            '"' => {
+                at += string_end(&text[at..])? + 1;
+            }
+            _ => {}
+        }
     }
 }

@@ -18,7 +18,6 @@ chompy.workspace = true
 pretty_assertions.workspace = true
 itertools.workspace = true
 hashbrown.workspace = true
-bitflags.workspace = true
 mutants.workspace = true
 miette.workspace = true
 thiserror.workspace = true

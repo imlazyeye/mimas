@@ -13,7 +13,8 @@ macro_rules! expr_test {
             let expected: crate::expr::Expr = crate::expr::ExprKind::from($expected).into_expr();
             let lexer = crate::lex::Lexer::new($source, 0, "test".into());
             let mut parser = crate::Parser::new(lexer);
-            let output = parser.expr().unwrap();
+            let output = parser.expr();
+            assert!(parser.errors().is_empty(), "{:?}", parser.errors());
             if output.kind() != expected.kind() {
                 assert_eq!(output.to_string(), expected.to_string());
                 assert_eq!(output.kind(), expected.kind());

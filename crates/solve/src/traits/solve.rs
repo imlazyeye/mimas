@@ -138,6 +138,22 @@ impl Solve for Access {
                     })
                 })?;
 
+            // a path that stops on a module hasn't named a value yet
+            if solver.non_value != Some(id)
+                && matches!(
+                    field.ty.clone().normalized(solver),
+                    Ty::Adt(inner) if solver.adts[&inner]
+                        .flags
+                        .intersects(AdtFlags::IS_MODULE | AdtFlags::IS_BUILTIN)
+                )
+            {
+                Err(NotAValue {
+                    src: solver.src(right.location()),
+                    at: right.location().into(),
+                    name: right.lexeme.clone(),
+                })?
+            }
+
             let dec = field.dec;
             solver.check_vis(dec, right.location())?;
             solver.node_decs.insert(id, dec);
@@ -338,6 +354,14 @@ impl Solve for Access {
                                 .into());
                             }
 
+                            if solver.non_value != Some(id) {
+                                return Err(MethodIsNotAValue {
+                                    src: solver.src(right.location()),
+                                    at: right.location().into(),
+                                }
+                                .into());
+                            }
+
                             // freshen so dispatch can't bind the pact header's shared self-slot
                             // vid, which would pollute every later use
                             // and impl signature check. through a bound, a `Self` return is some
@@ -354,9 +378,8 @@ impl Solve for Access {
                         }
                     }
                     other => {
-                        // adts/identity resolve directly; primitives & collections route through
-                        // their library adt so builtin methods and bare method refs resolve like
-                        // any other impl.
+                        // adts/identity resolve directly. primitives and collections route
+                        // through their library adt, which is where their methods live
                         let aid = match other {
                             Ty::Adt(aid) | Ty::Identity(aid) => *aid,
                             l => solver.builtin_adt(l).ok_or_else(|| {
@@ -425,7 +448,7 @@ impl Solve for Access {
                                 let dec = impl_field.dec;
                                 solver.check_vis(dec, right.location())?;
                                 solver.node_decs.insert(id, dec);
-                                if let Some(binding) = solver.dec_to_native.get(&dec) {
+                                let member = if let Some(binding) = solver.dec_to_native.get(&dec) {
                                     let sig = crate::NativeFnSig {
                                         params: binding.sig.params.clone(),
                                         return_ty: binding.sig.return_ty.clone(),
@@ -435,7 +458,19 @@ impl Solve for Access {
                                         .instantiate_native(&sig, Some((&lhs, left.location())))?
                                 } else {
                                     impl_field.ty
+                                };
+                                // an associated const reads fine through a value, but a
+                                // method only exists as a call's callee
+                                if solver.non_value != Some(id)
+                                    && matches!(member.clone().normalized(solver), Ty::Fn(_))
+                                {
+                                    return Err(MethodIsNotAValue {
+                                        src: solver.src(right.location()),
+                                        at: right.location().into(),
+                                    }
+                                    .into());
                                 }
+                                member
                             }
                         }
                     }
@@ -697,7 +732,8 @@ impl Solve for Call {
                     solver.shadow_expr_ty(self.left.id(), t.clone(), self.left.location())?;
                     t.normalized(solver)
                 }
-                None => self.left.query(solver)?.normalized(solver),
+                // the callee is the one place a method access is legal
+                None => solver.query_non_value(&self.left)?.normalized(solver),
             };
             let fn_data = match ty {
                 Ty::Fn(fn_data) => fn_data,
@@ -1200,9 +1236,11 @@ impl Solve for Grouping {
 impl Solve for Ident {
     fn solve(&self, id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
         let ty = self.query(solver)?;
+        let resolved = solver.ribs.resolve_with_closures(self);
+        let bound = resolved.is_some();
 
         // mark this usage; every closure boundary crossed on the way to the binding captures it
-        if let Some((dec_id, crossed)) = solver.ribs.resolve_with_closures(self) {
+        if let Some((dec_id, crossed)) = resolved {
             solver.node_decs.insert(id, dec_id);
             if matches!(solver.decs[dec_id].kind, DecKind::Local | DecKind::LoopVar) {
                 for closure in crossed {
@@ -1227,6 +1265,19 @@ impl Solve for Ident {
                     .map(|m| FnParam::new(None, m.normalized(solver), false))
                     .collect();
                 return Ok(Ty::Fn(FnHeader::new(params, ty, false).ctor()));
+            }
+        }
+
+        // modules and builtin namespaces have a type for `::` paths to resolve against (see
+        // [Solver::resolve_path_head]), but they aren't values
+        if let Ty::Adt(adt) = &ty {
+            let flags = solver.adts[adt].flags;
+            if !bound || flags.intersects(AdtFlags::IS_MODULE | AdtFlags::IS_BUILTIN) {
+                Err(NotAValue {
+                    src: solver.src(self.location()),
+                    at: self.location().into(),
+                    name: self.lexeme.clone(),
+                })?
             }
         }
         Ok(ty)
@@ -1486,7 +1537,7 @@ impl Solve for Literal {
             Literal::Struct(StructLiteral { name, fields }) => {
                 let (adt, variant, layout) = match name.kind() {
                     ExprKind::Access(Access::DoubleColon { left, right }) => {
-                        let lhs = left.query(solver)?;
+                        let lhs = solver.resolve_path_head(left)?;
                         let adt = match lhs {
                             Ty::Adt(adt) | Ty::Identity(adt) => adt,
                             _ => Err(NotAStruct {
@@ -1568,7 +1619,7 @@ impl Solve for Literal {
                         (adt, variant, adt)
                     }
                     ExprKind::Ident(ident) => {
-                        let lhs = name.query(solver)?;
+                        let lhs = solver.resolve_path_head(name)?;
                         let dec = solver.ribs.resolve(ident).ok_or_else(|| NotFound {
                             src: solver.src(ident.location),
                             at: ident.location.into(),
@@ -1953,7 +2004,7 @@ impl Solve for While {
 /// struct ident resolves to its constructor `Ty::Fn` via `Ident::solve`, so look through that to
 /// reach the underlying adt.
 fn adt_from_type_path(left: &Expr, solver: &mut Solver) -> Result<AdtId> {
-    let ty = left.query(solver)?;
+    let ty = solver.resolve_path_head(left)?;
     match ty {
         Ty::Adt(adt) | Ty::Identity(adt) => Ok(adt),
         Ty::Fn(ref f) => match f.return_ty.as_ref() {

@@ -1,23 +1,37 @@
 use crate::{components::*, errors::*, *};
-use bitflags::bitflags;
 use chompy::{
     lex::{Lex, Tok, Token},
     utils::Located as _,
 };
-use lex::{Lexer, TokKind};
+use lex::{Lexer, TokKind, interp_end};
 use miette::NamedSource;
-use shared::{FileId, Located, Location, Result, Span};
-use std::{iter::Peekable, sync::Arc};
+use shared::{FileId, Located, Location, Span};
+use std::{cell::Cell, sync::Arc};
 
 /// Recursively descends mimas source, incrementally returning various
 /// statements and expressions.
 pub struct Parser<'s> {
-    lexer: Peekable<Lexer<'s>>,
-    cursor: usize,
+    /// Always ends with an `Eof`.
+    tokens: Vec<Tok<TokKind<'s>>>,
+    /// Index of the next token in `tokens`.
+    next: usize,
+    /// Spent by looking at the next token and refilled by taking it. Running out means the
+    /// parser is stuck.
+    fuel: Cell<u32>,
+    /// All errors the parser encounterse along its descent.
+    errors: Vec<shared::Error>,
+    /// The token the last error was reported at. Anything else that goes wrong there is
+    /// fallout, and isn't reported.
+    last_error: Option<usize>,
+    /// The lexer already reported why the input ends where it does.
+    cut_short: bool,
+    /// The file id of this parser's source.
     file_id: FileId,
+    /// The file name of the this parser's source. Todo: do we really need this _and_ the id?
     file_name: String,
     src: NamedSource<Arc<str>>,
-    restrictions: Restriction,
+    /// Off inside a condition, where a `{` opens the body.
+    struct_literals: bool,
     depth: usize,
 }
 
@@ -25,63 +39,118 @@ pub struct Parser<'s> {
 impl<'s> Parser<'s> {
     /// Creates a new parser.
     pub fn new(lexer: Lexer<'s>) -> Self {
-        let file_id = lexer.file_id();
-        let file_name: String = lexer.file_name().into();
-        let src = NamedSource::new(file_name.clone(), Arc::<str>::from(lexer.source()));
-        let mut lexer = lexer.peekable();
-        let cursor = lexer
-            .peek()
-            .map_or(0, |v| v.as_ref().map_or(0, |v| v.span().start()));
+        let src = NamedSource::new(lexer.file_name(), Arc::<str>::from(lexer.source()));
+        Self::with_src(lexer, src)
+    }
+
+    /// Creates a parser whose diagnostics render against `src` rather than the lexer's own
+    /// source (the lexer is on a slice of it).
+    fn with_src(mut lexer: Lexer<'s>, src: NamedSource<Arc<str>>) -> Self {
+        let mut tokens: Vec<_> = lexer.by_ref().collect();
+        tokens.push(Tok::new(TokKind::Eof, lexer.end()));
+        let errors = lexer
+            .take_errors()
+            .into_iter()
+            .map(|(diag, location)| {
+                let err = LexError {
+                    src: src.clone(),
+                    diag,
+                    at: Location::from(location).into(),
+                };
+                err.into()
+            })
+            .collect();
         Self {
-            file_id,
-            lexer,
-            cursor,
-            file_name,
+            tokens,
+            next: 0,
+            fuel: Cell::new(FUEL),
+            errors,
+            last_error: None,
+            cut_short: lexer.cut_short(),
+            file_id: lexer.file_id(),
+            file_name: lexer.file_name().into(),
             src,
-            restrictions: Restriction::default(),
+            struct_literals: true,
             depth: 0,
         }
     }
 
-    /// Guards the recursive descent against stack overflow: deeply-nested (or unbalanced --
-    /// 50k stray `(`s) input would otherwise SIGABRT before any diagnostic. Callers pair this
-    /// with a `self.depth -= 1` after the recursive body returns; the error path skips the
-    /// decrement because the whole parse aborts on the first error anyway.
-    fn descend(&mut self) -> Result<()> {
-        const MAX_DEPTH: usize = 64;
-        self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            let at = shared::Location::from(self.peek()?.location()).into();
-            Err(NestingTooDeep {
-                src: self.src(),
-                at,
-            })?;
+    /// Parses the whole source into an Ast, along with every error found. Anything that failed
+    /// to parse is left in the Ast as [Poison], which later stages treat as unreachable, so only
+    /// pass the Ast on when the errors are empty.
+    pub fn into_ast(mut self) -> (Ast, Vec<shared::Error>) {
+        let mut statements = vec![];
+        while !self.at(TokKind::Eof) {
+            if self.peek().starts_stmt() {
+                statements.push(self.stmt());
+            } else {
+                self.reject_stmt(self.unexpected_token());
+            }
         }
-        Ok(())
+        // the lexer's errors went in first
+        self.errors.sort_by_cached_key(|err| {
+            let label = err.labels().and_then(|mut labels| labels.next());
+            label.map_or(0, |label| label.offset())
+        });
+        (Ast::new(self.file_name, self.src, statements), self.errors)
+    }
+
+    /// The Ast, if the source parsed cleanly. What most callers want -- see [Self::into_ast]
+    /// for the errors themselves.
+    pub fn try_into_ast(self) -> std::result::Result<Ast, Vec<shared::Error>> {
+        let (ast, errors) = self.into_ast();
+        if errors.is_empty() {
+            Ok(ast)
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Every error found so far. Check this after [Self::expr], which returns poison instead
+    /// of failing.
+    pub fn errors(&self) -> &[shared::Error] {
+        &self.errors
+    }
+
+    /// Runs `body` one level deeper into the grammar, or gives up with `None` when that's too
+    /// deep (the stack would overflow long before the input ran out). Every cycle in the
+    /// grammar has to pass through a call to this.
+    fn nested<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> Option<T> {
+        const MAX_DEPTH: usize = 100;
+        if self.depth >= MAX_DEPTH {
+            self.error(NestingTooDeep {
+                src: self.src(),
+                at: self.next_location().into(),
+            });
+            // the rest of the statement would only land us back here
+            self.skip();
+            self.skip_stmt();
+            return None;
+        }
+        self.depth += 1;
+        let parsed = body(self);
+        self.depth -= 1;
+        Some(parsed)
+    }
+
+    /// Runs `body` with struct literals allowed or not, then puts that back as it was. A
+    /// condition turns them off, and any brackets inside it turn them back on (nothing in
+    /// there can be mistaken for the body).
+    fn struct_literals<T>(&mut self, allowed: bool, body: impl FnOnce(&mut Self) -> T) -> T {
+        let outer = std::mem::replace(&mut self.struct_literals, allowed);
+        let parsed = body(self);
+        self.struct_literals = outer;
+        parsed
     }
 
     /// Clone the per-file `NamedSource` for embedding in a diagnostic. Cheap (Arc + String).
-    pub(crate) fn src(&self) -> NamedSource<Arc<str>> {
+    fn src(&self) -> NamedSource<Arc<str>> {
         self.src.clone()
-    }
-
-    /// Runs the parser through the entire source, collecting everything into an
-    /// Ast and returning it.
-    ///
-    /// ### Errors
-    ///
-    /// Returns a [ParseError] if any of the source code caused an error.
-    pub fn into_ast(mut self) -> Result<Ast> {
-        let mut statements = vec![];
-        while self.soft_peek()?.is_some() {
-            statements.push(self.stmt()?);
-        }
-        Ok(Ast::new(self.file_name, self.src, statements))
     }
 
     /// Creates a new expression.
     fn new_expr(&self, expr: impl Into<ExprKind>, start: usize) -> Expr {
-        Expr::new(expr.into(), Location::new(self.file_id, self.span(start)))
+        Expr::new(expr.into(), self.location(start))
     }
 
     /// Creates a new statement.
@@ -89,28 +158,31 @@ impl<'s> Parser<'s> {
         Stmt::new(stmt.into(), NodeId::new(), self.location(start))
     }
 
-    /// Creates a [Span] from the given position up until our current position.
-    fn span(&self, start: usize) -> Span {
-        Span::new(start, self.cursor)
+    /// Creates a new pattern.
+    fn new_pat(&self, pat: PatKind, start: usize) -> Pat {
+        Pat::new(pat, self.location(start))
     }
 
-    /// Creates a [Location] from the given position up until our current position.
+    /// Creates a poison expression covering whatever was consumed since `start`.
+    fn poison_expr(&self, start: usize) -> Expr {
+        self.new_expr(Poison, start)
+    }
+
+    /// Creates a [Location] from the given position up until our current position (empty at the
+    /// cursor if nothing was consumed since `start`).
     fn location(&self, start: usize) -> Location {
-        Location::new(self.file_id, self.span(start))
+        let end = self.cursor();
+        Location::new(self.file_id, Span::new(start.min(end), end))
     }
 }
 
 // Recursive descent (mimas grammar)
 impl<'s> Parser<'s> {
-    pub(crate) fn stmt(&mut self) -> Result<Stmt> {
-        let start = self.next_tok_boundary();
-        match self.node()? {
-            BlockElement::Stmt(stmt) => Ok(stmt),
-            BlockElement::MaybeYield(expr) => {
-                let stmt = self.new_stmt(StmtKind::Expr(expr), start);
-                self.semicolon_check(&stmt)?;
-                Ok(stmt)
-            }
+    pub(crate) fn stmt(&mut self) -> Stmt {
+        let start = self.next_start();
+        match self.node() {
+            BlockElement::Stmt(stmt) => stmt,
+            BlockElement::MaybeYield(expr) => self.expr_stmt(expr, start),
         }
     }
 
@@ -118,156 +190,110 @@ impl<'s> Parser<'s> {
     /// out: a fully-formed statement, or a bare expression whose role (yielded value vs expression
     /// statement) the caller decides. Assignments finish here as `Stmt`; only true bare exprs
     /// surface as `MaybeYield`.
-    fn node(&mut self) -> Result<BlockElement> {
-        let start = self.next_tok_boundary();
-        match self.peek()?.kind() {
-            TokKind::Let => self.let_stmt().map(BlockElement::Stmt),
-            TokKind::Module => self.module_stmt().map(BlockElement::Stmt),
-            TokKind::Pub
-            | TokKind::Fn
-            | TokKind::Struct
-            | TokKind::Pact
-            | TokKind::Enum
-            | TokKind::Impl
-            | TokKind::Const
-            | TokKind::Use => {
-                let item = self.item()?;
-                let stmt = self.new_stmt(item, start);
-                Ok(BlockElement::Stmt(stmt))
-            }
-            // here to give a nicer diagnostic than "expected identifier" when the user writes `;;`
-            TokKind::SemiColon => {
-                let tok = self.take()?;
-                Err(self.unexpected(tok).into())
+    fn node(&mut self) -> BlockElement {
+        let start = self.next_start();
+        match self.peek() {
+            TokKind::Let => BlockElement::Stmt(self.let_stmt()),
+            TokKind::Module => BlockElement::Stmt(self.module_stmt()),
+            kind if kind.starts_item() => {
+                let item = self.item();
+                self.end_item(&item);
+                BlockElement::Stmt(self.new_stmt(item, start))
             }
             _ => {
-                let expr = self.expr()?;
+                let expr = self.expr();
 
                 // TODO: assignment does not belong here... I think
-                if let Some(operator) = self.soft_peek()?.and_then(|tok| tok.kind().try_into().ok())
-                {
-                    // Ensure the left is a valid assignment target
-                    if !matches!(expr.kind(), ExprKind::Access(_) | ExprKind::Ident(_)) {
-                        Err(errors::InvalidAssignmentTarget {
-                            src: self.src(),
-                            at: expr.location().into(),
-                        })?
-                    } else {
-                        self.take()?;
-                        let assignment = Assignment::new(expr, operator, self.expr()?);
-                        let stmt = self.new_stmt(assignment, start);
-                        self.ok_if_semicolon(stmt).map(BlockElement::Stmt)
-                    }
+                let Ok(operator) = self.peek().try_into() else {
+                    return BlockElement::MaybeYield(expr);
+                };
+                let left = if matches!(
+                    expr.kind(),
+                    ExprKind::Access(_) | ExprKind::Ident(_) | ExprKind::Poison(_)
+                ) {
+                    expr
                 } else {
-                    Ok(BlockElement::MaybeYield(expr))
+                    self.error(InvalidAssignmentTarget {
+                        src: self.src(),
+                        at: expr.location().into(),
+                    });
+                    Expr::new(Poison.into(), expr.location())
+                };
+                self.advance();
+                let assignment = Assignment::new(left, operator, self.expr());
+                let stmt = self.new_stmt(assignment, start);
+                self.end_stmt(stmt.location());
+                BlockElement::Stmt(stmt)
+            }
+        }
+    }
+
+    fn item(&mut self) -> Item {
+        fn inner(parser: &mut Parser) -> ItemKind {
+            match parser.peek() {
+                TokKind::Fn => parser.function().into(),
+                TokKind::Struct => parser.struct_decl().into(),
+                TokKind::Pact => parser.pact_decl().into(),
+                TokKind::Enum => parser.enum_decl().into(),
+                TokKind::Impl => parser.impl_decl().into(),
+                TokKind::Const => parser.const_decl().into(),
+                TokKind::Use => parser.use_decl().map_or(Poison.into(), Into::into),
+                _ => {
+                    parser.expected("item");
+                    Poison.into()
                 }
             }
         }
+        let start = self.next_start();
+        let public = self.eat(TokKind::Pub);
+        let kind = self.nested(inner).unwrap_or(Poison.into());
+        Item::new(kind, self.location(start), public)
     }
 
-    fn item(&mut self) -> Result<Item> {
-        let start = self.next_tok_boundary();
-        let public = self.match_take(TokKind::Pub).is_some();
-
-        let (kind, requires_semi): (ItemKind, bool) = match self.peek()?.kind() {
-            TokKind::Fn => (self.function()?.into(), false),
-            TokKind::Struct => (self.struct_decl()?.into(), false),
-            TokKind::Pact => (self.pact_decl()?.into(), false),
-            TokKind::Enum => (self.enum_decl()?.into(), false),
-            TokKind::Impl => (self.impl_decl()?.into(), false),
-            TokKind::Const => (self.const_decl()?.into(), true),
-            TokKind::Use => (self.use_decl()?.into(), true),
-            _ => {
-                let tok = self.take()?;
-                Err(self.unexpected(tok))?
-            }
-        };
-
-        let location = self.location(start);
-        if requires_semi {
-            if self.match_take(TokKind::SemiColon).is_none() {
-                Err(MissingSemiColon {
-                    src: self.src(),
-                    at: location.into(),
-                })?
-            }
-        } else {
-            // optional trailing `;` after fn/struct/enum/impl
-            self.match_take(TokKind::SemiColon);
-        }
-
-        Ok(Item::new(kind, location, public))
-    }
-
-    fn use_decl(&mut self) -> Result<Use> {
-        self.take_known(TokKind::Use)?;
+    fn use_decl(&mut self) -> Option<Use> {
+        self.bump(TokKind::Use);
 
         // detailed error, mostly as a humorous nod to rustc
-        if let Some(tok) = self.match_take(TokKind::Star) {
-            Err(UseAllModules {
+        if self.at(TokKind::Star) {
+            self.reject(UseAllModules {
                 src: self.src(),
-                at: shared::Location::from(tok.location()).into(),
-            })?;
+                at: self.next_location().into(),
+            });
+            return None;
         }
 
-        // All use statements must start with an identifier
-        let mut path = vec![self.require_ident()?];
-
-        // Now a semi colon ends us or a colon continues us
-        loop {
-            let tok = self.peek()?;
-            match tok.kind() {
-                TokKind::SemiColon => {
-                    let item = path.pop().unwrap();
-                    return Ok(Use::Singular(path, item));
+        let mut path = vec![self.require_ident()];
+        while self.eat(TokKind::DoubleColon) {
+            match self.peek() {
+                TokKind::Ident(_) => path.push(self.require_ident()),
+                TokKind::Star => {
+                    self.bump(TokKind::Star);
+                    return Some(Use::All(path));
                 }
-                TokKind::DoubleColon => {
-                    self.take()?;
-                    match self.peek()?.kind() {
-                        TokKind::Ident(_) => {
-                            path.push(self.require_ident()?);
-                        }
-                        TokKind::Star => {
-                            self.take()?;
-                            return Ok(Use::All(path));
-                        }
-                        TokKind::LeftBrace => {
-                            self.take()?;
-                            let mut items = vec![];
-                            while let Some(ident) = self.match_take_ident()? {
-                                items.push(ident);
-                                if self.match_take(TokKind::Comma).is_none() {
-                                    break;
-                                }
-                                if self.peek()?.kind() == TokKind::RightBrace {
-                                    break;
-                                }
-                            }
-                            self.expect(TokKind::RightBrace)?;
-                            return Ok(Use::Multi(path, items));
-                        }
-                        _ => {
-                            let tok = self.take()?;
-                            Err(self.unexpected(tok))?
-                        }
-                    }
+                TokKind::LeftBrace => {
+                    self.bump(TokKind::LeftBrace);
+                    let items =
+                        self.list(TokKind::RightBrace, TokKind::is_ident, Self::require_ident);
+                    return Some(Use::Multi(path, items));
                 }
                 _ => {
-                    let tok = self.take()?;
-                    Err(self.unexpected(tok))?
+                    self.expected("import");
+                    return None;
                 }
             }
         }
+        // the path ran out, so its last segment is the import
+        let item = path.pop()?;
+        Some(Use::Singular(path, item))
     }
 
-    fn module_stmt(&mut self) -> Result<Stmt> {
-        // First we take the module
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Module)?;
+    fn module_stmt(&mut self) -> Stmt {
+        let start = self.next_start();
+        self.bump(TokKind::Module);
 
         // We either are given an ident or an @, which maps to the file name. The lexer's name
         // can be a full path (that's what diagnostics render), so take the stem here.
-        let module = if self.match_take(TokKind::At).is_some() {
+        let module = if self.eat(TokKind::At) {
             let stem = std::path::Path::new(&self.file_name)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -277,9 +303,9 @@ impl<'s> Parser<'s> {
         } else {
             // `module a::b;` -- nested path, flattened into one `::`-joined name (the solver
             // splits it back out through ensure_module_path)
-            let mut ident = self.require_ident()?;
-            while self.match_take(TokKind::DoubleColon).is_some() {
-                let segment = self.require_ident()?;
+            let mut ident = self.require_ident();
+            while self.eat(TokKind::DoubleColon) {
+                let segment = self.require_ident();
                 ident.lexeme = format!("{}::{}", ident.lexeme, segment.lexeme);
             }
             ident.location = self.location(start);
@@ -287,25 +313,18 @@ impl<'s> Parser<'s> {
         };
 
         let stmt = self.new_stmt(module, start);
-        self.ok_if_semicolon(stmt)
+        self.end_stmt(stmt.location());
+        stmt
     }
 
-    fn let_stmt(&mut self) -> Result<Stmt> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Let)?;
-        let left = self.pattern()?;
-        let annotation = if self.match_take(TokKind::Colon).is_some() {
-            Some(self.annotation()?)
-        } else {
-            None
-        };
-        self.expect(TokKind::Equal)?;
-        let right = self.expr()?;
-        let else_branch = if self.match_take(TokKind::Else).is_some() {
-            Some(self.expr()?)
-        } else {
-            None
-        };
+    fn let_stmt(&mut self) -> Stmt {
+        let start = self.next_start();
+        self.bump(TokKind::Let);
+        let left = self.pattern();
+        let annotation = self.eat(TokKind::Colon).then(|| self.annotation());
+        self.expect(TokKind::Equal);
+        let right = self.expr();
+        let else_branch = self.eat(TokKind::Else).then(|| self.expr());
         let stmt = self.new_stmt(
             Let {
                 left,
@@ -315,550 +334,417 @@ impl<'s> Parser<'s> {
             },
             start,
         );
-        self.ok_if_semicolon(stmt)
+        self.end_stmt(stmt.location());
+        stmt
     }
 
-    fn const_decl(&mut self) -> Result<Const> {
-        self.take_known(TokKind::Const)?;
-        let left = self.require_ident()?;
-        let annotation = if self.match_take(TokKind::Colon).is_some() {
-            Some(self.annotation()?)
-        } else {
-            None
-        };
-        self.expect(TokKind::Equal)?;
-        let right = self.expr()?;
-        Ok(Const {
+    fn const_decl(&mut self) -> Const {
+        self.bump(TokKind::Const);
+        let left = self.require_ident();
+        let annotation = self.eat(TokKind::Colon).then(|| self.annotation());
+        self.expect(TokKind::Equal);
+        let right = self.expr();
+        Const {
             left,
             annotation,
             right,
-        })
+        }
     }
 
-    /// Parses the source mimas for a new expression.
-    ///
-    ///  ### Errors
-    ///
-    /// Returns a [ParseError] if any of the source code caused an error.
-    pub fn expr(&mut self) -> Result<Expr> {
-        self.descend()?;
-        let result = self
-            .block_body()
-            .and_then(|expr| self.chain_after_block(expr));
-        self.depth -= 1;
-        result
+    /// Parses one expression. Anything that fails to parse comes back as [Poison], with its
+    /// error in [Self::errors]. See [Self::into_ast] for what that means for the caller.
+    pub fn expr(&mut self) -> Expr {
+        let expr = self.block_body();
+        self.chain_after_block(expr)
     }
 
     /// The expression dispatch without chaining a trailing block. Control-flow *bodies* parse
     /// through here so postfix after the body (`if c {...} else {...}.foo()`) attaches to the whole
     /// construct, not the inner block; `expr` wraps this with `chain_after_block`.
-    fn block_body(&mut self) -> Result<Expr> {
-        match self.peek()?.kind() {
-            TokKind::Pipe | TokKind::DoublePipe => self.closure(),
-            TokKind::Loop => self.loop_expr(),
-            TokKind::While => self.while_expr(),
-            TokKind::For => self.for_in(),
-            TokKind::If => self.if_expr(),
-            TokKind::Match => self.match_expr(),
-            TokKind::LeftBrace => self.block(),
-            TokKind::Return => self.return_expr(),
-            TokKind::Raise => self.raise_expr(),
-            TokKind::Break => self.break_stmt(),
-            TokKind::Collect => self.collect(),
-            TokKind::Continue => self.continue_expr(),
+    fn block_body(&mut self) -> Expr {
+        fn inner(parser: &mut Parser) -> Expr {
+            match parser.peek() {
+                TokKind::Pipe | TokKind::DoublePipe => parser.closure(),
+                TokKind::Loop => parser.loop_expr(),
+                TokKind::While => parser.while_expr(),
+                TokKind::For => parser.for_in(),
+                TokKind::If => parser.if_expr(),
+                TokKind::Match => parser.match_expr(),
+                TokKind::LeftBrace => parser.block(),
+                TokKind::Return => parser.return_expr(),
+                TokKind::Raise => parser.raise_expr(),
+                TokKind::Break => parser.break_stmt(),
+                TokKind::Collect => parser.collect(),
+                TokKind::Continue => parser.continue_expr(),
 
-            // No keyword expressions found, so start recursive descent
-            _ => self.null_coalecence(),
+                // No keyword expressions found, so start recursive descent
+                _ => parser.null_coalecence(),
+            }
+        }
+        let start = self.next_start();
+        if !self.peek().starts_expr() {
+            self.expected("expression");
+            return self.poison_expr(start);
+        }
+        self.nested(inner)
+            .unwrap_or_else(|| self.poison_expr(start))
+    }
+
+    fn struct_decl(&mut self) -> Struct {
+        self.bump(TokKind::Struct);
+        let name = self.require_ident();
+        let fields = if self.eat(TokKind::SemiColon) {
+            vec![]
+        } else if self.eat(TokKind::LeftParenthesis) {
+            let mut index = 0;
+            self.list(
+                TokKind::RightParenthesis,
+                |kind| kind == TokKind::Pub || kind.starts_annotation(),
+                |p| {
+                    let start = p.next_start();
+                    let public = p.eat(TokKind::Pub);
+                    let annotation = p.annotation();
+                    index += 1;
+                    StructField {
+                        name: FieldKey::Int(index - 1),
+                        annotation,
+                        public,
+                        location: p.location(start),
+                    }
+                },
+            )
+        } else if self.expect(TokKind::LeftBrace) {
+            self.list(
+                TokKind::RightBrace,
+                |kind| kind == TokKind::Pub || kind.is_ident(),
+                Self::named_field,
+            )
+        } else {
+            vec![]
+        };
+        Struct { name, fields }
+    }
+
+    /// A `name: Type` field, `pub` or not.
+    fn named_field(&mut self) -> StructField {
+        let start = self.next_start();
+        let public = self.eat(TokKind::Pub);
+        let name = self.require_ident();
+        self.expect(TokKind::Colon);
+        let annotation = self.annotation();
+        StructField {
+            name: FieldKey::Ident(name),
+            annotation,
+            public,
+            location: self.location(start),
         }
     }
 
-    fn struct_decl(&mut self) -> Result<Struct> {
-        self.take_known(TokKind::Struct)?;
-        let name = self.require_ident()?;
-        let mut fields = vec![];
-
-        if self.match_take(TokKind::SemiColon).is_none() {
-            if self.match_take(TokKind::LeftParenthesis).is_some() {
-                let mut iter = 0;
-                loop {
-                    if self.match_take(TokKind::RightParenthesis).is_some() {
-                        break;
-                    } else {
-                        let start = self.next_tok_boundary();
-                        let public = self.match_take(TokKind::Pub).is_some();
-                        let annotation = self.annotation()?;
-                        fields.push(StructField {
-                            name: FieldKey::Int(iter),
-                            annotation,
-                            public,
-                            location: Location::new(self.file_id, self.span(start)),
-                        });
-                        iter += 1;
-                        if self.match_take(TokKind::Comma).is_none() {
-                            self.expect(TokKind::RightParenthesis)?;
-                            break;
-                        }
-                    }
-                }
-            } else {
-                self.expect(TokKind::LeftBrace)?;
-                loop {
-                    if self.match_take(TokKind::RightBrace).is_some() {
-                        break;
-                    } else {
-                        let start = self.next_tok_boundary();
-                        let public = self.match_take(TokKind::Pub).is_some();
-                        let name = self.require_ident()?;
-                        self.expect(TokKind::Colon)?;
-                        let annotation = self.annotation()?;
-                        fields.push(StructField {
-                            name: FieldKey::Ident(name),
-                            annotation,
-                            public,
-                            location: Location::new(self.file_id, self.span(start)),
-                        });
-                        if self.match_take(TokKind::Comma).is_none() {
-                            self.expect(TokKind::RightBrace)?;
-                            break;
-                        }
-                    }
-                }
-            }
+    fn pact_decl(&mut self) -> Pact {
+        self.bump(TokKind::Pact);
+        let pact_name = self.require_ident();
+        let mut items = vec![];
+        if !self.expect(TokKind::LeftBrace) {
+            return Pact::new(pact_name, items);
         }
-
-        Ok(Struct { name, fields })
-    }
-
-    fn pact_decl(&mut self) -> Result<Pact> {
-        self.take_known(TokKind::Pact)?;
-        let pact_name = self.require_ident()?;
-        self.expect(TokKind::LeftBrace)?;
-        let mut items = Vec::new();
-        loop {
-            if self.match_take(TokKind::RightBrace).is_some() {
-                break;
-            }
-            if let Some(tok) = self.match_take(TokKind::Pub) {
-                return Err(InvalidPubMarker {
+        while !self.eat(TokKind::RightBrace) {
+            let start = self.next_start();
+            match self.peek() {
+                TokKind::Pub => self.reject(InvalidPubMarker {
                     src: self.src(),
-                    at: shared::Location::from(tok.location()).into(),
-                }
-                .into());
-            }
-            let (item, requires_semi) = match self.peek()?.kind() {
+                    at: self.next_location().into(),
+                }),
                 TokKind::Const => {
-                    self.take_known(TokKind::Const)?;
-                    let name = self.require_ident()?;
-                    if self.match_take(TokKind::Colon).is_none() {
-                        let location = self.peek()?.location();
-                        return Err(PactConstAnnotationRequired {
+                    self.bump(TokKind::Const);
+                    let name = self.require_ident();
+                    let annotation = if self.eat(TokKind::Colon) {
+                        self.annotation()
+                    } else {
+                        self.error(PactConstAnnotationRequired {
                             src: self.src(),
-                            at: shared::Location::from(location).into(),
-                        }
-                        .into());
-                    }
-                    let annotation = self.annotation()?;
-                    (PactItem::Const { name, annotation }, true)
+                            at: self.next_location().into(),
+                        });
+                        Annotation::Poison(Poison)
+                    };
+                    self.end_stmt(self.location(start));
+                    items.push(PactItem::Const { name, annotation });
                 }
                 TokKind::Fn => {
-                    let (name, parameters, return_type) = self.function_sig()?;
-                    for param in &parameters {
-                        if let Some(default) = &param.right {
-                            return Err(PactSigDefaultParam {
-                                src: self.src(),
-                                at: default.location().into(),
-                            }
-                            .into());
-                        }
-                    }
+                    let (name, parameters, return_type) = self.function_sig(false);
                     // optional default body -- `{ ... }` after the sig. when present, the trailing
                     // `;` is dropped (block-terminated, like normal fns).
-                    let default = if self.peek().is_ok_and(|t| t.kind() == TokKind::LeftBrace) {
-                        Some(self.block()?)
+                    let default = self.at(TokKind::LeftBrace).then(|| self.block());
+                    if default.is_some() {
+                        self.eat(TokKind::SemiColon);
                     } else {
-                        None
-                    };
-                    let requires_semi = default.is_none();
-                    (
-                        PactItem::Fn {
-                            name,
-                            parameters,
-                            return_type,
-                            default,
-                        },
-                        requires_semi,
-                    )
-                }
-                _ => {
-                    let location = self.peek()?.location();
-                    return Err(InvalidPactItem {
-                        src: self.src(),
-                        at: shared::Location::from(location).into(),
+                        self.end_stmt(self.location(start));
                     }
-                    .into());
+                    items.push(PactItem::Fn {
+                        name,
+                        parameters,
+                        return_type,
+                        default,
+                    });
                 }
-            };
-            if self.match_take(TokKind::SemiColon).is_none() && requires_semi {
-                let location = self.peek()?.location();
-                return Err(MissingSemiColon {
+                TokKind::Eof => {
+                    self.expect(TokKind::RightBrace);
+                    break;
+                }
+                _ => self.reject_stmt(InvalidPactItem {
                     src: self.src(),
-                    at: shared::Location::from(location).into(),
-                }
-                .into());
+                    at: self.next_location().into(),
+                }),
             }
-            items.push(item);
         }
-        Ok(Pact::new(pact_name, items))
+        Pact::new(pact_name, items)
     }
 
-    fn enum_decl(&mut self) -> Result<Enum> {
-        self.take_known(TokKind::Enum)?;
-        let name = self.require_ident()?;
-        let mut members = vec![];
-        self.expect(TokKind::LeftBrace)?;
-        loop {
-            if self.match_take(TokKind::RightBrace).is_some() {
-                break;
-            } else {
-                let name = self.require_ident()?;
-                if self.match_take(TokKind::LeftParenthesis).is_some() {
-                    let mut tuple_members = vec![];
-
-                    while self.match_take(TokKind::RightParenthesis).is_none() {
-                        tuple_members.push(self.annotation()?);
-                        if self.match_take(TokKind::Comma).is_none() {
-                            self.expect(TokKind::RightParenthesis)?;
-                            break;
+    fn enum_decl(&mut self) -> Enum {
+        self.bump(TokKind::Enum);
+        let head = self.require_ident();
+        let members = if self.expect(TokKind::LeftBrace) {
+            self.list(TokKind::RightBrace, TokKind::is_ident, |p| {
+                let name = p.require_ident();
+                let member = if p.eat(TokKind::LeftParenthesis) {
+                    Member::Tuple(p.list(
+                        TokKind::RightParenthesis,
+                        TokKind::starts_annotation,
+                        Self::annotation,
+                    ))
+                } else if p.eat(TokKind::LeftBrace) {
+                    Member::Struct(p.list(TokKind::RightBrace, TokKind::is_ident, |p| {
+                        StructField {
+                            public: true,
+                            ..p.named_field()
                         }
-                    }
-
-                    members.push((name, Member::Tuple(tuple_members)));
+                    }))
                 } else {
-                    let mut fields = vec![];
-                    if self.match_take(TokKind::LeftBrace).is_some() {
-                        loop {
-                            if self.match_take(TokKind::RightBrace).is_some() {
-                                break;
-                            }
-                            let field_start = self.next_tok_boundary();
-                            let field = self.require_ident()?;
-                            self.expect(TokKind::Colon)?;
-                            let annotation = self.annotation()?;
-                            fields.push(StructField {
-                                name: FieldKey::Ident(field),
-                                annotation,
-                                location: Location::new(self.file_id, self.span(field_start)),
-                                public: true,
-                            });
-                            if self.match_take(TokKind::Comma).is_none() {
-                                self.expect(TokKind::RightBrace)?;
-                                break;
-                            }
-                        }
-                    }
-                    members.push((name, Member::Struct(fields)));
-                }
-            }
-            if self.match_take(TokKind::Comma).is_none() {
-                self.expect(TokKind::RightBrace)?;
-                break;
-            }
-        }
-
-        Ok(Enum {
-            head: name,
-            members,
-        })
+                    Member::Struct(vec![])
+                };
+                (name, member)
+            })
+        } else {
+            vec![]
+        };
+        Enum { head, members }
     }
 
-    fn impl_decl(&mut self) -> Result<Impl> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Impl)?;
-        let first = self.require_ident()?;
+    fn impl_decl(&mut self) -> Impl {
+        self.bump(TokKind::Impl);
+        let first = self.require_ident();
         // `impl Foo {}` (inherent) vs `impl Pact for Foo {}` (pact impl). After the first ident,
         // a `for` token disambiguates -- first becomes the pact, second becomes the target.
-        let (pact, target) = if self.match_take(TokKind::For).is_some() {
-            let target = self.require_ident()?;
+        let (pact, target) = if self.eat(TokKind::For) {
+            let target = self.require_ident();
             (Some(first), target)
         } else {
             (None, first)
         };
-        self.expect(TokKind::LeftBrace)?;
-        let mut items = Vec::new();
-        loop {
-            if self.match_take(TokKind::RightBrace).is_some() {
-                break;
-            } else {
-                let item_start = self.next_tok_boundary();
-                let public = self.match_take(TokKind::Pub).is_some();
-                let (kind, requires_semi): (ItemKind, bool) = match self.peek()?.kind() {
-                    TokKind::Const => (self.const_decl()?.into(), true),
-                    TokKind::Fn => (self.function()?.into(), false),
-                    _ => {
-                        return Err(InvalidImplItem {
-                            src: self.src(),
-                            at: self.location(start).into(),
-                        }
-                        .into());
-                    }
-                };
-                let location = self.location(item_start);
-                if requires_semi {
-                    if self.match_take(TokKind::SemiColon).is_none() {
-                        Err(MissingSemiColon {
-                            src: self.src(),
-                            at: location.into(),
-                        })?
-                    }
-                } else {
-                    self.match_take(TokKind::SemiColon);
-                }
-                items.push(Item::new(kind, location, public));
-            }
+        let mut items = vec![];
+        if !self.expect(TokKind::LeftBrace) {
+            return Impl::new(target, pact, items);
         }
-        Ok(Impl::new(target, pact, items))
-    }
-
-    fn function_sig(&mut self) -> Result<(Ident, Vec<Binding>, Option<Annotation>)> {
-        self.take_known(TokKind::Fn)?;
-        let name = self.require_ident()?;
-        self.expect(TokKind::LeftParenthesis)?;
-        let mut parameters = vec![];
-        let mut method = false;
-        loop {
-            if self.match_take(TokKind::RightParenthesis).is_some() {
-                break;
-            } else if !method && let Some(s) = self.match_take(TokKind::SelfKeyword) {
-                method = true;
-                self.match_take(TokKind::Comma);
-                let ident = Ident {
-                    lexeme: "self".into(),
-                    location: s.location.into(),
-                };
-                parameters.push(Binding::new(ident));
+        while !self.eat(TokKind::RightBrace) {
+            let kind = if self.at(TokKind::Pub) {
+                self.nth(1)
             } else {
-                let name = self.require_ident()?;
-                let mut binding = Binding::new(name);
-                if self.match_take(TokKind::Colon).is_some() {
-                    binding.annotation = Some(self.annotation()?);
+                self.peek()
+            };
+            match kind {
+                TokKind::Const | TokKind::Fn => {
+                    let item = self.item();
+                    self.end_item(&item);
+                    items.push(item);
                 }
-                if self.match_take(TokKind::Equal).is_some() {
-                    binding.right = Some(self.expr()?);
-                }
-                parameters.push(binding);
-                if self.match_take(TokKind::Comma).is_none() {
-                    self.expect(TokKind::RightParenthesis)?;
+                TokKind::Eof => {
+                    self.expect(TokKind::RightBrace);
                     break;
                 }
+                _ => self.reject_stmt(InvalidImplItem {
+                    src: self.src(),
+                    at: self.next_location().into(),
+                }),
             }
         }
-        let return_type = if self.match_take(TokKind::Arrow).is_some() {
-            Some(self.annotation()?)
-        } else {
-            None
-        };
-
-        Ok((name, parameters, return_type))
+        Impl::new(target, pact, items)
     }
 
-    fn function(&mut self) -> Result<Function> {
-        let start = self.next_tok_boundary();
-        let (name, parameters, return_type) = self.function_sig()?;
-        let body = if self.peek()?.kind() == TokKind::LeftBrace {
-            self.block()?
+    /// A function up to its body. A pact's signatures don't get `defaults`.
+    fn function_sig(&mut self, defaults: bool) -> (Ident, Vec<Binding>, Option<Annotation>) {
+        self.bump(TokKind::Fn);
+        let name = self.require_ident();
+        let parameters = if self.expect(TokKind::LeftParenthesis) {
+            let mut first = true;
+            self.list(
+                TokKind::RightParenthesis,
+                |kind| kind == TokKind::SelfKeyword || kind.is_ident(),
+                |p| {
+                    // only the first parameter can be the receiver
+                    let receiver = std::mem::replace(&mut first, false);
+                    if receiver && p.at(TokKind::SelfKeyword) {
+                        let location = p.next_location();
+                        p.bump(TokKind::SelfKeyword);
+                        return Binding::new(Ident::new("self", location));
+                    }
+                    let mut binding = p.binding();
+                    binding.right = p.eat(TokKind::Equal).then(|| p.expr());
+                    if let Some(default) = binding.right.as_ref().filter(|_| !defaults) {
+                        p.error(PactSigDefaultParam {
+                            src: p.src(),
+                            at: default.location().into(),
+                        });
+                    }
+                    binding
+                },
+            )
         } else {
-            Err(MissingFunctionBody {
+            vec![]
+        };
+        let return_type = self.eat(TokKind::Arrow).then(|| self.annotation());
+
+        (name, parameters, return_type)
+    }
+
+    /// A parameter's name, and maybe its type.
+    fn binding(&mut self) -> Binding {
+        let mut binding = Binding::new(self.require_ident());
+        binding.annotation = self.eat(TokKind::Colon).then(|| self.annotation());
+        binding
+    }
+
+    fn function(&mut self) -> Function {
+        let start = self.next_start();
+        let (name, parameters, return_type) = self.function_sig(true);
+        let body = if self.at(TokKind::LeftBrace) {
+            self.block()
+        } else {
+            self.error_here(MissingFunctionBody {
                 src: self.src(),
                 at: self.location(start).into(),
-            })?
+            });
+            self.poison_expr(self.cursor())
         };
 
-        Ok(Function {
+        Function {
             name,
             parameters,
             return_type,
             body,
-        })
+        }
     }
 
-    fn closure(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        if self.match_take(TokKind::DoublePipe).is_some() {
-            let body = self.expr()?;
-
-            let return_type = if self.match_take(TokKind::Arrow).is_some() {
-                Some(self.annotation()?)
-            } else {
-                None
-            };
-
-            Ok(self.new_expr(
+    fn closure(&mut self) -> Expr {
+        let start = self.next_start();
+        if self.eat(TokKind::DoublePipe) {
+            let body = self.expr();
+            let return_type = self.eat(TokKind::Arrow).then(|| self.annotation());
+            return self.new_expr(
                 Closure {
                     parameters: vec![],
                     body,
                     return_type,
                 },
                 start,
-            ))
-        } else {
-            self.expect(TokKind::Pipe)?;
-            let mut parameters = vec![];
-            loop {
-                if self.match_take(TokKind::Pipe).is_some() {
-                    break;
-                } else {
-                    let name = self.require_ident()?;
-                    let mut binding = Binding::new(name);
-                    if self.match_take(TokKind::Colon).is_some() {
-                        binding.annotation = Some(self.annotation()?);
-                    }
-                    parameters.push(binding);
-                    if self.match_take(TokKind::Comma).is_none() {
-                        self.expect(TokKind::Pipe)?;
-                        break;
-                    }
-                }
-            }
-            let return_type = if self.match_take(TokKind::Arrow).is_some() {
-                Some(self.annotation()?)
-            } else {
-                None
-            };
-
-            let body = self.expr()?;
-
-            Ok(self.new_expr(
-                Closure {
-                    parameters,
-                    body,
-                    return_type,
-                },
-                start,
-            ))
+            );
         }
+        self.bump(TokKind::Pipe);
+        let parameters = self.list(TokKind::Pipe, TokKind::is_ident, Self::binding);
+        let return_type = self.eat(TokKind::Arrow).then(|| self.annotation());
+        let body = self.expr();
+        self.new_expr(
+            Closure {
+                parameters,
+                body,
+                return_type,
+            },
+            start,
+        )
     }
 
-    fn break_stmt(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Break)?;
+    fn break_stmt(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Break);
         let expr = self.optional_expr();
-        Ok(self.new_expr(Break::new(expr), start))
+        self.new_expr(Break::new(expr), start)
     }
 
-    fn collect(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Collect)?;
-        let expr = self.expr()?;
-        Ok(self.new_expr(Collect::new(expr), start))
+    fn collect(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Collect);
+        let expr = self.expr();
+        self.new_expr(Collect::new(expr), start)
     }
 
-    fn continue_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Continue)?;
-        Ok(self.new_expr(ExprKind::Continue(Continue), start))
+    fn continue_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Continue);
+        self.new_expr(ExprKind::Continue(Continue), start)
     }
 
-    fn return_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Return)?;
+    fn return_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Return);
         let expr = self.optional_expr();
-        Ok(self.new_expr(Return::new(expr), start))
+        self.new_expr(Return::new(expr), start)
     }
 
-    fn raise_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Raise)?;
-        let value = self.expr()?;
-        Ok(self.new_expr(Raise::new(value), start))
+    fn raise_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Raise);
+        let value = self.expr();
+        self.new_expr(Raise::new(value), start)
     }
 
-    fn loop_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Loop)?;
-        let body = self.block_body()?;
-        Ok(self.new_expr(Loop::new(body), start))
+    fn loop_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Loop);
+        let body = self.block_body();
+        self.new_expr(Loop::new(body), start)
     }
 
-    fn while_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::While)?;
-        let binding = if self.match_take(TokKind::Let).is_some() {
-            let binding = self.pattern()?;
-            self.expect(TokKind::Equal)?;
-            Some(binding)
-        } else {
-            None
-        };
-        self.restrictions.insert(Restriction::NO_STRUCT_LITERAL);
-        let header = self.expr()?;
-        self.restrictions.remove(Restriction::NO_STRUCT_LITERAL);
-        if let Some(err) = self.condition_misdirection(binding.is_none()) {
-            return Err(err);
-        }
-        let body = self.block_body()?;
-        Ok(self.new_expr(
+    fn while_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::While);
+        let (binding, header) = self.condition();
+        let body = self.block_body();
+        self.new_expr(
             While {
                 header,
                 body,
                 binding,
             },
             start,
-        ))
+        )
     }
 
-    fn for_in(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::For)?;
+    fn for_in(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::For);
 
-        let binding = self.pattern()?;
-        self.expect(TokKind::In)?;
-        self.restrictions.insert(Restriction::NO_STRUCT_LITERAL);
-
-        let iterator = self.expr()?;
-
-        let iterator = if let Some(dot) =
-            self.match_take_possibilities(&[TokKind::DoubleDot, TokKind::DoubleDotEqual])
-        {
-            let start = iterator;
-            let start_boundary = start.span().start();
-            let end = self.expr()?;
-            self.new_expr(
-                Range::new(start, end, dot.kind() == TokKind::DoubleDotEqual),
-                start_boundary,
-            )
-        } else {
-            iterator
-        };
-
-        self.restrictions.remove(Restriction::NO_STRUCT_LITERAL);
-        let body = self.block_body()?;
-        Ok(self.new_expr(For::new(binding, iterator, body), start))
+        let binding = self.pattern();
+        self.expect(TokKind::In);
+        let iterator = self.struct_literals(false, |p| {
+            let iterator = p.expr();
+            let inclusive = p.at(TokKind::DoubleDotEqual);
+            if !inclusive && !p.at(TokKind::DoubleDot) {
+                return iterator;
+            }
+            p.advance();
+            let start = iterator.span().start();
+            let end = p.expr();
+            p.new_expr(Range::new(iterator, end, inclusive), start)
+        });
+        let body = self.block_body();
+        self.new_expr(For::new(binding, iterator, body), start)
     }
 
-    fn if_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::If)?;
-        let binding = if self.match_take(TokKind::Let).is_some() {
-            let binding = self.pattern()?;
-            self.expect(TokKind::Equal)?;
-            Some(binding)
-        } else {
-            None
-        };
-        self.restrictions.insert(Restriction::NO_STRUCT_LITERAL);
-        let condition = self.expr()?;
-        self.restrictions.remove(Restriction::NO_STRUCT_LITERAL);
-        if let Some(err) = self.condition_misdirection(binding.is_none()) {
-            return Err(err);
-        }
-        let main_body = self.block_body()?;
-        let else_expr = if self.match_take(TokKind::Else).is_some() {
-            let expr = self.block_body()?;
-            Some(expr)
-        } else {
-            None
-        };
-        Ok(self.new_expr(
+    fn if_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::If);
+        let (binding, condition) = self.condition();
+        let main_body = self.block_body();
+        let else_expr = self.eat(TokKind::Else).then(|| self.block_body());
+        self.new_expr(
             If {
                 condition,
                 main_body,
@@ -866,382 +752,289 @@ impl<'s> Parser<'s> {
                 binding,
             },
             start,
-        ))
+        )
     }
 
-    fn match_expr(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        self.take_known(TokKind::Match)?;
-        self.restrictions.insert(Restriction::NO_STRUCT_LITERAL);
-        let expr = self.expr()?;
-        self.restrictions.remove(Restriction::NO_STRUCT_LITERAL);
-        self.expect(TokKind::LeftBrace)?;
-        let mut members = vec![];
-        let mut panic_terminator = false;
-        loop {
-            if self.match_take(TokKind::RightBrace).is_some() {
-                break;
+    /// What an `if` or a `while` tests, along with the pattern when it's a `let` binding.
+    fn condition(&mut self) -> (Option<Pat>, Expr) {
+        let binding = self.eat(TokKind::Let).then(|| {
+            let binding = self.pattern();
+            self.expect(TokKind::Equal);
+            binding
+        });
+        let condition = self.struct_literals(false, Self::expr);
+
+        // a trailing `= 5` or `and b` means the user reached for another language's syntax --
+        // catch it before the body parse swallows the token. the rest of the condition gets
+        // taken too (so the body still parses) and the whole thing is poison
+        let (msg, label) = match self.peek() {
+            TokKind::Equal if binding.is_none() => {
+                ("invalid assignment in a condition", "did you mean `==`?")
             }
-            if self.match_take(TokKind::Bang).is_some() {
-                panic_terminator = true;
-                self.match_take(TokKind::Comma);
-                self.expect(TokKind::RightBrace)?;
-                break;
+            TokKind::Ident(name @ ("and" | "or")) => {
+                foreign_spelling(name).expect("both are in there")
             }
-            let pattern = self.pattern()?;
-            let guard = if self.match_take(TokKind::If).is_some() {
-                Some(self.expr()?)
-            } else {
-                None
-            };
-            self.expect(TokKind::FatArrow)?;
-            let body_is_block = matches!(self.peek()?.kind(), TokKind::LeftBrace);
-            let body = self.expr()?;
-            members.push(MatchCase::new(pattern, guard, body));
-            if self.match_take(TokKind::Comma).is_none() {
-                // block-bodied arms can omit the trailing comma; otherwise the case is the last
-                if !body_is_block {
-                    self.expect(TokKind::RightBrace)?;
-                    break;
-                }
-            }
-        }
-        Ok(self.new_expr(Match::new(expr, members, panic_terminator), start))
-    }
-
-    fn null_coalecence(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let expr = self.logical()?;
-        if self.match_take(TokKind::DoubleHook).is_some() {
-            let value = self.expr()?;
-            Ok(self.new_expr(Coalescence::new(expr, value), start))
-        } else if self.match_take(TokKind::Absolve).is_some() {
-            let handler = self.expr()?;
-            Ok(self.new_expr(Absolve::new(expr, handler), start))
-        } else {
-            Ok(expr)
-        }
-    }
-
-    fn logical(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let mut expr = self.equality()?;
-        while let Some(operator) = self.soft_peek()?.and_then(|tok| tok.kind().try_into().ok()) {
-            self.take()?;
-            let right = self.equality()?;
-            expr = self.new_expr(Logical::new(expr, operator, right), start);
-        }
-        Ok(expr)
-    }
-
-    fn equality(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let mut expr = self.membership()?;
-        while let Some(operator) = self.soft_peek()?.and_then(|tok| tok.kind().try_into().ok()) {
-            self.take()?;
-            let right = self.membership()?;
-            expr = self.new_expr(Equality::new(expr, operator, right), start);
-        }
-        Ok(expr)
-    }
-
-    fn membership(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let expr = self.evaluation()?;
-        let condition = if self.match_take(TokKind::In).is_some() {
-            true
-        } else if self.match_take(TokKind::NotIn).is_some() {
-            false
-        } else {
-            return Ok(expr);
+            _ => return (binding, condition),
         };
-
-        let right = self.evaluation()?;
-        Ok(self.new_expr(In::new(expr, right, condition), start))
+        self.reject(Misdirection {
+            src: self.src(),
+            at: self.next_location().into(),
+            msg: msg.into(),
+            label: label.into(),
+        });
+        self.struct_literals(false, Self::expr);
+        (binding, self.poison_expr(condition.span().start()))
     }
 
-    fn evaluation(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let mut expr = self.bitshift()?;
-        while let Some(operator) = self
-            .soft_peek()?
-            .and_then(|tok| tok.kind().try_into().ok())
-            .filter(EvaluationOp::is_binary)
-        {
-            self.take()?;
-            let right = self.bitshift()?;
-            expr = self.new_expr(Evaluation::new(expr, operator, right), start);
-        }
-        Ok(expr)
-    }
-
-    fn bitshift(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let mut expr = self.addition()?;
-        while let Some(operator) = self
-            .soft_peek()?
-            .and_then(|tok| tok.kind().try_into().ok())
-            .filter(EvaluationOp::is_bit_shift)
-        {
-            self.take()?;
-            let right = self.addition()?;
-            expr = self.new_expr(Evaluation::new(expr, operator, right), start);
-        }
-        Ok(expr)
-    }
-
-    fn addition(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let mut expr = self.multiplication()?;
-        while let Some(operator) = self
-            .soft_peek()?
-            .and_then(|tok| tok.kind().try_into().ok())
-            .filter(EvaluationOp::is_additive)
-        {
-            self.take()?;
-            let right = self.multiplication()?;
-            expr = self.new_expr(Evaluation::new(expr, operator, right), start);
-        }
-        Ok(expr)
-    }
-
-    fn multiplication(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        let mut expr = self.unary()?;
-        while let Some(operator) = self
-            .soft_peek()?
-            .and_then(|tok| tok.kind().try_into().ok())
-            .filter(EvaluationOp::is_multiplicative)
-        {
-            self.take()?;
-            let right = self.unary()?;
-            expr = self.new_expr(Evaluation::new(expr, operator, right), start);
-        }
-        Ok(expr)
-    }
-
-    fn unary(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        if let Ok(operator) = self.peek()?.kind().try_into() {
-            self.take()?;
-            let right = self.unary()?;
-            Ok(self.new_expr(Unary::new(operator, right), start))
-        } else {
-            self.fstring()
-        }
-    }
-
-    fn fstring(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        if let TokKind::FString(content) = self.peek()?.kind() {
-            // byte offset of the f-string's content in the outer source -- used to align spans
-            // emitted by the sub-parser we spawn for each interp body. token span covers `f"..."`,
-            // so content begins at span.start() + 2 (skip `f"`).
-            let fstring_span_start = self.peek()?.location().span().start();
-            let content_offset = fstring_span_start + 2;
-            self.take()?;
-
-            let mut parts = vec![];
-            let mut current_literal = String::new();
-            let mut chars = content.char_indices().peekable();
-            while let Some((_, c)) = chars.next() {
-                if c == '\\' {
-                    current_literal.push(c);
-                    if let Some((_, next)) = chars.next() {
-                        current_literal.push(next);
-                    }
-                } else if c == '{' && matches!(chars.peek(), Some(&(_, '{'))) {
-                    // `{{` escape -> literal `{`
-                    chars.next();
-                    current_literal.push('{');
-                } else if c == '}' && matches!(chars.peek(), Some(&(_, '}'))) {
-                    // `}}` escape -> literal `}`
-                    chars.next();
-                    current_literal.push('}');
-                } else if c == '{' {
-                    if !current_literal.is_empty() {
-                        // `{` and `}` join the quote-chars so chompy's unescape resolves
-                        // `\{` -> `{` and `\}` -> `}` (the brace-escape form, sibling to
-                        // `{{`/`}}`).
-                        let segment =
-                            chompy::utils::unescape(&current_literal, &['\\'], &['"', '{', '}']);
-                        parts.push(FStringPart::Literal(segment));
-                        current_literal.clear();
-                    }
-                    // absolute byte offset (in outer source) of the first char inside the interp
-                    let body_start =
-                        content_offset + chars.peek().map_or(content.len(), |(i, _)| *i);
-                    let mut expr_str = String::new();
-                    let mut depth = 1;
-                    let mut closed = false;
-                    while let Some((_, c)) = chars.next() {
-                        if c == '{' {
-                            depth += 1;
-                            expr_str.push(c);
-                        } else if c == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                closed = true;
-                                break;
-                            }
-                            expr_str.push(c);
-                        } else if c == '"' {
-                            // nested string literal in the interp expression -- pass
-                            // it through verbatim so a `}` inside the string doesn't
-                            // close the interp.
-                            expr_str.push(c);
-                            let mut esc = false;
-                            for (_, sc) in chars.by_ref() {
-                                expr_str.push(sc);
-                                if esc {
-                                    esc = false;
-                                } else if sc == '\\' {
-                                    esc = true;
-                                } else if sc == '"' {
-                                    break;
-                                }
-                            }
-                        } else {
-                            expr_str.push(c);
+    fn match_expr(&mut self) -> Expr {
+        let start = self.next_start();
+        self.bump(TokKind::Match);
+        let expr = self.struct_literals(false, Self::expr);
+        let mut panic_terminator = false;
+        let members = if self.expect(TokKind::LeftBrace) {
+            self.sequence(
+                TokKind::RightBrace,
+                |kind| kind == TokKind::Bang || kind.starts_pattern(),
+                |p| {
+                    if p.eat(TokKind::Bang) {
+                        panic_terminator = true;
+                        p.eat(TokKind::Comma);
+                        // nothing comes after the `!`
+                        if !p.at(TokKind::RightBrace) {
+                            p.expect(TokKind::RightBrace);
                         }
+                        return None;
                     }
-                    if !closed {
-                        Err(UnterminatedFStringExpr {
-                            src: self.src(),
-                            at: self.location(self.cursor).into(),
-                        })?;
+                    let pattern = p.pattern();
+                    let guard = p.eat(TokKind::If).then(|| p.expr());
+                    p.expect(TokKind::FatArrow);
+                    let body_is_block = p.at(TokKind::LeftBrace);
+                    let body = p.expr();
+                    // block-bodied arms can omit the trailing comma
+                    if !p.eat(TokKind::Comma) && !body_is_block && !p.at(TokKind::RightBrace) {
+                        p.expect(TokKind::Comma);
                     }
-                    // literal insanity -- we offset the string with spaces so that diagnostics
-                    // point to the correct spans relative to our real lexer, lol, this is bad
-                    //
-                    // i mean it literally caused stack overflows in the lexer and i had to rewrite
-                    // it to no longer recurse on each whitespace
-                    let padded = format!("{}{}", " ".repeat(body_start), expr_str);
-                    let lexer = Lexer::new(&padded, self.file_id, self.file_name.clone());
-                    let mut parser = Parser::new(lexer);
-                    let expr = parser.expr()?;
-                    parts.push(FStringPart::Expr(expr));
-                } else {
-                    current_literal.push(c);
-                }
-            }
-            if !current_literal.is_empty() {
-                let segment = chompy::utils::unescape(&current_literal, &['\\'], &['"', '{', '}']);
-                parts.push(FStringPart::Literal(segment));
-            }
-
-            let expr = self.new_expr(FString::new(parts), start);
-            self.chain_accesses(expr)
+                    Some(MatchCase::new(pattern, guard, body))
+                },
+            )
         } else {
-            self.literal()
+            vec![]
+        };
+        let members = members.into_iter().flatten().collect();
+        self.new_expr(Match::new(expr, members, panic_terminator), start)
+    }
+
+    fn null_coalecence(&mut self) -> Expr {
+        let start = self.next_start();
+        let expr = self.binary(1);
+        if self.eat(TokKind::DoubleHook) {
+            let value = self.expr();
+            self.new_expr(Coalescence::new(expr, value), start)
+        } else if self.eat(TokKind::Absolve) {
+            let handler = self.expr();
+            self.new_expr(Absolve::new(expr, handler), start)
+        } else {
+            expr
         }
     }
 
-    fn literal(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        if let Ok(literal) = Literal::try_from(self.peek()?.kind()) {
-            self.take()?;
+    /// Precedence climbing over the binary operators. `min_power` is the loosest operator this
+    /// call may take; anything looser belongs to the caller.
+    fn binary(&mut self, min_power: u8) -> Expr {
+        let start = self.next_start();
+        let mut left = self.unary();
+        while let Some((op, power)) = BinaryOp::of(self.peek())
+            && power >= min_power
+        {
+            self.advance();
+            let right = self.binary(power + 1);
+            let chains = !matches!(op, BinaryOp::In(_));
+            left = match op {
+                BinaryOp::Logical(op) => self.new_expr(Logical::new(left, op, right), start),
+                BinaryOp::Equality(op) => self.new_expr(Equality::new(left, op, right), start),
+                BinaryOp::In(condition) => self.new_expr(In::new(left, right, condition), start),
+                BinaryOp::Eval(op) => self.new_expr(Evaluation::new(left, op, right), start),
+            };
+            if !chains {
+                break;
+            }
+        }
+        left
+    }
+
+    fn unary(&mut self) -> Expr {
+        let start = self.next_start();
+        let Ok(operator) = self.peek().try_into() else {
+            return self.fstring();
+        };
+        self.advance();
+        // `----...` recurses here without passing back through `expr`
+        let right = self
+            .nested(Self::unary)
+            .unwrap_or_else(|| self.poison_expr(self.cursor()));
+        self.new_expr(Unary::new(operator, right), start)
+    }
+
+    fn fstring(&mut self) -> Expr {
+        /// Parses the expression inside a `{...}`. It gets a parser of its own, on the
+        /// interpolation's slice of the real source.
+        fn interpolation<'s>(outer: &mut Parser<'s>, body: &'s str, offset: usize) -> Expr {
+            let lexer = Lexer::new(body, outer.file_id, outer.file_name.clone());
+            let mut parser = Parser::with_src(lexer.with_offset(offset), outer.src());
+            // nested f-strings would otherwise restart the depth guard
+            parser.depth = outer.depth;
+            let expr = parser.expr();
+            if !parser.at(TokKind::Eof) {
+                parser.error(parser.unexpected_token());
+            }
+            outer.errors.extend(parser.errors);
+            expr
+        }
+        // `{` and `}` join the quote-chars so chompy's unescape resolves `\{` -> `{` and
+        // `\}` -> `}` (the brace-escape form, sibling to `{{`/`}}`).
+        fn unescape(literal: &str) -> FStringPart {
+            FStringPart::Literal(chompy::utils::unescape(literal, &['\\'], &['"', '{', '}']))
+        }
+
+        let start = self.next_start();
+        let TokKind::FString(content) = self.peek() else {
+            return self.literal();
+        };
+        self.advance();
+        // the token covers `f"..."`, so the content begins two bytes in
+        let content_start = start + 2;
+
+        let mut parts = vec![];
+        let mut literal = String::new();
+        let mut at = 0;
+        while let Some(c) = content[at..].chars().next() {
+            at += c.len_utf8();
+            let rest = &content[at..];
+            match c {
+                '\\' => {
+                    literal.push(c);
+                    if let Some(escaped) = rest.chars().next() {
+                        literal.push(escaped);
+                        at += escaped.len_utf8();
+                    }
+                }
+                // `{{` and `}}` are a literal `{` and `}`
+                '{' | '}' if rest.starts_with(c) => {
+                    literal.push(c);
+                    at += 1;
+                }
+                '{' => {
+                    if !literal.is_empty() {
+                        parts.push(unescape(&literal));
+                        literal.clear();
+                    }
+                    let Some(end) = interp_end(rest) else {
+                        let open = content_start + at - 1;
+                        self.error(UnterminatedFStringExpr {
+                            src: self.src(),
+                            at: Location::new(self.file_id, Span::new(open, open + 1)).into(),
+                        });
+                        break;
+                    };
+                    let expr = interpolation(self, &rest[..end], content_start + at);
+                    parts.push(FStringPart::Expr(expr));
+                    at += end + 1;
+                }
+                _ => literal.push(c),
+            }
+        }
+        if !literal.is_empty() {
+            parts.push(unescape(&literal));
+        }
+
+        let expr = self.new_expr(FString::new(parts), start);
+        self.chain_accesses(expr)
+    }
+
+    fn literal(&mut self) -> Expr {
+        let start = self.next_start();
+        if let Ok(literal) = Literal::try_from(self.peek()) {
+            self.advance();
             let expr = self.new_expr(literal, start);
 
             // todo: this might allow "hello"() or true[]" etc. only dot accesses are okay on lits"
             self.chain_accesses(expr)
-        } else if self.match_take(TokKind::LeftSquare).is_some() {
-            let mut elements = vec![];
-            let expr = loop {
-                if self.match_take(TokKind::RightSquare).is_some() {
-                    let literal = Literal::Array(elements);
-                    break self.new_expr(literal, start);
-                } else {
-                    elements.push(self.expr()?);
-                    self.match_take(TokKind::Comma);
-                }
-            };
+        } else if self.eat(TokKind::LeftSquare) {
+            let elements = self.list(TokKind::RightSquare, TokKind::starts_expr, |p| {
+                p.struct_literals(true, Self::expr)
+            });
+            let expr = self.new_expr(Literal::Array(elements), start);
             self.chain_accesses(expr)
-        } else if self.match_take(TokKind::TildeLeftBrace).is_some() {
-            let mut elements = vec![];
-            let expr = loop {
-                if self.match_take(TokKind::RightBrace).is_some() {
-                    let literal = Literal::Dictionary(elements);
-                    break self.new_expr(literal, start);
-                } else {
-                    let name = self.require_ident()?;
-                    self.expect(TokKind::Equal)?;
-                    elements.push((name, self.expr()?));
-                    if self.match_take(TokKind::Comma).is_none() {
-                        let _tok = self.expect(TokKind::RightBrace)?;
-                        let literal = Literal::Dictionary(elements);
-                        break self.new_expr(literal, start);
-                    }
-                }
-            };
+        } else if self.eat(TokKind::TildeLeftBrace) {
+            let elements = self.list(TokKind::RightBrace, TokKind::is_ident, |p| {
+                let name = p.require_ident();
+                p.expect(TokKind::Equal);
+                (name, p.struct_literals(true, Self::expr))
+            });
+            let expr = self.new_expr(Literal::Dictionary(elements), start);
             self.chain_accesses(expr)
         } else {
-            let expr = self.supreme()?;
-            if !self.restrictions.contains(Restriction::NO_STRUCT_LITERAL)
-                && self.match_take(TokKind::LeftBrace).is_some()
-            {
-                let mut fields = vec![];
-                loop {
-                    if self.match_take(TokKind::RightBrace).is_some() {
-                        break;
-                    } else {
-                        self.next_tok_boundary();
-                        let iden = self.require_ident()?;
-                        if self.match_take(TokKind::Comma).is_some()
-                            || self.peek()?.kind == TokKind::RightBrace
-                        {
-                            let this_start = iden.location.span().start();
-                            fields.push((
-                                FieldKey::Ident(iden.clone()),
-                                self.new_expr(iden, this_start),
-                            ));
-                        } else {
-                            self.expect(TokKind::Equal)?;
-                            let expr = self.expr()?;
-                            fields.push((FieldKey::Ident(iden), expr));
-                            if self.match_take(TokKind::Comma).is_none() {
-                                if self.match_take(TokKind::RightBrace).is_some() {
-                                    break;
-                                }
-                                self.expect(TokKind::Comma)?;
-                            }
-                        }
-                    }
-                }
-
-                let expr =
-                    self.new_expr(Literal::Struct(StructLiteral { name: expr, fields }), start);
-                self.chain_accesses(expr)
-            } else {
-                Ok(expr)
+            let name = self.supreme();
+            if !self.struct_literals || !self.eat(TokKind::LeftBrace) {
+                return name;
             }
+            let fields = self.list(TokKind::RightBrace, TokKind::is_ident, |p| {
+                let field = p.require_ident();
+                // shorthand: `Foo { x }` is `Foo { x = x }`
+                let value = if p.at(TokKind::Comma) || p.at(TokKind::RightBrace) {
+                    p.new_expr(field.clone(), field.location.span().start())
+                } else {
+                    p.expect(TokKind::Equal);
+                    p.expr()
+                };
+                (FieldKey::Ident(field), value)
+            });
+            let expr = self.new_expr(Literal::Struct(StructLiteral { name, fields }), start);
+            self.chain_accesses(expr)
         }
     }
 
-    fn supreme(&mut self) -> Result<Expr> {
-        let expr = self.call(None)?;
+    fn supreme(&mut self) -> Expr {
+        let expr = self.primary();
         self.chain_accesses(expr)
+    }
+
+    /// An expression with no postfix on it yet. [Self::chain_accesses] adds those.
+    fn primary(&mut self) -> Expr {
+        let start = self.next_start();
+        // `int::random` etc. -- synthesize an Ident at the expr head so the regular library map
+        // lookup handles it. TyKw is only legal here in `TyKw ::` shape.
+        if let TokKind::TyKw(ty) = self.peek() {
+            self.advance();
+            if !self.at(TokKind::DoubleColon) {
+                self.expect(TokKind::DoubleColon);
+            }
+            return self.new_expr(Ident::new(ty.to_string(), self.location(start)), start);
+        }
+        self.parentheticals()
     }
 
     /// Chains any trailing access expressions (`.field`, `[key]`, `::member`,
     /// `()` calls, `!` unwraps, bare `?` postfix) onto an already-parsed expression.
-    fn chain_accesses(&mut self, expr: Expr) -> Result<Expr> {
-        let mut expr = Some(expr);
+    fn chain_accesses(&mut self, expr: Expr) -> Expr {
+        // postfix on a failed expression only ever earns a second error for the same mistake
+        if matches!(expr.kind(), ExprKind::Poison(_)) {
+            return expr;
+        }
+        let mut expr = expr;
         loop {
-            expr = match self.soft_peek()?.map(|v| v.kind()) {
-                Some(TokKind::LeftParenthesis) => Some(self.call(expr)?),
-                Some(TokKind::LeftSquare | TokKind::HookLeftSquare) => {
-                    Some(self.square_access(expr)?)
-                }
-                Some(TokKind::DoubleColon) => Some(self.colon_access(expr)?),
-                Some(TokKind::Dot | TokKind::HookDot) => Some(self.dot_access(expr)?),
-                Some(TokKind::Bang) => Some(self.unwrap(expr)?),
+            expr = match self.peek() {
+                TokKind::LeftParenthesis => self.call(expr),
+                TokKind::LeftSquare | TokKind::HookLeftSquare => self.square_access(expr),
+                TokKind::DoubleColon => self.colon_access(expr),
+                TokKind::Dot | TokKind::HookDot => self.dot_access(expr),
+                TokKind::Bang => self.unwrap(expr),
                 // bare trailing ?'s do nothing but are permitted. future warning
-                Some(TokKind::Hook) => {
-                    self.match_take(TokKind::Hook);
+                TokKind::Hook => {
+                    self.bump(TokKind::Hook);
                     expr
                 }
-                _ => break Ok(expr.unwrap()),
+                _ => break expr,
             }
         }
     }
@@ -1249,886 +1042,777 @@ impl<'s> Parser<'s> {
     /// Postfix chaining for block expressions. `(` and `[` directly after a block are ambiguous
     /// with a following statement (`if c {}` newline `[x]`), so they need parens; `.`/`::`/`!`/`?`
     /// can't start a statement, so once one attaches we hand off to the full `chain_accesses`.
-    fn chain_after_block(&mut self, expr: Expr) -> Result<Expr> {
-        match self.soft_peek()?.map(|t| t.kind()) {
-            Some(
-                TokKind::Dot
-                | TokKind::HookDot
-                | TokKind::DoubleColon
-                | TokKind::Bang
-                | TokKind::Hook,
-            ) => self.chain_accesses(expr),
-            _ => Ok(expr),
+    fn chain_after_block(&mut self, expr: Expr) -> Expr {
+        match self.peek() {
+            TokKind::Dot
+            | TokKind::HookDot
+            | TokKind::DoubleColon
+            | TokKind::Bang
+            | TokKind::Hook => self.chain_accesses(expr),
+            _ => expr,
         }
     }
 
-    fn unwrap(&mut self, left: Option<Expr>) -> Result<Expr> {
-        let (start, left) = if let Some(left) = left {
-            (left.span().start(), left)
-        } else {
-            let start = self.next_tok_boundary();
-            let call = self.call(None)?;
-            if !matches!(self.soft_peek()?.map(|t| t.kind()), Some(TokKind::Bang)) {
-                return Ok(call);
-            } else {
-                (start, call)
-            }
-        };
-        self.take_known(TokKind::Bang)?;
-        Ok(self.new_expr(Unwrap { expr: left }, start))
+    fn unwrap(&mut self, left: Expr) -> Expr {
+        let start = left.span().start();
+        self.bump(TokKind::Bang);
+        self.new_expr(Unwrap { expr: left }, start)
     }
 
-    fn call(&mut self, left: Option<Expr>) -> Result<Expr> {
-        // If we've been provided a leftside expression, we *must* parse for a call.
-        // Otherwise, the call is merely possible.
-        let (start, left) = if let Some(left) = left {
-            (left.span().start(), left)
-        } else {
-            let start = self.next_tok_boundary();
-            let dot = self.dot_access(None)?;
-            if !matches!(
-                self.soft_peek()?.map(|t| t.kind()),
-                Some(TokKind::LeftParenthesis)
-            ) {
-                return Ok(dot);
+    fn call(&mut self, left: Expr) -> Expr {
+        let start = left.span().start();
+        self.bump(TokKind::LeftParenthesis);
+        let mut named = false;
+        let arguments = self.list(TokKind::RightParenthesis, TokKind::starts_expr, |p| {
+            let value = p.struct_literals(true, Self::expr);
+            if !p.at(TokKind::Equal) {
+                if named {
+                    p.error(NamedBeforePositional {
+                        src: p.src(),
+                        at: value.location().into(),
+                    });
+                }
+                return Argument { name: None, value };
             }
-            (start, dot)
-        };
-        self.expect(TokKind::LeftParenthesis)?;
-        let mut arguments = vec![];
-        let mut positional_allowed = true;
-        while self.match_take(TokKind::RightParenthesis).is_none() {
-            let expr = self.expr()?;
-            let (name, value) = if let Some(tok) = self.match_take(TokKind::Equal) {
-                let ExprKind::Ident(ident) = expr.kind() else {
-                    Err(self.unexpected(tok))?
-                };
-                let assigned_value = self.expr()?;
-                positional_allowed = false;
-                (Some(ident.clone()), assigned_value)
-            } else if !positional_allowed {
-                return Err(NamedBeforePositional {
+            named = true;
+            let name = match value.kind() {
+                ExprKind::Ident(ident) => Some(ident.clone()),
+                _ => {
+                    p.error(p.unexpected_token());
+                    None
+                }
+            };
+            p.bump(TokKind::Equal);
+            let value = p.expr();
+            Argument { name, value }
+        });
+        self.new_expr(Call::new(left, arguments), start)
+    }
+
+    fn dot_access(&mut self, left: Expr) -> Expr {
+        let start = left.span().start();
+        let kind = AccessKind::try_from(self.advance().kind()).expect("dispatched on a dot");
+        let right = match self.peek() {
+            TokKind::Ident(_) => {
+                let ident = self.require_ident();
+                self.new_expr(ident, start)
+            }
+            // take the int token directly -- `parser.literal()` would chain further accesses,
+            // which would steal a trailing `.foo()` from the *outer* dot (`a.0.pairs()` would
+            // misparse as `a . (0.pairs())`). The outer chain_accesses loop owns chaining.
+            TokKind::Int(index) => {
+                self.advance();
+                self.new_expr(Literal::Int(index), start)
+            }
+            _ => {
+                self.error_here(InvalidDotAccess {
                     src: self.src(),
-                    at: expr.location().into(),
-                }
-                .into());
-            } else {
-                (None, expr)
-            };
-            arguments.push(Argument { name, value });
-            self.match_take(TokKind::Comma);
+                    at: self.location(start).into(),
+                });
+                self.poison_expr(start)
+            }
+        };
+        self.new_expr(Access::Dot { left, right, kind }, start)
+    }
+
+    fn colon_access(&mut self, left: Expr) -> Expr {
+        let start = left.span().start();
+        self.bump(TokKind::DoubleColon);
+        let right = self.require_member_name();
+        self.new_expr(Access::DoubleColon { left, right }, start)
+    }
+
+    fn square_access(&mut self, left: Expr) -> Expr {
+        let start = left.span().start();
+        let kind = AccessKind::try_from(self.advance().kind()).expect("dispatched on a square");
+        let key = self.struct_literals(true, Self::expr);
+        self.expect(TokKind::RightSquare);
+        self.new_expr(Access::Square { left, key, kind }, start)
+    }
+
+    fn parentheticals(&mut self) -> Expr {
+        let start = self.next_start();
+        if !self.eat(TokKind::LeftParenthesis) {
+            return self.block();
         }
-
-        Ok(self.new_expr(Call::new(left, arguments), start))
+        if self.eat(TokKind::RightParenthesis) {
+            return self.new_expr(Literal::Unit, start);
+        }
+        let first = self.struct_literals(true, Self::expr);
+        if !self.eat(TokKind::Comma) {
+            self.expect(TokKind::RightParenthesis);
+            return self.new_expr(Grouping::new(first), start);
+        }
+        let mut members = vec![first];
+        members.extend(
+            self.list(TokKind::RightParenthesis, TokKind::starts_expr, |p| {
+                p.struct_literals(true, Self::expr)
+            }),
+        );
+        self.new_expr(Literal::Tuple(members), start)
     }
 
-    fn dot_access(&mut self, left: Option<Expr>) -> Result<Expr> {
-        fn read<'s>(parser: &mut Parser<'s>, start: usize) -> Result<Expr> {
-            match parser.peek()?.kind() {
-                TokKind::Ident(_) => {
-                    let ident = parser.require_ident()?;
-                    Ok(parser.new_expr(ident, start))
+    fn block(&mut self) -> Expr {
+        let start = self.next_start();
+        if !self.eat(TokKind::LeftBrace) {
+            return self.ident();
+        }
+        let mut body: Vec<Stmt> = vec![];
+        let yielded_expr = loop {
+            if self.eat(TokKind::RightBrace) {
+                break None;
+            }
+            if self.at(TokKind::Eof) {
+                self.expect(TokKind::RightBrace);
+                break None;
+            }
+            if !self.peek().starts_stmt() {
+                self.reject_stmt(self.unexpected_token());
+                continue;
+            }
+            let node_start = self.next_start();
+            match self.node() {
+                BlockElement::Stmt(stmt) => body.push(stmt),
+                // last node in the block -- this is the yield, not a new stmt
+                BlockElement::MaybeYield(expr) if self.eat(TokKind::RightBrace) => {
+                    break Some(expr);
                 }
-                // take the int token directly -- `parser.literal()` would chain further accesses,
-                // which would steal a trailing `.foo()` from the *outer* dot (`a.0.pairs()` would
-                // misparse as `a . (0.pairs())`). The outer chain_accesses loop owns chaining.
-                TokKind::Int(_) => {
-                    let tok = parser.take()?;
-                    let literal = Literal::try_from(tok.kind()).unwrap();
-                    Ok(parser.new_expr(literal, start))
-                }
-                _ => Err(InvalidDotAccess {
-                    src: parser.src(),
-                    at: parser.location(start).into(),
-                })?,
+                BlockElement::MaybeYield(expr) => body.push(self.expr_stmt(expr, node_start)),
+            }
+        };
+        self.new_expr(Block { body, yielded_expr }, start)
+    }
+
+    /// The bottom of the descent. Anything that isn't an identifier by now isn't an expression.
+    fn ident(&mut self) -> Expr {
+        let start = self.next_start();
+        match self.peek() {
+            // we're just gonna hijack this guy...
+            TokKind::SelfKeyword => {
+                let lexeme = self.advance().to_string();
+                self.new_expr(Ident::new(lexeme, self.location(start)), start)
+            }
+            TokKind::Ident(_) => {
+                let ident = self.require_ident();
+                self.new_expr(ident, start)
+            }
+            _ => {
+                self.expected("expression");
+                self.poison_expr(start)
             }
         }
-        let mut start = self.next_tok_boundary();
-        let access = if let Some(left) = left {
-            let tok = self.require_possibilities(&[TokKind::Dot, TokKind::HookDot])?;
-            start = left.span().start();
-            let right = read(self, start)?;
-
-            Access::Dot {
-                left,
-                right,
-                kind: tok.kind().try_into().unwrap(),
-            }
-        } else {
-            let left = self.colon_access(None)?;
-            if let Some(tok) = self.match_take_possibilities(&[TokKind::Dot, TokKind::HookDot]) {
-                let right = read(self, start)?;
-
-                Access::Dot {
-                    left,
-                    right,
-                    kind: tok.kind().try_into().unwrap(),
-                }
-            } else {
-                return Ok(left);
-            }
-        };
-        Ok(self.new_expr(access, start))
-    }
-
-    fn colon_access(&mut self, expr: Option<Expr>) -> Result<Expr> {
-        let mut start = self.next_tok_boundary();
-        let access = if let Some(expr) = expr {
-            self.expect(TokKind::DoubleColon)?;
-            start = expr.span().start();
-            let right = self.require_member_name()?;
-            Access::DoubleColon { left: expr, right }
-        } else if let Ok(TokKind::TyKw(ty)) = self.peek().map(|t| t.kind()) {
-            // `int::random` etc. -- synthesize an Ident at expr head so the regular library map
-            // lookup handles it. TyKw is only legal here in `TyKw ::` shape.
-            let tok = self.take()?;
-            self.expect(TokKind::DoubleColon)?;
-            let left = self.new_expr(Ident::new(ty.to_string(), tok.location().into()), start);
-            let right = self.require_member_name()?;
-            Access::DoubleColon { left, right }
-        } else {
-            let left = self.square_access(None)?;
-            if self.match_take(TokKind::DoubleColon).is_some() {
-                let right = self.require_member_name()?;
-                Access::DoubleColon { left, right }
-            } else {
-                return Ok(left);
-            }
-        };
-        Ok(self.new_expr(access, start))
-    }
-
-    fn square_access(&mut self, left: Option<Expr>) -> Result<Expr> {
-        let (start, left) = if let Some(left) = left {
-            (left.span().start(), left)
-        } else {
-            let left = self.parentheticals()?;
-            if !matches!(
-                self.soft_peek()?.map(|v| v.kind()),
-                Some(TokKind::LeftSquare | TokKind::HookLeftSquare)
-            ) {
-                return Ok(left);
-            }
-            (self.next_tok_boundary(), left)
-        };
-        let tok = self.require_possibilities(&[TokKind::LeftSquare, TokKind::HookLeftSquare])?;
-        let key = self.expr()?;
-        let access = Access::Square {
-            left,
-            key,
-            kind: tok.kind().try_into().unwrap(),
-        };
-        let _tok = self.expect(TokKind::RightSquare)?;
-        Ok(self.new_expr(access, start))
-    }
-
-    fn parentheticals(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        if self.match_take(TokKind::LeftParenthesis).is_some() {
-            if self.match_take(TokKind::RightParenthesis).is_some() {
-                Ok(self.new_expr(Literal::Unit, start))
-            } else {
-                let expr = self.expr()?;
-                if self.match_take(TokKind::Comma).is_some() {
-                    let mut members = vec![expr];
-                    while self.match_take(TokKind::RightParenthesis).is_none() {
-                        members.push(self.expr()?);
-                        if self.match_take(TokKind::Comma).is_none() {
-                            self.expect(TokKind::RightParenthesis)?;
-                            break;
-                        }
-                    }
-                    Ok(self.new_expr(Literal::Tuple(members), start))
-                } else {
-                    self.expect(TokKind::RightParenthesis)?;
-                    Ok(self.new_expr(Grouping::new(expr), start))
-                }
-            }
-        } else {
-            self.block()
-        }
-    }
-
-    fn block(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        if self.match_take(TokKind::LeftBrace).is_some() {
-            let mut body: Vec<Stmt> = vec![];
-            let yielded_expr = loop {
-                if self.match_take(TokKind::RightBrace).is_some() {
-                    break None;
-                }
-                let node_start = self.next_tok_boundary();
-                match self.node()? {
-                    BlockElement::Stmt(stmt) => body.push(stmt),
-                    BlockElement::MaybeYield(expr) => {
-                        if self.match_take(TokKind::RightBrace).is_some() {
-                            // last node in the block -- this is the yield, not a new stmt
-                            break Some(expr);
-                        }
-                        let stmt = self.new_stmt(StmtKind::Expr(expr), node_start);
-                        self.semicolon_check(&stmt)?;
-                        body.push(stmt);
-                    }
-                }
-            };
-            Ok(self.new_expr(Block { body, yielded_expr }, start))
-        } else {
-            self.ident()
-        }
-    }
-
-    fn ident(&mut self) -> Result<Expr> {
-        let start = self.next_tok_boundary();
-        // we're just gonna hijack this guy...
-        let ident = if let Some(tok) = self.match_take(TokKind::SelfKeyword) {
-            Ident {
-                lexeme: tok.to_string(),
-                location: self.location(start),
-            }
-        } else {
-            self.require_ident()?
-        };
-        Ok(self.new_expr(ident, start))
     }
 }
 
 // General/helpers
 impl<'s> Parser<'s> {
-    fn ok_if_semicolon(&mut self, stmt: Stmt) -> Result<Stmt> {
-        if self.match_take(TokKind::SemiColon).is_none() {
-            if let Some(err) = self.misdirection(&stmt) {
-                return Err(err);
-            }
-            Err(MissingSemiColon {
-                src: self.src(),
-                at: stmt.location().into(),
-            })?
-        } else {
-            Ok(stmt)
-        }
-    }
-
-    // after a condition parses, a trailing `= 5` or `and b` means the user reached for
-    // another language's syntax -- catch it before the body parse swallows the token
-    fn condition_misdirection(&mut self, equal_hint: bool) -> Option<shared::Error> {
-        let tok = self.peek().ok()?;
-        let location = tok.location();
-        let (msg, label) = match tok.kind() {
-            TokKind::Equal if equal_hint => {
-                ("invalid assignment in a condition", "did you mean `==`?")
-            }
-            TokKind::Ident("and") => ("unknown operator `and`", "mimas spells this `&&`"),
-            TokKind::Ident("or") => ("unknown operator `or`", "mimas spells this `||`"),
-            _ => return None,
-        };
-        Some(
-            Misdirection {
-                src: self.src(),
-                at: shared::Location::from(location).into(),
-                msg: msg.into(),
-                label: label.into(),
-            }
-            .into(),
-        )
-    }
-
-    fn misdirection(&mut self, stmt: &Stmt) -> Option<shared::Error> {
-        let spellings = |name: &str| match name {
-            "and" => Some(("unknown operator `and`", "mimas spells this `&&`")),
-            "or" => Some(("unknown operator `or`", "mimas spells this `||`")),
-            "elif" => Some(("unknown keyword `elif`", "mimas spells this `else if`")),
-            "as" => Some((
-                "mimas has no `as` casts",
-                "convert with a method instead, e.g. `.to_float()`",
-            )),
-            _ => None,
-        };
-        // the culprit is either the next token (mid-statement, e.g. `x as float`) or was
-        // already consumed as a lone identifier statement (e.g. the `and` in `if a and b`)
-        let tok = self.peek().ok()?;
-        let ((msg, label), at) = match tok.kind() {
-            TokKind::Ident(name) if spellings(name).is_some() => {
-                (spellings(name)?, shared::Location::from(tok.location()))
-            }
-            _ => {
-                let StmtKind::Expr(e) = stmt.kind() else {
-                    return None;
-                };
-                let ExprKind::Ident(id) = e.kind() else {
-                    return None;
-                };
-                (spellings(&id.lexeme)?, stmt.location())
-            }
-        };
-        Some(
-            Misdirection {
-                src: self.src(),
-                at: at.into(),
-                msg: msg.into(),
-                label: label.into(),
-            }
-            .into(),
-        )
-    }
-
-    fn semicolon_check(&mut self, stmt: &Stmt) -> Result<()> {
-        let has_semicolon = self.match_take(TokKind::SemiColon).is_some();
-
-        // We'll forgive expression_stmts statements that end with blocks
-        //
-        // TODO: The check for the block below is commented out because it is not quite sufficient.
-        //
-        // The following code is valid:
-        // ```
-        // if a {
-        // } else {
-        // }
-        // {}
-        // loop {
-        //     break;
-        // }
-        // ```
-        //
-        // In other words, these statements don't need semicolons if their type is (). The check
-        // below for blocks cheats but checking if there's no yielded value, but that's full of
-        // false negatives.
-        //
-        // For now the compiler simply always treats these as optional, which is more leniant than
-        // it should be, as the following code becomes valid:
-        //
-        // ```
-        // if a { 0 } else { 0 }
-        // ```
-        //
-        // This should emit an error that the type of that expression was expected to be (). It
-        // needs a semicolon, which would throw out the value of the expression and turn it
-        // into a statement. Type analysis is required to properly check this.
-        //
-        // The control flow expressions that evaluate to ! are correct though!
-        //
-        // update: I'm pretty sure all this is is that expr stmts must be (), gonna try that
-        // ---
+    /// Turns a bare expression into a statement, which has to end like one.
+    fn expr_stmt(&mut self, expr: Expr, start: usize) -> Stmt {
         // Expr's that end with blocks do not need semicolons.
-        let semicolon_optional = if let StmtKind::Expr(expr) = stmt.kind() {
-            matches!(
-                expr.kind(),
-                ExprKind::If(_)
-                    | ExprKind::Match(_)
-                    | ExprKind::For(_)
-                    | ExprKind::Block(_)
-                    | ExprKind::Loop(_)
-                    | ExprKind::While(_)
-                    | ExprKind::Break(_)
-                    | ExprKind::Continue(_)
-                    | ExprKind::Collect(_)
-                    | ExprKind::Return(_)
-                    | ExprKind::Raise(_),
-            )
-        } else {
-            // items handle their own semicolon discipline in `item()` (const/use require, the rest
-            // are optional), so by the time they get here it's already resolved.
-            matches!(stmt.kind(), StmtKind::Item(_))
-        };
+        let semicolon_optional = matches!(
+            expr.kind(),
+            ExprKind::If(_)
+                | ExprKind::Match(_)
+                | ExprKind::For(_)
+                | ExprKind::Block(_)
+                | ExprKind::Loop(_)
+                | ExprKind::While(_)
+                | ExprKind::Break(_)
+                | ExprKind::Continue(_)
+                | ExprKind::Collect(_)
+                | ExprKind::Return(_)
+                | ExprKind::Raise(_),
+        );
 
-        if semicolon_optional || has_semicolon {
-            Ok(())
-        } else {
-            if let Some(err) = self.misdirection(stmt) {
-                return Err(err);
-            }
-            // The semicolon is not optional which means this is an expressions floating in an
-            // invalid place.
-            Err(MissingSemiColon {
+        // a keyword from another language (the `elif` in `if a {} elif b {}`) parses as a
+        // statement of its own, so the next token is no help in spotting it
+        if let ExprKind::Ident(ident) = expr.kind()
+            && let Some((msg, label)) = foreign_spelling(&ident.lexeme)
+            && !self.at(TokKind::SemiColon)
+        {
+            self.error(Misdirection {
                 src: self.src(),
-                at: stmt.location().into(),
-            })?
-        }
-    }
-
-    /// Build an `UnexpectedToken` diagnostic from the given lex token. Most parse errors
-    /// share this shape, so it lives as a helper here rather than at every call site.
-    fn unexpected(&self, tok: Tok<TokKind>) -> UnexpectedToken {
-        UnexpectedToken {
-            src: self.src(),
-            at: shared::Location::from(tok.location()).into(),
-            tok: tok.kind.to_string(),
-        }
-    }
-
-    fn optional_expr(&mut self) -> Option<Expr> {
-        // valueless return/break: the next token can't start a value. crucially, do NOT consume
-        // the `;` -- it terminates the enclosing statement, not the return/break (otherwise
-        // `let x = y else return;` steals the let's own terminator).
-        match self.soft_peek().ok().flatten().map(|t| t.kind()) {
-            Some(TokKind::SemiColon) | None => None,
-            _ => self.expr().ok(),
-        }
-    }
-
-    fn annotation(&mut self) -> Result<Annotation> {
-        self.descend()?;
-        let result = self.annotation_inner();
-        self.depth -= 1;
-        result
-    }
-
-    fn annotation_inner(&mut self) -> Result<Annotation> {
-        let atom = self.annotation_atom()?;
-
-        if matches!(self.soft_peek()?.map(|t| t.kind()), Some(TokKind::Plus)) {
-            let Annotation::Ty(first) = atom else {
-                let tok = self.take()?;
-                return Err(NonPactInBound {
-                    src: self.src(),
-                    at: shared::Location::from(tok.location()).into(),
-                }
-                .into());
-            };
-            let mut idents = vec![first];
-            while self.match_take(TokKind::Plus).is_some() {
-                idents.push(self.require_ident()?);
-            }
-            if let Some(tok) = self
-                .match_take(TokKind::Hook)
-                .or_else(|| self.match_take(TokKind::Bang))
-            {
-                return Err(PactBoundConstraint {
-                    src: self.src(),
-                    at: shared::Location::from(tok.location()).into(),
-                }
-                .into());
-            }
-            return Ok(Annotation::Bounds(idents));
-        }
-
-        let mut annotation = atom;
-        loop {
-            if self.match_take(TokKind::Hook).is_some() {
-                annotation = Annotation::Option(Box::new(annotation));
-            } else if self.match_take(TokKind::Bang).is_some() {
-                annotation = Annotation::Result(Box::new(annotation));
-            } else if let Some(tok) = self.match_take(TokKind::DoubleHook) {
-                // `T??` lexes as one DoubleHook (the coalesce operator), so without this
-                // arm it dies on a generic "expected token"
-                return Err(DoubledOption {
-                    src: self.src(),
-                    at: shared::Location::from(tok.location()).into(),
-                }
-                .into());
-            } else {
-                break;
-            }
-        }
-        if let Some(tok) = self.match_take(TokKind::Plus) {
-            return Err(PactBoundConstraint {
-                src: self.src(),
-                at: shared::Location::from(tok.location()).into(),
-            }
-            .into());
-        }
-        Ok(annotation)
-    }
-
-    fn annotation_atom(&mut self) -> Result<Annotation> {
-        if matches!(self.peek()?.kind(), TokKind::Ident(_)) {
-            let mut segments = vec![self.require_ident()?];
-            while self.match_take(TokKind::DoubleColon).is_some() {
-                segments.push(self.require_ident()?);
-            }
-            return Ok(if segments.len() == 1 {
-                Annotation::Ty(segments.pop().unwrap())
-            } else {
-                Annotation::Path(segments)
+                at: ident.location.into(),
+                msg: msg.into(),
+                label: label.into(),
             });
         }
-        let tok = self.take()?;
-        match tok.kind() {
-            TokKind::TyKw(tykw) => Ok(Annotation::Kw(tykw)),
-            TokKind::LeftParenthesis => self.paren_annotation(tok),
-            TokKind::LeftSquare => {
-                let inner = self.annotation()?;
-                self.expect(TokKind::RightSquare)?;
-                Ok(Annotation::Array(Box::new(inner)))
-            }
-            TokKind::TildeLeftBrace => {
-                let inner = self.annotation()?;
-                self.expect(TokKind::RightBrace)?;
-                Ok(Annotation::Dictionary(Box::new(inner)))
-            }
-            _ => Err(self.unexpected(tok).into()),
+
+        let stmt = self.new_stmt(StmtKind::Expr(expr), start);
+        if semicolon_optional {
+            self.eat(TokKind::SemiColon);
+        } else {
+            self.end_stmt(stmt.location());
+        }
+        stmt
+    }
+
+    /// Ends an item the way its kind does: a `const` or a `use` needs its `;`, and the rest
+    /// may have one.
+    fn end_item(&mut self, item: &Item) {
+        if matches!(item.kind(), ItemKind::Const(_) | ItemKind::Use(_)) {
+            self.end_stmt(item.location());
+        } else {
+            self.eat(TokKind::SemiColon);
         }
     }
 
-    fn paren_annotation(&mut self, open: Tok<TokKind<'s>>) -> Result<Annotation> {
-        let mut members = vec![];
-        let mut saw_comma = false;
-        if self.match_take(TokKind::RightParenthesis).is_none() {
-            loop {
-                members.push(self.annotation()?);
-                let completed = if self.match_take(TokKind::Comma).is_none() {
-                    self.expect(TokKind::RightParenthesis)?;
-                    true
-                } else {
-                    saw_comma = true;
-                    self.match_take(TokKind::RightParenthesis).is_some()
+    /// Ends a statement on its `;`. When something the statement couldn't use is in the way, the
+    /// rest of the line goes with it.
+    fn end_stmt(&mut self, stmt: Location) {
+        if self.eat(TokKind::SemiColon) {
+            return;
+        }
+        let stray = !self.peek().ends_stmt() && !self.at_line_start();
+        if let TokKind::Ident(name) = self.peek()
+            && let Some((msg, label)) = foreign_spelling(name)
+        {
+            self.error(Misdirection {
+                src: self.src(),
+                at: self.next_location().into(),
+                msg: msg.into(),
+                label: label.into(),
+            });
+        } else if stray {
+            self.error(self.unexpected_token());
+        } else {
+            self.error(MissingSemiColon {
+                src: self.src(),
+                at: stmt.into(),
+            });
+        }
+        if stray {
+            self.skip_stmt();
+            self.eat(TokKind::SemiColon);
+        }
+    }
+
+    /// The value of a `return` or a `break`, when there is one.
+    fn optional_expr(&mut self) -> Option<Expr> {
+        self.peek().starts_expr().then(|| self.expr())
+    }
+
+    fn annotation(&mut self) -> Annotation {
+        fn inner(parser: &mut Parser) -> Annotation {
+            let atom = parser.annotation_atom();
+
+            if parser.at(TokKind::Plus) {
+                let Annotation::Ty(first) = atom else {
+                    parser.reject(NonPactInBound {
+                        src: parser.src(),
+                        at: parser.next_location().into(),
+                    });
+                    return Annotation::Poison(Poison);
                 };
-                if completed {
+                let mut idents = vec![first];
+                while parser.eat(TokKind::Plus) {
+                    idents.push(parser.require_ident());
+                }
+                if parser.at(TokKind::Hook) || parser.at(TokKind::Bang) {
+                    parser.reject(PactBoundConstraint {
+                        src: parser.src(),
+                        at: parser.next_location().into(),
+                    });
+                }
+                return Annotation::Bounds(idents);
+            }
+
+            let mut annotation = atom;
+            loop {
+                if parser.eat(TokKind::Hook) {
+                    annotation = Annotation::Option(Box::new(annotation));
+                } else if parser.eat(TokKind::Bang) {
+                    annotation = Annotation::Result(Box::new(annotation));
+                } else if parser.at(TokKind::DoubleHook) {
+                    // `T??` lexes as one DoubleHook (the coalesce operator), so without this
+                    // arm it dies on a generic "expected token"
+                    parser.error(DoubledOption {
+                        src: parser.src(),
+                        at: parser.next_location().into(),
+                    });
+                    parser.bump(TokKind::DoubleHook);
+                    annotation = Annotation::Option(Box::new(annotation));
+                } else {
                     break;
                 }
             }
+            if parser.at(TokKind::Plus) {
+                parser.reject(PactBoundConstraint {
+                    src: parser.src(),
+                    at: parser.next_location().into(),
+                });
+            }
+            annotation
+        }
+        if !self.peek().starts_annotation() {
+            self.expected("type");
+            return Annotation::Poison(Poison);
+        }
+        self.nested(inner).unwrap_or(Annotation::Poison(Poison))
+    }
+
+    fn annotation_atom(&mut self) -> Annotation {
+        match self.peek() {
+            TokKind::Ident(_) => {
+                let mut segments = vec![self.require_ident()];
+                while self.eat(TokKind::DoubleColon) {
+                    segments.push(self.require_ident());
+                }
+                match segments.len() {
+                    1 => Annotation::Ty(segments.remove(0)),
+                    _ => Annotation::Path(segments),
+                }
+            }
+            TokKind::TyKw(tykw) => {
+                self.advance();
+                Annotation::Kw(tykw)
+            }
+            TokKind::LeftParenthesis => self.paren_annotation(),
+            TokKind::LeftSquare => {
+                self.bump(TokKind::LeftSquare);
+                let inner = self.annotation();
+                self.expect(TokKind::RightSquare);
+                Annotation::Array(Box::new(inner))
+            }
+            TokKind::TildeLeftBrace => {
+                self.bump(TokKind::TildeLeftBrace);
+                let inner = self.annotation();
+                self.expect(TokKind::RightBrace);
+                Annotation::Dictionary(Box::new(inner))
+            }
+            _ => {
+                self.expected("type");
+                Annotation::Poison(Poison)
+            }
+        }
+    }
+
+    /// Everything that opens with a `(`: unit, a tuple, a function, or a parenthesized bound.
+    fn paren_annotation(&mut self) -> Annotation {
+        let open = self.next_location();
+        self.bump(TokKind::LeftParenthesis);
+        let mut members = vec![];
+        let mut tuple = false;
+        if !self.eat(TokKind::RightParenthesis) {
+            members.push(self.annotation());
+            tuple = self.eat(TokKind::Comma);
+            if tuple {
+                members.extend(self.list(
+                    TokKind::RightParenthesis,
+                    TokKind::starts_annotation,
+                    Self::annotation,
+                ));
+            } else {
+                self.expect(TokKind::RightParenthesis);
+            }
         }
 
-        if self.match_take(TokKind::Arrow).is_some() {
-            return Ok(Annotation::Function(members, Box::new(self.annotation()?)));
+        if self.eat(TokKind::Arrow) {
+            return Annotation::Function(members, Box::new(self.annotation()));
         }
-        if members.is_empty() {
-            return Ok(Annotation::Unit);
+        if tuple {
+            return Annotation::Tuple(members);
         }
-        if saw_comma {
-            return Ok(Annotation::Tuple(members));
-        }
-        match members.pop().unwrap() {
-            bounds @ Annotation::Bounds(_) => Ok(bounds),
-            _ => Err(SingleTypeParens {
-                src: self.src(),
-                at: shared::Location::from(open.location()).into(),
+        match members.pop() {
+            None => Annotation::Unit,
+            // no use complaining about the parens when what's inside them didn't parse
+            Some(inner @ (Annotation::Bounds(_) | Annotation::Poison(_))) => inner,
+            Some(single) => {
+                self.error(SingleTypeParens {
+                    src: self.src(),
+                    at: open.into(),
+                });
+                single
             }
-            .into()),
         }
+    }
+
+    /// Parses `element`s up to `closer` (whose opener is already taken), with a `,` between
+    /// them and maybe one after the last.
+    fn list<T>(
+        &mut self,
+        closer: TokKind<'s>,
+        starts: impl Fn(TokKind<'s>) -> bool,
+        mut element: impl FnMut(&mut Self) -> T,
+    ) -> Vec<T> {
+        self.sequence(closer, &starts, |p| {
+            let parsed = element(p);
+            // a missing `,` right before another element is reported, and the list carries on
+            if !p.eat(TokKind::Comma) && starts(p.peek()) {
+                p.expect(TokKind::Comma);
+            }
+            parsed
+        })
+    }
+
+    /// Parses `element`s up to `closer`. An element begins on a token `starts` accepts, and has
+    /// to take it. Anything else is reported and skipped through the next `,`. A token that
+    /// something further out is waiting for ends the sequence early.
+    fn sequence<T>(
+        &mut self,
+        closer: TokKind<'s>,
+        starts: impl Fn(TokKind<'s>) -> bool,
+        mut element: impl FnMut(&mut Self) -> T,
+    ) -> Vec<T> {
+        let mut elements = vec![];
+        while !self.eat(closer) {
+            let kind = self.peek();
+            if starts(kind) {
+                elements.push(element(self));
+            } else if kind.ends_list() {
+                self.expect(closer);
+                break;
+            } else {
+                self.error(self.unexpected_token());
+                while !self.at(TokKind::Comma) && !self.peek().is_boundary() {
+                    self.skip();
+                }
+                self.eat(TokKind::Comma);
+            }
+        }
+        elements
+    }
+
+    /// Reports that `what` was expected where the next token is. The token is skipped, unless
+    /// something further out is waiting for it.
+    fn expected(&mut self, what: &'static str) {
+        self.error_here(Expected {
+            src: self.src(),
+            at: self.next_location().into(),
+            what,
+        });
+        if !self.peek().is_anchor() {
+            self.skip();
+        }
+    }
+
+    /// Reports the next token with `err`, then skips it and the rest of its statement.
+    fn reject_stmt(&mut self, err: impl Into<shared::Error>) {
+        self.reject(err);
+        self.skip_stmt();
+        self.eat(TokKind::SemiColon);
+    }
+
+    /// Reports the next token with `err`, then skips it.
+    fn reject(&mut self, err: impl Into<shared::Error>) {
+        self.error_here(err);
+        self.skip();
+    }
+
+    /// Skips what's left of a statement that stopped making sense, up to its `;` or the end of
+    /// its line.
+    fn skip_stmt(&mut self) {
+        while !self.peek().ends_stmt() && !self.at_line_start() {
+            self.skip();
+        }
+    }
+
+    /// Skips the next token, along with everything up to its matching closer if it opens a
+    /// group. A closer of the wrong kind stops the skip (it belongs to something further out).
+    /// Whatever goes wrong where the skip ends is fallout.
+    fn skip(&mut self) {
+        let mut open: Vec<TokKind<'s>> = vec![];
+        loop {
+            let kind = self.peek();
+            let mismatched = kind.is_closer() && open.last().is_some_and(|open| *open != kind);
+            if kind == TokKind::Eof || mismatched {
+                break;
+            }
+            self.advance();
+            match kind {
+                TokKind::LeftParenthesis => open.push(TokKind::RightParenthesis),
+                TokKind::LeftSquare | TokKind::HookLeftSquare => open.push(TokKind::RightSquare),
+                TokKind::LeftBrace | TokKind::TildeLeftBrace => open.push(TokKind::RightBrace),
+                kind if kind.is_closer() => {
+                    open.pop();
+                }
+                _ => {}
+            }
+            if open.is_empty() {
+                break;
+            }
+        }
+        self.last_error = Some(self.next);
+    }
+
+    /// Creates the error for a token that doesn't belong where it is.
+    fn unexpected_token(&self) -> UnexpectedToken {
+        UnexpectedToken {
+            src: self.src(),
+            at: self.next_location().into(),
+            tok: self.peek().to_string(),
+        }
+    }
+
+    /// Records an error about the next token, or the end of input if that's where we are.
+    fn error_here(&mut self, err: impl Into<shared::Error>) {
+        if self.at(TokKind::Eof) {
+            self.error(UnexpectedEnd {
+                src: self.src(),
+                at: self.location(self.cursor()).into(),
+            });
+        } else {
+            self.error(err);
+        }
+    }
+
+    /// Records an error, unless one was already reported at this token.
+    fn error(&mut self, err: impl Into<shared::Error>) {
+        let explained = self.cut_short && self.at(TokKind::Eof);
+        if self.last_error != Some(self.next) && !explained {
+            self.errors.push(err.into());
+        }
+        self.last_error = Some(self.next);
     }
 }
 
 // Patterns
 impl<'s> Parser<'s> {
-    fn pattern(&mut self) -> Result<Pat> {
-        self.descend()?;
-        let result = self.pattern_inner();
-        self.depth -= 1;
-        result
-    }
-
-    fn pattern_inner(&mut self) -> Result<Pat> {
-        let first = self.match_pat_atom()?;
-        if self.peek()?.kind() != TokKind::Pipe {
-            return Ok(first);
-        }
-        let start_loc = first.location();
-        let mut alts = vec![first];
-        while self.match_take(TokKind::Pipe).is_some() {
-            alts.push(self.match_pat_atom()?);
-        }
-        Ok(Pat::new(PatKind::Or(alts), start_loc))
-    }
-
-    fn match_pat_atom(&mut self) -> Result<Pat> {
-        let start = self.next_tok_boundary();
-        let base = self.match_pat_base()?;
-        if self.match_take(TokKind::Hook).is_some() {
-            return Ok(Pat::new(
-                PatKind::NullBind(Box::new(base)),
-                self.location(start),
-            ));
-        }
-        Ok(base)
-    }
-
-    fn match_pat_base(&mut self) -> Result<Pat> {
-        let start = self.next_tok_boundary();
-        match self.peek()?.kind() {
-            TokKind::LeftParenthesis => {
-                self.take()?;
-                let mut members = vec![];
-                loop {
-                    if self.match_take(TokKind::RightParenthesis).is_some() {
-                        break;
-                    }
-                    members.push(self.pattern()?);
-                    if self.match_take(TokKind::Comma).is_none() {
-                        self.expect(TokKind::RightParenthesis)?;
-                        break;
-                    }
-                }
-                Ok(Pat::new(PatKind::Tuple(members), self.location(start)))
+    fn pattern(&mut self) -> Pat {
+        fn inner(parser: &mut Parser) -> Pat {
+            let first = parser.match_pat_atom();
+            if !parser.at(TokKind::Pipe) {
+                return first;
             }
-            TokKind::Int(_)
-            | TokKind::Float(_)
-            | TokKind::Hex(_)
-            | TokKind::String(_)
-            | TokKind::True
-            | TokKind::False
-            | TokKind::Null => {
-                let lit = Literal::try_from(self.peek()?.kind()).unwrap();
-                self.take()?;
-                Ok(Pat::new(PatKind::Literal(lit), self.location(start)))
+            let location = first.location();
+            let mut alts = vec![first];
+            while parser.eat(TokKind::Pipe) {
+                alts.push(parser.match_pat_atom());
+            }
+            Pat::new(PatKind::Or(alts), location)
+        }
+        let start = self.next_start();
+        if !self.peek().starts_pattern() {
+            self.expected("pattern");
+            return self.new_pat(PatKind::Poison(Poison), start);
+        }
+        self.nested(inner)
+            .unwrap_or_else(|| self.new_pat(PatKind::Poison(Poison), start))
+    }
+
+    fn match_pat_atom(&mut self) -> Pat {
+        let start = self.next_start();
+        let base = self.match_pat_base();
+        if self.eat(TokKind::Hook) {
+            return self.new_pat(PatKind::NullBind(Box::new(base)), start);
+        }
+        base
+    }
+
+    fn match_pat_base(&mut self) -> Pat {
+        let start = self.next_start();
+        let kind = self.peek();
+        match kind {
+            TokKind::LeftParenthesis => {
+                self.bump(TokKind::LeftParenthesis);
+                let members = self.list(
+                    TokKind::RightParenthesis,
+                    TokKind::starts_pattern,
+                    Self::pattern,
+                );
+                self.new_pat(PatKind::Tuple(members), start)
             }
             TokKind::Minus => {
-                self.take()?;
-                let next = self.take()?;
-                let lit = match next.kind() {
+                self.bump(TokKind::Minus);
+                let literal = match self.peek() {
                     TokKind::Int(i) => Literal::Int(-i),
                     TokKind::Float(f) => Literal::Float(-f),
-                    _ => Err(self.unexpected(next))?,
+                    _ => {
+                        self.expected("number");
+                        return self.new_pat(PatKind::Poison(Poison), start);
+                    }
                 };
-                Ok(Pat::new(PatKind::Literal(lit), self.location(start)))
+                self.advance();
+                self.new_pat(PatKind::Literal(literal), start)
             }
-            TokKind::Ident(_) | TokKind::SelfKeyword => {
+            TokKind::Ident(_) => {
                 // walk path: ident (:: ident)*
-                let first = self.require_ident()?;
+                let first = self.require_ident();
                 let mut head_expr = self.new_expr(first.clone(), start);
-                while self.match_take(TokKind::DoubleColon).is_some() {
-                    let right = self.require_member_name()?;
-                    head_expr = self.new_expr(
-                        Access::DoubleColon {
-                            left: head_expr,
-                            right,
-                        },
-                        start,
-                    );
+                let mut is_path = false;
+                while self.eat(TokKind::DoubleColon) {
+                    let right = self.require_member_name();
+                    let left = head_expr;
+                    head_expr = self.new_expr(Access::DoubleColon { left, right }, start);
+                    is_path = true;
                 }
-                let is_path = matches!(
-                    head_expr.kind(),
-                    ExprKind::Access(Access::DoubleColon { .. })
-                );
 
-                match self.peek()?.kind() {
+                match self.peek() {
                     // `Foo(...)` tuple-variant
                     TokKind::LeftParenthesis => {
-                        self.take()?;
-                        let mut pats = vec![];
-                        loop {
-                            if self.match_take(TokKind::RightParenthesis).is_some() {
-                                break;
-                            }
-                            pats.push(self.pattern()?);
-                            if self.match_take(TokKind::Comma).is_none() {
-                                self.expect(TokKind::RightParenthesis)?;
-                                break;
-                            }
-                        }
-                        Ok(Pat::new(
-                            PatKind::TupleVariant(Box::new(head_expr), pats),
-                            self.location(start),
-                        ))
+                        self.bump(TokKind::LeftParenthesis);
+                        let pats = self.list(
+                            TokKind::RightParenthesis,
+                            TokKind::starts_pattern,
+                            Self::pattern,
+                        );
+                        self.new_pat(PatKind::TupleVariant(Box::new(head_expr), pats), start)
                     }
                     // `Foo { ... }` struct
                     TokKind::LeftBrace => {
-                        self.take()?;
-                        let mut fields = hashbrown::HashMap::new();
-                        loop {
-                            if self.match_take(TokKind::RightBrace).is_some() {
-                                break;
-                            }
-                            let name = self.require_ident()?;
-                            let sub = if self.match_take(TokKind::Equal).is_some() {
-                                self.pattern()?
+                        self.bump(TokKind::LeftBrace);
+                        let fields = self.list(TokKind::RightBrace, TokKind::is_ident, |p| {
+                            let name = p.require_ident();
+                            let sub = if p.eat(TokKind::Equal) {
+                                p.pattern()
                             } else {
                                 // shorthand: `Foo { x }` is `Foo { x = x }`
                                 Pat::from(name.clone())
                             };
-                            fields.insert(name.lexeme.clone(), sub);
-                            if self.match_take(TokKind::Comma).is_none() {
-                                self.expect(TokKind::RightBrace)?;
-                                break;
-                            }
-                        }
-                        Ok(Pat::new(
-                            PatKind::Struct(Box::new(head_expr), fields),
-                            self.location(start),
-                        ))
+                            (name.lexeme, sub)
+                        });
+                        let fields = fields.into_iter().collect();
+                        self.new_pat(PatKind::Struct(Box::new(head_expr), fields), start)
                     }
-                    // bare identifier -- binding/wildcard
-                    _ if !is_path => Ok(Pat::new(PatKind::Ident(first), self.location(start))),
                     // bare path -- `Foo::Bar` with no payload
-                    _ => Ok(Pat::new(
-                        PatKind::Variant(Box::new(head_expr)),
-                        self.location(start),
-                    )),
+                    _ if is_path => self.new_pat(PatKind::Variant(Box::new(head_expr)), start),
+                    // bare identifier -- binding/wildcard
+                    _ => self.new_pat(PatKind::Ident(first), start),
                 }
             }
-            _ => {
-                let tok = self.take()?;
-                Err(self.unexpected(tok))?
-            }
+            _ => match Literal::try_from(kind) {
+                Ok(literal) => {
+                    self.advance();
+                    self.new_pat(PatKind::Literal(literal), start)
+                }
+                Err(()) => {
+                    self.expected("pattern");
+                    self.new_pat(PatKind::Poison(Poison), start)
+                }
+            },
         }
     }
 }
 
 // Lexing tools
 impl<'s> Parser<'s> {
-    /// Consumes and returns the next tok if it is within the array of types.
-    fn match_take_possibilities(&mut self, tok_kinds: &[TokKind<'s>]) -> Option<Tok<TokKind<'s>>> {
-        if self.peek().is_ok_and(|tok| tok_kinds.contains(&tok.kind())) {
-            Some(self.take().unwrap())
-        } else {
-            None
+    /// Returns the next tok as an Identifier, or poison (after reporting) if it isn't one.
+    fn require_ident(&mut self) -> Ident {
+        let location = self.next_location();
+        if let TokKind::Ident(lexeme) = self.peek() {
+            self.advance();
+            return Ident::new(lexeme, location);
         }
-    }
-
-    /// Returns the next tok as an Identifier if it is of TokenKind::Identifier.
-    fn require_ident(&mut self) -> Result<Ident> {
-        let next = self.take()?;
-        if let TokKind::Ident(v) = next.kind() {
-            Ok(Ident::new(v, next.location().into()))
-        } else {
-            Err(ExpectedIdentifier {
-                src: self.src(),
-                at: shared::Location::from(next.location()).into(),
-            }
-            .into())
-        }
+        self.expected("identifier");
+        // `Ident` is a plain struct with nowhere to put a variant, so its poison is a lexeme no
+        // real identifier can have
+        Ident::new(POISON, self.location(self.next_start()))
     }
 
     // member-access position (right of `::`): also accepts type keywords as plain names so
     // namespaces like `std::random::int` work without colliding with the type system.
-    fn require_member_name(&mut self) -> Result<Ident> {
-        let next = self.take()?;
-        match next.kind() {
-            TokKind::Ident(v) => Ok(Ident::new(v, next.location().into())),
-            TokKind::TyKw(kw) => Ok(Ident::new(kw.to_string(), next.location().into())),
-            _ => Err(ExpectedIdentifier {
-                src: self.src(),
-                at: shared::Location::from(next.location()).into(),
-            }
-            .into()),
+    fn require_member_name(&mut self) -> Ident {
+        let location = self.next_location();
+        if let TokKind::TyKw(kw) = self.peek() {
+            self.advance();
+            return Ident::new(kw.to_string(), location);
         }
+        self.require_ident()
     }
 
-    /// Returns the next Token, returning an error if there is none, or if it is
-    /// not within the provided array of required types.
-    fn require_possibilities(&mut self, toks: &[TokKind<'s>]) -> Result<Tok<TokKind<'s>>> {
-        let found_tok = self.take()?;
-        if toks.contains(&found_tok.kind()) {
-            Ok(found_tok)
-        } else {
-            Err(ExpectedPossibleTokens {
+    /// A grammar-mandated token the user must supply next (separator/opener/closer). If it's
+    /// absent the span sits at the end of the last consumed token, where it belongs -- not on the
+    /// stray one. Nothing is consumed when it's missing.
+    fn expect(&mut self, kind: TokKind<'s>) -> bool {
+        let found = self.eat(kind);
+        if !found {
+            self.error_here(ExpectedToken {
                 src: self.src(),
-                at: shared::Location::from(found_tok.location()).into(),
-                options: toks
-                    .iter()
-                    .map(|v| format!("{v:?}"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            }
-            .into())
+                at: self.location(self.cursor()).into(),
+                expected: kind.to_string(),
+            });
         }
+        found
     }
 
-    /// Returns the inner field of the next Token if it is an Identifier.
-    #[allow(unused)]
-    fn match_take_ident(&mut self) -> Result<Option<Ident>> {
-        if matches!(self.peek().map(|v| v.kind()), Ok(TokKind::Ident(_))) {
-            Ok(Some(self.require_ident()?))
-        } else {
-            Ok(None)
+    /// Takes the next token if it's a `kind`, and returns whether it was.
+    fn eat(&mut self, kind: TokKind<'s>) -> bool {
+        let found = self.at(kind);
+        if found {
+            self.advance();
+        }
+        found
+    }
+
+    /// Takes a token the grammar already dispatched on.
+    fn bump(&mut self, kind: TokKind<'s>) {
+        debug_assert!(self.at(kind), "dispatched on {kind}");
+        self.advance();
+    }
+
+    /// Takes the next token. The `Eof` stays put.
+    fn advance(&mut self) -> Tok<TokKind<'s>> {
+        let tok = self.tokens[self.next];
+        if tok.kind() != TokKind::Eof {
+            self.next += 1;
+            self.fuel.set(FUEL);
+        }
+        tok
+    }
+
+    /// Returns if the next token is a `kind`.
+    fn at(&self, kind: TokKind<'s>) -> bool {
+        self.peek() == kind
+    }
+
+    /// Kind of the next token.
+    fn peek(&self) -> TokKind<'s> {
+        self.nth(0)
+    }
+
+    /// Kind of the token `n` past the next one.
+    fn nth(&self, n: usize) -> TokKind<'s> {
+        let fuel = self.fuel.get();
+        assert!(
+            fuel > 0,
+            "the parser is stuck at byte {}",
+            self.next_start()
+        );
+        self.fuel.set(fuel - 1);
+        let last = self.tokens.len() - 1;
+        self.tokens[(self.next + n).min(last)].kind()
+    }
+
+    /// Location of the next token.
+    fn next_location(&self) -> Location {
+        self.tokens[self.next].location().into()
+    }
+
+    /// Start byte of the next token.
+    fn next_start(&self) -> usize {
+        self.tokens[self.next].span().start()
+    }
+
+    /// Whether the next token is the first on its line.
+    fn at_line_start(&self) -> bool {
+        self.src.inner()[self.cursor()..self.next_start()].contains('\n')
+    }
+
+    /// End byte of the last token taken.
+    fn cursor(&self) -> usize {
+        match self.next.checked_sub(1) {
+            Some(last) => self.tokens[last].span().end(),
+            None => self.next_start(),
         }
     }
 }
 
-// Token-stream helpers. Used to live on `chompy::parse::Parse`; reimplemented locally so the
-// parser can speak `shared::Result` end-to-end instead of bridging chompy diagnostics at every
-// hop.
-impl<'s> Parser<'s> {
-    pub(crate) fn set_cursor(&mut self, target: usize) {
-        self.cursor = target;
-    }
+/// How many times the parser can look at a token before it has to take it. Nearly everything
+/// stays in the dozens. The exception is backing out of the depth guard, where each of the 100
+/// levels looks at whatever stopped it about a dozen times on its way out.
+const FUEL: u32 = 4096;
 
-    /// Start byte of the next token (or the current cursor if we're at EOF).
-    pub(crate) fn next_tok_boundary(&mut self) -> usize {
-        let cursor = self.cursor;
-        self.lexer.peek().map_or(cursor, |tok| {
-            tok.as_ref().map_or(cursor, |tok| tok.span().start())
-        })
-    }
-
-    /// Borrow the next token without advancing. Surfaces lex errors and end-of-input as
-    /// diagnostics anchored at the current cursor.
-    pub(crate) fn peek(&mut self) -> Result<&Tok<TokKind<'s>>> {
-        let next = self.next_tok_boundary();
-        let at = self.location(next);
-        if self.lexer.peek().is_some_and(|v| v.is_err()) {
-            return Err(self.take().unwrap_err());
-        }
-        // Build the fallback source before reborrowing self.lexer, since the match arms
-        // hold the lexer borrow alive across the None path.
-        let src = self.src();
-        match self.lexer.peek() {
-            Some(Ok(tok)) => Ok(tok),
-            None => Err(UnexpectedEnd { src, at: at.into() }.into()),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Peek the next token, or `Ok(None)` if input is exhausted. Lex errors still propagate.
-    pub(crate) fn soft_peek(&mut self) -> Result<Option<&Tok<TokKind<'s>>>> {
-        if self.lexer.peek().is_some_and(|v| v.is_err()) {
-            return Err(self.take().unwrap_err());
-        }
-        match self.lexer.peek() {
-            Some(Ok(tok)) => Ok(Some(tok)),
-            None => Ok(None),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Consume the next token. End-of-input is an error.
-    pub(crate) fn take(&mut self) -> Result<Tok<TokKind<'s>>> {
-        let next = self.next_tok_boundary();
-        let at = self.location(next);
-        match self.lexer.next() {
-            Some(Ok(tok)) => {
-                self.set_cursor(tok.span().end());
-                Ok(tok)
-            }
-            Some(Err(err)) => Err(err),
-            None => Err(UnexpectedEnd {
-                src: self.src(),
-                at: at.into(),
-            }
-            .into()),
-        }
-    }
-
-    /// Consume the next token if it matches `tok_kind`; otherwise leave it unread and return
-    /// `None`. Lex errors swallow as `None`; the caller's next `take`/`peek` will surface them.
-    pub(crate) fn match_take(&mut self, tok_kind: TokKind<'s>) -> Option<Tok<TokKind<'s>>> {
-        match self.peek() {
-            Ok(peek) if peek.kind() == tok_kind => Some(self.take().unwrap()),
-            _ => None,
-        }
-    }
-
-    /// A token the grammar *guarantees* is here because we already dispatched on it; a failure
-    /// means the parser mis-stepped (our bug, not bad input), so the span marks the offending
-    /// token.
-    pub(crate) fn take_known(&mut self, known: TokKind<'s>) -> Result<Tok<TokKind<'s>>> {
-        let found_tok = self.take()?;
-        if found_tok.kind() == known {
-            Ok(found_tok)
-        } else {
-            Err(ParserMisdirection {
-                src: self.src(),
-                at: shared::Location::from(found_tok.location()).into(),
-                expected: known.to_string(),
-            }
-            .into())
-        }
-    }
-
-    /// A grammar-mandated token the user must supply next (separator/opener/closer); if it's absent
-    /// the span sits at the end of the last consumed token, where it belongs -- not on the stray
-    /// one.
-    pub(crate) fn expect(&mut self, expected: TokKind<'s>) -> Result<Tok<TokKind<'s>>> {
-        let present = self.peek().is_ok_and(|tok| tok.kind() == expected);
-        if present {
-            self.take()
-        } else {
-            Err(ExpectedToken {
-                src: self.src(),
-                at: self.location(self.cursor).into(),
-                expected: expected.to_string(),
-            }
-            .into())
-        }
+/// Operators and keywords from other languages, with what to say about them.
+fn foreign_spelling(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "and" => Some(("unknown operator `and`", "mimas spells this `&&`")),
+        "or" => Some(("unknown operator `or`", "mimas spells this `||`")),
+        "elif" => Some(("unknown keyword `elif`", "mimas spells this `else if`")),
+        "as" => Some((
+            "mimas has no `as` casts",
+            "convert with a method instead, e.g. `.to_float()`",
+        )),
+        _ => None,
     }
 }
 
@@ -2140,15 +1824,39 @@ enum BlockElement {
     MaybeYield(Expr),
 }
 
-bitflags! {
-    pub(crate) struct Restriction: u32 {
-        const NO_STRUCT_LITERAL = 0b0001;
-        const REQUIRE_FUNCTION_BODIES = 0b0010;
-    }
+/// A binary operator, paired with how tightly it binds (loosest is 1).
+enum BinaryOp {
+    Logical(LogicalOp),
+    Equality(EqualityOp),
+    /// `in` when true, `!in` when false.
+    In(bool),
+    Eval(EvaluationOp),
 }
 
-impl Default for Restriction {
-    fn default() -> Self {
-        Restriction::empty()
+impl BinaryOp {
+    /// Returns the operator `kind` is, if it is one.
+    fn of(kind: TokKind) -> Option<(Self, u8)> {
+        if let Ok(op) = LogicalOp::try_from(kind) {
+            return Some((Self::Logical(op), 1));
+        }
+        if let Ok(op) = EqualityOp::try_from(kind) {
+            return Some((Self::Equality(op), 2));
+        }
+        // `in` doesn't chain, so `binary` stops after taking one
+        if matches!(kind, TokKind::In | TokKind::NotIn) {
+            return Some((Self::In(kind == TokKind::In), 3));
+        }
+        let op = EvaluationOp::try_from(kind).ok()?;
+        let power = if op.is_binary() {
+            4
+        } else if op.is_bit_shift() {
+            5
+        } else if op.is_additive() {
+            6
+        } else {
+            // the multiplicative ops, which bind tightest
+            7
+        };
+        Some((Self::Eval(op), power))
     }
 }

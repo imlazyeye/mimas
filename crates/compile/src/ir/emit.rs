@@ -57,6 +57,7 @@ impl Ir {
             StmtKind::Module(_) => Some(()),
             StmtKind::Item(item) => {
                 match item.kind() {
+                    parse::ItemKind::Poison(poison) => poison.escaped(),
                     // function bodies need to be lowered into their own Body
                     parse::ItemKind::Function(f) => {
                         let _ = f.emit(item.id(), ir);
@@ -725,6 +726,7 @@ impl Lower for Expr {
     fn lower(&self, ir: &mut Ir) -> Option<InstId> {
         let id = self.id();
         ir.with_loc(self.location(), |ir| match self.kind() {
+            ExprKind::Poison(poison) => poison.escaped(),
             ExprKind::Absolve(absolve) => absolve.emit(id, ir),
             ExprKind::Access(access) => access.emit(id, ir),
             ExprKind::Block(block) => block.emit(id, ir),
