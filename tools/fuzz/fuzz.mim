@@ -1,0 +1,71 @@
+/// Runs the fuzzer through cargo-fuzz (needs a nightly toolchain and `cargo install cargo-fuzz`).
+///
+/// mimas run tools/fuzz/fuzz.mim -- run|reproduce|shrink [artifact]
+use std::fs;
+use std::process;
+use std::sys;
+
+const RUN_FLAGS: [str] = [
+    "-timeout=10",
+    "-rss_limit_mb=2048",
+    "-fork=8",
+    "-ignore_crashes=1",
+];
+
+let code = match (sys::arg(1), sys::arg(2)) {
+    ("run"?, _) => {
+        let args = ["--", f"-dict={fuzz_dir()}/mimas.dict"];
+        args.extend(RUN_FLAGS);
+        cargo_fuzz("run", args)
+    }
+    ("reproduce"?, artifact) => cargo_fuzz("run", [pick_artifact(artifact)]),
+    ("shrink"?, artifact) => cargo_fuzz("tmin", [pick_artifact(artifact)]),
+    _ => {
+        print("usage: mimas run tools/fuzz/fuzz.mim -- run|reproduce|shrink [artifact]");
+        1
+    }
+};
+sys::exit(code);
+
+/// Runs a cargo-fuzz subcommand on the `parse` target and hands back its exit code.
+fn cargo_fuzz(command: str, args: [str]) -> int {
+    let full = [
+        "+nightly",
+        "fuzz",
+        command,
+        "--fuzz-dir",
+        fuzz_dir(),
+        "--sanitizer",
+        "none",
+        "parse",
+    ];
+    full.extend(args);
+    process::run_attached("cargo", full)!
+}
+
+/// The given artifact, or the only one there is.
+fn pick_artifact(given: str?) -> str {
+    if let artifact? = given {
+        return artifact;
+    }
+    let dir = f"{fuzz_dir()}/artifacts/parse";
+    let artifacts = fs::list_dir(dir) absolve |_| [];
+    if artifacts.is_empty() {
+        print(f"no artifacts in {dir}");
+        sys::exit(1);
+    } else if artifacts.len() > 1 {
+        print("more than one artifact, pick one:");
+        for artifact in artifacts {
+            print(f"  {artifact}");
+        }
+        sys::exit(1);
+    }
+    artifacts[0]
+}
+
+/// The directory this script lives in, so it works no matter where it's run from.
+fn fuzz_dir() -> str {
+    let parts = sys::file().split("/");
+    parts.pop();
+    parts.join("/")
+}

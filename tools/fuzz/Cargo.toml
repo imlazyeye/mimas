@@ -1,0 +1,27 @@
+[package]
+name = "mimas-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mimas = { package = "mimas", path = "../../crates/mimas" }
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+# own workspace, so the fuzzer gets its own profile instead of the root's fat lto
+[workspace]
+
+[profile.release]
+debug = 1
+debug-assertions = true
+overflow-checks = true
