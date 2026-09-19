@@ -74,12 +74,12 @@ fn doc_for(path: &str) -> String {
 }
 
 impl<'a, 'gc> Api<'a, 'gc> {
-    pub fn add<F, Marker>(&mut self, f: F)
+    pub fn add<F, Marker>(&mut self, f: F) -> NativeId
     where
         F: IntoFn<'gc, Marker>,
     {
         let name = short_name_of_val(&f);
-        f.install(self, name, Vec::new());
+        f.install(self, name, Vec::new())
     }
 
     pub fn add_named<F, Marker>(&mut self, name: impl Into<String>, f: F)
@@ -296,12 +296,12 @@ pub struct ModuleApi<'b, 'a, 'gc> {
 }
 
 impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
-    pub fn add<F, Marker>(&mut self, f: F)
+    pub fn add<F, Marker>(&mut self, f: F) -> NativeId
     where
         F: IntoFn<'gc, Marker>,
     {
         let name = short_name_of_val(&f);
-        f.install(self.parent, name, self.path.clone());
+        f.install(self.parent, name, self.path.clone())
     }
 
     pub fn add_named<F, Marker>(&mut self, name: impl Into<String>, f: F)

@@ -1,9 +1,12 @@
 #![allow(unused)] // temp
 
+use std::{collections::HashMap, sync::Arc};
+
 use api::NativeId;
 use indexmap::IndexMap;
+use miette::NamedSource;
 use parse::{Literal, NodeId};
-use shared::{IdVec, PactId};
+use shared::{FileId, IdVec, PactId};
 
 use crate::{
     Solver,
@@ -17,6 +20,7 @@ pub struct Resolutions {
     pub adts: IdVec<AdtId, ResolvedAdt>,
     pub closure_captures: IndexMap<NodeId, Vec<DecId>>,
     pub root: ResolvedModule,
+    pub sources: HashMap<FileId, NamedSource<Arc<str>>>,
 }
 
 /// Everything a file or module declares, in declaration order.
@@ -196,6 +200,7 @@ impl From<Solver> for Resolutions {
             adts: resolved_adts,
             closure_captures,
             root,
+            sources: solver.sources,
         }
     }
 }

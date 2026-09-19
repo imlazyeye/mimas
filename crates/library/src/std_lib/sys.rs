@@ -12,6 +12,8 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     m.add(arg);
     m.add(exit);
     m.add(stdin);
+    let file = m.add(file);
+    api.mark_intrinsic(file, api::Intrinsic::File);
 }
 
 #[native]
@@ -31,6 +33,11 @@ fn stdin<'gc>() -> Raisable<String> {
         .read_to_string(&mut buf)
         .map(|_| buf)
         .into()
+}
+
+#[native]
+fn file() -> String {
+    "<unknown>".into()
 }
 
 #[derive(Default)]

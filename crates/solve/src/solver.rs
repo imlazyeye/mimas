@@ -39,7 +39,7 @@ pub struct Solver {
     library: HashMap<String, AdtId>,
     pub(crate) root_modules: IndexMap<String, AdtId>,
     pub(crate) module_items: IndexMap<AdtId, IndexMap<String, DecId>>,
-    sources: HashMap<FileId, NamedSource<Arc<str>>>,
+    pub(crate) sources: HashMap<FileId, NamedSource<Arc<str>>>,
 
     pub(crate) dec_to_native: HashMap<DecId, NativeBinding>,
 

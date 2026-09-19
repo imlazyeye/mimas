@@ -15,4 +15,5 @@ pub enum Intrinsic {
     Push,
     ToFloat,
     Sqrt,
+    File,
 }

@@ -362,6 +362,37 @@ impl Emit for Call {
             .unwrap_or_default()
         }
 
+        fn emit_intrinsic(
+            ir: &mut Ir,
+            intrinsic: api::Intrinsic,
+            args: &[InstId],
+            call: &Call,
+        ) -> InstId {
+            match intrinsic {
+                api::Intrinsic::Len => ir.current().len(args[0]),
+                api::Intrinsic::In => ir.current().check_in(args[1], args[0], true),
+                api::Intrinsic::Push => {
+                    ir.current().push(args[0], args[1]);
+                    ir.current().constant(Constant::Null)
+                }
+                api::Intrinsic::ToFloat => ir.current().to_float(args[0]),
+                api::Intrinsic::Sqrt => ir.current().sqrt(args[0]),
+                api::Intrinsic::File => {
+                    let name = ir
+                        .resolutions
+                        .sources
+                        .get(&call.left.location().file_id)
+                        .unwrap()
+                        .name()
+                        .to_string();
+                    let path = std::fs::canonicalize(&name)
+                        .map_or(name, |path| path.to_string_lossy().into_owned());
+                    let path = ir.intern_str(&path);
+                    ir.current().constant(Constant::Str(path))
+                }
+            }
+        }
+
         // pact-typed receiver dispatch: a runtime IsInstance chain over implementors of the bound,
         // each arm CallDirect-ing that adt's body for the method. one implementor => skip the test.
         fn emit_pact_dispatch(
@@ -490,24 +521,10 @@ impl Emit for Call {
                     let receiver = takes_self.then_some(receiver);
                     let args = fill_call_args(ir, &fn_ty, &defaults, &self.arguments, receiver)?;
                     Some(match (native_id, body) {
-                        (Some(id), _) => {
-                            if let Some(i) = ir.intrinsics.get(&id) {
-                                match i {
-                                    api::Intrinsic::Len => ir.current().len(args[0]),
-                                    api::Intrinsic::In => {
-                                        ir.current().check_in(args[1], args[0], true)
-                                    }
-                                    api::Intrinsic::Push => {
-                                        ir.current().push(args[0], args[1]);
-                                        ir.current().constant(Constant::Null)
-                                    }
-                                    api::Intrinsic::ToFloat => ir.current().to_float(args[0]),
-                                    api::Intrinsic::Sqrt => ir.current().sqrt(args[0]),
-                                }
-                            } else {
-                                ir.current().call_native(id, args)
-                            }
-                        }
+                        (Some(id), _) => match ir.intrinsics.get(&id) {
+                            Some(&i) => emit_intrinsic(ir, i, &args, self),
+                            None => ir.current().call_native(id, args),
+                        },
                         (None, Some(body)) => ir.current().call_direct(body, args),
                         _ => unreachable!(),
                     })
@@ -577,7 +594,10 @@ impl Emit for Call {
 
         Some(match static_callee {
             Some(StaticCallee::Body(body)) => ir.current().call_direct(body, args),
-            Some(StaticCallee::Native(id)) => ir.current().call_native(id, args),
+            Some(StaticCallee::Native(id)) => match ir.intrinsics.get(&id) {
+                Some(&i) => emit_intrinsic(ir, i, &args, self),
+                None => ir.current().call_native(id, args),
+            },
             None => {
                 let callee = self.left.lower(ir)?;
                 ir.current().call(callee, args)

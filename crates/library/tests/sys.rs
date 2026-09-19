@@ -130,3 +130,8 @@ test_fail!(
     r#"let TEST_VALUE = std::sys::stdin().len();"#,
     r#"let TEST_VALUE = std::sys::exit("nope");"#
 );
+
+test_run!(
+    file_intrinisc,
+    "std::sys::file()" => r#""<execute>""#
+);
