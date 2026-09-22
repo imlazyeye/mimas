@@ -466,6 +466,7 @@ impl Solver {
             dec: None,
             constant: false,
         };
+        self.note(first, target.ty.clone(), None);
 
         for ident in walk_segments.iter().skip(1) {
             let Some(adt) = target.ty.as_adt().copied() else {
@@ -475,6 +476,7 @@ impl Solver {
                 })?
             };
             target = self.module_field(adt, ident)?;
+            self.note(ident, target.ty.clone(), target.dec);
         }
 
         let imports: Vec<ImportBinding> = match us {
@@ -488,7 +490,11 @@ impl Solver {
                 };
                 items
                     .iter()
-                    .map(|i| self.module_field(adt, i))
+                    .map(|i| {
+                        let binding = self.module_field(adt, i)?;
+                        self.note(i, binding.ty.clone(), binding.dec);
+                        Ok(binding)
+                    })
                     .collect::<Result<Vec<_>>>()?
             }
             Use::All(_) => {
@@ -1224,14 +1230,16 @@ impl Solver {
             }
         };
         let module = self.ribs.current_module();
-        self.decs.push(Dec {
+        let dec = self.decs.push(Dec {
             name: ident.lexeme.clone(),
             location: ident.location,
             kind,
             vid,
             vis,
             module,
-        })
+        });
+        self.note(ident, Ty::Vid(vid), Some(dec));
+        dec
     }
 }
 
@@ -1712,50 +1720,66 @@ impl Solver {
     }
 
     pub fn resolve_name(&mut self, ident: &Ident, read_location: Location) -> Result<Ty> {
-        if ident.is_identity() {
+        let (ty, dec) = if ident.is_identity() {
             // inside a pact, both `self` and `Self` are the implementing type -- one fixed but
             // unknown type, so two `Self`s are known to match (unlike two values of the bound)
-            if let Some(pid) = self.pact_self {
-                return Ok(Ty::Skolem(pid));
-            }
-            return self.impl_target().map(Ty::Adt).ok_or_else(|| {
-                SelfOutOfContext {
-                    src: self.src(read_location),
-                    at: read_location.into(),
-                }
-                .into()
-            });
-        }
-        match self.ribs.resolve(ident) {
-            Some(dec_id) => {
-                self.check_vis(dec_id, read_location)?;
-                // natives carry a fresh `Ty::Fn` per use so each call gets its own type vars;
-                // without this, two calls with different types unify and the second fails.
-                if let Some(binding) = self.dec_to_native.get(&dec_id) {
-                    let sig = NativeFnSig {
-                        params: binding.sig.params.clone(),
-                        return_ty: binding.sig.return_ty.clone(),
-                        recv: binding.sig.recv.clone(),
+            let ty = match self.pact_self {
+                Some(pid) => Ty::Skolem(pid),
+                None => self.impl_target().map(Ty::Adt).ok_or_else(|| {
+                    Error::from(SelfOutOfContext {
+                        src: self.src(read_location),
+                        at: read_location.into(),
+                    })
+                })?,
+            };
+            (ty, None)
+        } else {
+            match self.ribs.resolve(ident) {
+                Some(dec_id) => {
+                    self.check_vis(dec_id, read_location)?;
+                    // natives carry a fresh `Ty::Fn` per use so each call gets its own type vars;
+                    // without this, two calls with different types unify and the second fails.
+                    let ty = if let Some(binding) = self.dec_to_native.get(&dec_id) {
+                        let sig = NativeFnSig {
+                            params: binding.sig.params.clone(),
+                            return_ty: binding.sig.return_ty.clone(),
+                            recv: binding.sig.recv.clone(),
+                        };
+                        self.instantiate_native(&sig, None)?
+                    } else {
+                        Ty::Vid(self.decs[dec_id].vid).normalized(self)
                     };
-                    return self.instantiate_native(&sig, None);
+                    (ty, Some(dec_id))
                 }
-                Ok(Ty::Vid(self.decs[dec_id].vid).normalized(self))
-            }
-            None if self.library.contains_key(&ident.lexeme) => {
-                Ok(Ty::Adt(self.library[&ident.lexeme]))
-            }
-            None => {
-                if let Some((pid, _)) = self.pacts.iter().find(|(_, p)| p.name == ident.lexeme) {
-                    return Ok(Ty::pacts(vec![pid]));
+                None if self.library.contains_key(&ident.lexeme) => {
+                    (Ty::Adt(self.library[&ident.lexeme]), None)
                 }
-                Err(NotFound {
-                    src: self.src(read_location),
-                    at: read_location.into(),
-                    name: ident.lexeme.clone(),
+                None => {
+                    let pact = self.pacts.iter().find(|(_, p)| p.name == ident.lexeme);
+                    let Some((pid, _)) = pact else {
+                        Err(NotFound {
+                            src: self.src(read_location),
+                            at: read_location.into(),
+                            name: ident.lexeme.clone(),
+                        })?
+                    };
+                    (Ty::pacts(vec![pid]), None)
                 }
-                .into())
             }
+        };
+        self.note(ident, ty.clone(), dec);
+        Ok(ty)
+    }
+
+    /// Records what `ident` resolved to. This is only used by tooling.
+    pub(crate) fn note(&mut self, ident: &Ident, ty: Ty, dec: Option<DecId>) {
+        if let Some(dec) = dec {
+            self.node_decs.insert(ident.id, dec);
         }
+        let vid = self.node_vid(ident.id);
+        // a name resolved twice yields the same type both times (a fresh native instantiation
+        // just links to the earlier one), and nothing downstream depends on this vid
+        let _ = self.register_sub(vid, ty);
     }
 
     /// Const-folds an expr using the solver's dec/lit tables to resolve Ident leaves. Returns

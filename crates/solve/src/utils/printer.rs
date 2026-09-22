@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use crate::components::{AdtId, Ty, Vid};
+use crate::components::{Ty, Vid};
 use colored::Colorize;
 use parse::{
     expr::{Expr, Ident},
@@ -13,7 +13,6 @@ thread_local! {
         RefCell::new(Printer {
         aliases: HashMap::default(),
         expr_strings: HashMap::default(),
-        adt_names: HashMap::default(),
         alias_characters: vec![
             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
             'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h',
@@ -28,7 +27,6 @@ thread_local! {
 pub struct Printer {
     aliases: HashMap<Vid, String>,
     expr_strings: HashMap<Vid, String>,
-    adt_names: HashMap<AdtId, String>,
     alias_characters: Vec<char>,
     iter: usize,
 }
@@ -133,13 +131,5 @@ impl Printer {
             Printer::vid(vid).bright_black().bold(),
             Printer::ty(ty).blue().bold(),
         )
-    }
-
-    pub(crate) fn report_new_adt(id: AdtId, name: String) {
-        PRINTER.with_borrow_mut(|p| p.adt_names.insert(id, name));
-    }
-
-    pub(crate) fn adt_name(id: AdtId) -> Option<String> {
-        PRINTER.with_borrow(|p| p.adt_names.get(&id).cloned())
     }
 }

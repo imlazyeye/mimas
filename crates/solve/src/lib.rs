@@ -35,9 +35,11 @@ pub mod utils {
 }
 
 mod exhaustion;
+mod load;
 mod resolutions;
 mod solver;
 mod unify;
+pub use load::*;
 pub use resolutions::*;
 pub use solver::*;
 use unify::*;

@@ -1663,31 +1663,21 @@ impl Vm {
         files: &[(&str, &str)],
         library: &::api::Library<()>,
     ) -> std::result::Result<(Program, Sources), ExecuteError> {
-        use parse::{Parser, lex::Lexer};
-        use solve::{Resolutions, Solver};
+        use solve::Resolutions;
 
-        let mut asts = Vec::with_capacity(files.len());
-        let mut sources = Sources::with_capacity(files.len());
-        for (file_id, (name, source)) in files.iter().enumerate() {
-            let lexer = Lexer::new(source, file_id, (*name).into());
-            // todo: only the first parse error makes it out
-            let ast = Parser::new(lexer)
-                .try_into_ast()
-                .map_err(|mut errors| errors.swap_remove(0))?;
-            asts.push(ast);
-            sources.insert(
-                file_id,
-                miette::NamedSource::new(*name, std::sync::Arc::from(*source)),
-            );
+        let mut loaded = solve::load_files(files.iter().copied(), library);
+        // todo: only the first error makes it out
+        if !loaded.errors.is_empty() {
+            return Err(loaded.errors.swap_remove(0).into());
         }
 
-        let mut solver = Solver::new();
-        solver.install_library(library);
-        solver.set_sources(sources.clone());
-        solver.solve_all(asts.iter())?;
-
-        let stmts: Vec<_> = asts.into_iter().flat_map(|ast| ast.unpack()).collect();
-        let resolutions = Resolutions::from(solver);
+        let stmts: Vec<_> = loaded
+            .asts
+            .into_iter()
+            .flat_map(|ast| ast.unpack())
+            .collect();
+        let sources = loaded.sources;
+        let resolutions = Resolutions::from(loaded.solver);
         // todo: there's zero reason to clone this here, im just trying to get a working version --
         // there's probably a much smoother way to get the intrinsics over here
         let mut ir = compile::Ir::new(

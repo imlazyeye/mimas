@@ -108,6 +108,7 @@ impl Solve for Access {
                         .dec()
                         .expect("enum variant must have a dec set during hoist");
                     solver.node_decs.insert(id, dec);
+                    solver.note(right, Ty::Adt(aid), Some(dec));
                     Ok(Ty::Adt(aid))
                 } else {
                     Err(MissingTupleMembers {
@@ -158,16 +159,18 @@ impl Solve for Access {
             solver.check_vis(dec, right.location())?;
             solver.node_decs.insert(id, dec);
             // module-nested natives need fresh type vars per call site, same as free natives.
-            if let Some(binding) = solver.dec_to_native.get(&dec) {
+            let ty = if let Some(binding) = solver.dec_to_native.get(&dec) {
                 let sig = crate::NativeFnSig {
                     params: binding.sig.params.clone(),
                     return_ty: binding.sig.return_ty.clone(),
                     recv: binding.sig.recv.clone(),
                 };
-                return solver.instantiate_native(&sig, None);
-            }
-
-            Ok(field.ty)
+                solver.instantiate_native(&sig, None)?
+            } else {
+                field.ty
+            };
+            solver.note(right, ty.clone(), Some(dec));
+            Ok(ty)
         }
         // can a plain `[i]` / `.x` ride the short-circuit on `e`, or does `e` leave a *fresh*
         // option that needs its own `?`? the mental model is "one `?` per option you reach
@@ -421,14 +424,15 @@ impl Solve for Access {
                             let name = &right.as_ident().unwrap().lexeme;
 
                             // fields win over impls. method dispatch happens @ call
-                            let field_ty = match solver.adts[aid].variants.values().next() {
+                            let field = match solver.adts[aid].variants.values().next() {
                                 Some(Variant::Struct(s)) => {
-                                    s.fields.get(name).map(|f| f.ty.clone())
+                                    s.fields.get(name).map(|f| (f.ty.clone(), f.dec))
                                 }
                                 _ => None,
                             };
 
-                            if let Some(ty) = field_ty {
+                            if let Some((ty, dec)) = field {
+                                solver.note(right.as_ident().unwrap(), ty.clone(), Some(dec));
                                 ty
                             } else {
                                 let impl_field = pick_method_overload(
@@ -470,6 +474,7 @@ impl Solve for Access {
                                     }
                                     .into());
                                 }
+                                solver.note(right.as_ident().unwrap(), member.clone(), Some(dec));
                                 member
                             }
                         }
@@ -725,6 +730,7 @@ impl Solve for Call {
                 } else {
                     field.ty
                 };
+                solver.note(ident, ty.clone(), Some(dec));
                 Ok(Some(ty))
             }
             let ty = match method_intercept(self, solver)? {

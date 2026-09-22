@@ -2411,6 +2411,7 @@ dependencies = [
  "mutants",
  "pretty_assertions",
  "thiserror 1.0.69",
+ "walkdir",
 ]
 
 [[package]]

@@ -6,7 +6,7 @@ use api::NativeId;
 use indexmap::IndexMap;
 use miette::NamedSource;
 use parse::{Literal, NodeId};
-use shared::{FileId, IdVec, PactId};
+use shared::{FileId, IdVec, Location, PactId, TyNames};
 
 use crate::{
     Solver,
@@ -18,9 +18,46 @@ pub struct Resolutions {
     pub node_decs: IndexMap<NodeId, DecId>,
     pub decs: IdVec<DecId, ResolvedDecl>,
     pub adts: IdVec<AdtId, ResolvedAdt>,
+    pub pact_names: IdVec<PactId, String>,
+    pub module_paths: HashMap<AdtId, Vec<String>>,
     pub closure_captures: IndexMap<NodeId, Vec<DecId>>,
     pub root: ResolvedModule,
     pub sources: HashMap<FileId, NamedSource<Arc<str>>>,
+}
+
+impl Resolutions {
+    /// An adt's name qualified by the module it's declared in, e.g. `one::two::Foo`.
+    pub fn adt_path(&self, aid: AdtId) -> String {
+        let adt = &self.adts[aid];
+        let mut path = self.module_path(adt.module).to_vec();
+        path.push(Ty::Adt(aid).display(self));
+        path.join("::")
+    }
+
+    /// What a dec sits in, as written before its name: the adt for a method or field, the
+    /// module path for anything else (empty at the root).
+    pub fn owner_path(&self, dec: DecId) -> String {
+        let dec = &self.decs[dec];
+        match dec.owner {
+            Some(owner) => self.adt_path(owner),
+            None => self.module_path(dec.module).join("::"),
+        }
+    }
+
+    /// The segments leading to `module`. Empty for the root (or anything that isn't a module).
+    pub fn module_path(&self, module: AdtId) -> &[String] {
+        self.module_paths.get(&module).map_or(&[], Vec::as_slice)
+    }
+}
+
+impl TyNames for Resolutions {
+    fn adt(&self, id: AdtId) -> Option<String> {
+        self.adts.get(id).map(|adt| adt.name.clone())
+    }
+
+    fn pact(&self, id: PactId) -> Option<String> {
+        self.pact_names.get(id).cloned()
+    }
 }
 
 /// Everything a file or module declares, in declaration order.
@@ -72,6 +109,9 @@ pub struct ResolvedDecl {
     pub ty: Ty,
     pub kind: ResolvedDeclKind,
     pub vis: Vis,
+    pub location: Location,
+    pub module: AdtId,
+    pub owner: Option<AdtId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,6 +132,8 @@ pub enum ResolvedDeclKind {
 }
 
 pub struct ResolvedAdt {
+    pub name: String,
+    pub module: AdtId,
     pub fields: Vec<String>,
     pub implements: Vec<PactId>,
     pub methods: IndexMap<String, DecId>,
@@ -128,7 +170,15 @@ impl ResolvedAdt {
             vec![aid]
         };
 
+        let module = solver
+            .decs
+            .iter()
+            .find(|(_, dec)| dec.kind == DecKind::Adt(aid))
+            .map_or(AdtId::DANGLING, |(_, dec)| dec.module);
+
         Self {
+            name: adt.name.clone(),
+            module,
             fields,
             implements,
             methods,
@@ -151,6 +201,44 @@ impl From<Solver> for Resolutions {
         }
 
         let root = ResolvedModule::new(&solver, AdtId::DANGLING);
+
+        fn module_paths(
+            solver: &Solver,
+            adt: AdtId,
+            prefix: &[String],
+            out: &mut HashMap<AdtId, Vec<String>>,
+        ) {
+            for (name, field) in solver.adts[adt].as_struct().fields.iter() {
+                let Some(child) = field.ty.as_adt().copied() else {
+                    continue;
+                };
+                if !solver.adts[child].flags.contains(AdtFlags::IS_MODULE) {
+                    continue;
+                }
+                let mut path = prefix.to_vec();
+                path.push(name.clone());
+                out.insert(child, path.clone());
+                module_paths(solver, child, &path, out);
+            }
+        }
+        let mut paths = HashMap::new();
+        for (name, &adt) in &solver.root_modules {
+            paths.insert(adt, vec![name.clone()]);
+            module_paths(&solver, adt, std::slice::from_ref(name), &mut paths);
+        }
+
+        let mut owners: HashMap<DecId, AdtId> = HashMap::new();
+        for (aid, adt) in solver.adts.iter() {
+            for field in adt.impls.values() {
+                owners.insert(field.dec, aid);
+            }
+            if let Some(Variant::Struct(variant)) = adt.variants.values().next() {
+                for field in variant.fields.values() {
+                    owners.insert(field.dec, aid);
+                }
+            }
+        }
+
         let tys: Vec<Ty> = solver
             .decs
             .iter()
@@ -184,7 +272,15 @@ impl From<Solver> for Resolutions {
                 ty,
                 kind,
                 vis,
+                location: dec.location,
+                module: dec.module,
+                owner: owners.get(&id).copied(),
             });
+        }
+
+        let mut pact_names = IdVec::new();
+        for (_, pact) in solver.pacts.iter() {
+            pact_names.push(pact.name.clone());
         }
 
         let closure_captures = solver
@@ -198,6 +294,8 @@ impl From<Solver> for Resolutions {
             node_decs: solver.node_decs,
             decs: resolved_decs,
             adts: resolved_adts,
+            pact_names,
+            module_paths: paths,
             closure_captures,
             root,
             sources: solver.sources,

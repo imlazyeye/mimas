@@ -291,11 +291,64 @@ impl FnHeader {
     }
 }
 
+impl FnHeader {
+    /// The header as a type, e.g. `(int, str) -> bool`.
+    pub fn display(&self, names: &dyn TyNames) -> String {
+        let params = self
+            .parameters
+            .iter()
+            .map(|p| p.ty.display(names))
+            .join(", ");
+        format!("({params}) -> {}", self.return_ty.display(names))
+    }
+
+    /// The header as it would be declared, e.g. `fn bar(self, fizz: int) -> Self`. `takes_self`
+    /// covers natives, whose receiver isn't in their parameters.
+    pub fn signature(&self, name: &str, takes_self: bool, names: &dyn TyNames) -> String {
+        let mut parameters = Vec::new();
+        if takes_self && !self.is_method {
+            parameters.push("self".to_owned());
+        }
+        for (i, param) in self.parameters.iter().enumerate() {
+            if i == 0 && self.is_method {
+                parameters.push("self".to_owned());
+                continue;
+            }
+            let name = param.name.as_deref().unwrap_or("_");
+            parameters.push(format!("{name}: {}", param.ty.display(names)));
+        }
+        let mut text = format!("fn {name}({})", parameters.join(", "));
+        if *self.return_ty != Ty::Unit {
+            text.push_str(&format!(" -> {}", self.return_ty.display(names)));
+        }
+        text
+    }
+}
+
 #[mutants::skip]
 impl std::fmt::Display for FnHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let param_str = self.parameters.iter().map(|p| &p.ty).join(", ");
-        f.pad(&format!("({param_str}) -> {}", self.return_ty))
+        f.pad(&self.display(&ThreadNames))
+    }
+}
+
+/// Where adt and pact names come from when a type is printed. The solver's tables implement
+/// this, as do the names it registered on the current thread (what `Display` uses).
+pub trait TyNames {
+    fn adt(&self, id: AdtId) -> Option<String>;
+    fn pact(&self, id: PactId) -> Option<String>;
+}
+
+/// The names the solver registered on this thread.
+pub struct ThreadNames;
+
+impl TyNames for ThreadNames {
+    fn adt(&self, id: AdtId) -> Option<String> {
+        TY_NAMES.with_borrow(|(adts, _)| adts.get(id.index()).filter(|n| !n.is_empty()).cloned())
+    }
+
+    fn pact(&self, id: PactId) -> Option<String> {
+        TY_NAMES.with_borrow(|(_, pacts)| pacts.get(id.index()).filter(|n| !n.is_empty()).cloned())
     }
 }
 
@@ -325,30 +378,10 @@ pub fn name_pact(index: usize, name: &str) {
     });
 }
 
-fn adt_display(index: usize) -> Option<String> {
-    TY_NAMES.with_borrow(|(adts, _)| {
-        let name = adts.get(index).filter(|n| !n.is_empty())?;
-        // module adts are spelled `<module:foo>` internally
-        Some(
-            match name
-                .strip_prefix("<module:")
-                .and_then(|r| r.strip_suffix('>'))
-            {
-                Some(module) => format!("module `{module}`"),
-                None => name.clone(),
-            },
-        )
-    })
-}
-
-fn pact_display(index: usize) -> Option<String> {
-    TY_NAMES.with_borrow(|(_, pacts)| pacts.get(index).filter(|n| !n.is_empty()).cloned())
-}
-
-#[mutants::skip]
-impl std::fmt::Display for Ty {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = match self {
+impl Ty {
+    /// The type as the user would write it, with adt and pact names looked up in `names`.
+    pub fn display(&self, names: &dyn TyNames) -> String {
+        match self {
             Ty::Unit => "()".into(),
             Ty::Never => "!".into(),
             Ty::Null => "null".into(),
@@ -356,26 +389,44 @@ impl std::fmt::Display for Ty {
             Ty::Int => "int".into(),
             Ty::Float => "float".into(),
             Ty::Str => "str".into(),
-            Ty::Array(ty) => format!("[{ty}]"),
-            Ty::Dict(ty) => format!("~{{{ty}}}"),
-            Ty::Tuple(members) => format!("({})", members.iter().map(|v| v.to_string()).join(", ")),
-            Ty::Fn(h) => h.to_string(),
+            Ty::Array(ty) => format!("[{}]", ty.display(names)),
+            Ty::Dict(ty) => format!("~{{{}}}", ty.display(names)),
+            Ty::Tuple(members) => {
+                format!("({})", members.iter().map(|v| v.display(names)).join(", "))
+            }
+            Ty::Fn(h) => h.display(names),
             // both vids and anons mark "an internal type slot that should have been resolved
             // before reaching a user-visible message". the shared `?mimas<...>` prefix lets the
             // diag emitter recognize either as a leak and attach an explanatory note.
             Ty::Vid(vid) => format!("{INTERNAL_TY_MARKER}T{}>", vid.index()),
             Ty::Anon(n) => format!("{INTERNAL_TY_MARKER}A{n}>"),
             Ty::Identity(_) | Ty::Skolem(_) => "Self".into(),
-            Ty::Adt(id) => adt_display(id.index()).unwrap_or_else(|| "<adt>".into()),
-            Ty::Option(inner) => format!("{inner}?"),
-            Ty::Result(inner) => format!("{inner}!"),
+            Ty::Adt(id) => match names.adt(*id) {
+                // module adts are spelled `<module:foo>` internally
+                Some(name) => match name
+                    .strip_prefix("<module:")
+                    .and_then(|r| r.strip_suffix('>'))
+                {
+                    Some(module) => format!("module `{module}`"),
+                    None => name,
+                },
+                None => "<adt>".into(),
+            },
+            Ty::Option(inner) => format!("{}?", inner.display(names)),
+            Ty::Result(inner) => format!("{}!", inner.display(names)),
             Ty::Pacts(ids) => ids
                 .iter()
-                .map(|p| pact_display(p.index()))
+                .map(|p| names.pact(*p))
                 .collect::<Option<Vec<_>>>()
                 .map(|names| names.join(" + "))
                 .unwrap_or_else(|| "<pacts>".into()),
-        };
-        f.pad(&string)
+        }
+    }
+}
+
+#[mutants::skip]
+impl std::fmt::Display for Ty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(&self.display(&ThreadNames))
     }
 }
