@@ -4,8 +4,8 @@ mod source_file;
 
 use lsp_server::Connection;
 use lsp_types::{
-    DefinitionProvider, DocumentSymbolProvider, HoverProvider, ServerCapabilities,
-    TextDocumentSync, TextDocumentSyncKind,
+    DefinitionProvider, DocumentSymbolProvider, HoverProvider, ReferencesProvider,
+    ServerCapabilities, TextDocumentSync, TextDocumentSyncKind,
 };
 use server::Server;
 
@@ -16,6 +16,7 @@ fn main() -> anyhow::Result<()> {
         hover_provider: Some(HoverProvider::Bool(true)),
         definition_provider: Some(DefinitionProvider::Bool(true)),
         document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
+        references_provider: Some(ReferencesProvider::Bool(true)),
         ..Default::default()
     };
     connection.initialize(serde_json::to_value(capabilities)?)?;

@@ -110,6 +110,44 @@ impl Project {
         })
     }
 
+    /// Every ident in the project that resolves to the same declaration as the one at
+    /// `position`, the declaration itself included when `with_declaration`.
+    pub fn references(
+        &self,
+        path: &Path,
+        position: Position,
+        with_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        let resolutions = self.analysis.as_ref().ok()?;
+        let file = self.files.get(path)?;
+        let (id, _) = file.ast.node_at(file.offset(position)?)?;
+        let target = *resolutions.node_decs.get(&id)?;
+        let declared_at = resolutions.decs[target].location;
+
+        let mut locations = Vec::new();
+        for (file_id, (path, file)) in self.files.iter().enumerate() {
+            let Ok(uri) = Uri::from_file_path(path) else {
+                continue;
+            };
+            for (id, span) in file.idents() {
+                if resolutions.node_decs.get(&id) != Some(&target) {
+                    continue;
+                }
+                let is_declaration = file_id == declared_at.file_id && span == declared_at.span;
+                if is_declaration && !with_declaration {
+                    continue;
+                }
+                if let Some(range) = file.range(span) {
+                    locations.push(Location {
+                        uri: uri.clone(),
+                        range,
+                    });
+                }
+            }
+        }
+        Some(locations)
+    }
+
     /// The outline of one file, which needs no analysis.
     pub fn symbols(&self, path: &Path) -> Option<Vec<DocumentSymbol>> {
         Some(self.files.get(path)?.symbols())

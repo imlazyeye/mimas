@@ -1,6 +1,8 @@
 use line_index::{LineCol, LineIndex, TextSize, WideEncoding, WideLineCol};
 use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Position, Range, SymbolKind};
-use parse::{Ast, FieldKey, Item, ItemKind, PactItem, StmtKind};
+use parse::{
+    Ast, FieldKey, Ident, Item, ItemKind, NodeId, PactItem, StmtKind, Visitor, walk_stmts,
+};
 use shared::{Located, Span};
 
 /// One file of a project, with the line index that maps between its byte offsets and LSP
@@ -16,6 +18,22 @@ impl SourceFile {
             ast,
             lines: LineIndex::new(text),
         }
+    }
+
+    /// Every ident written in the file, with the span it was written at.
+    pub fn idents(&self) -> Vec<(NodeId, Span)> {
+        #[derive(Default)]
+        struct Idents(Vec<(NodeId, Span)>);
+
+        impl Visitor for Idents {
+            fn ident(&mut self, ident: &Ident) {
+                self.0.push((ident.id, ident.location.span));
+            }
+        }
+
+        let mut idents = Idents::default();
+        walk_stmts(self.ast.stmts(), &mut idents);
+        idents.0
     }
 
     /// The file's outline -- its items, their members, and its top level bindings. Reads only the
