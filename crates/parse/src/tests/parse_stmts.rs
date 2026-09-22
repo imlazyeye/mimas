@@ -1046,5 +1046,5 @@ stmt_test!(
     comment_ignored,
     "// hello!
      let a = 0;",
-     Let::new(ident!("a").into(), int!(0), None)
+    Let::new(ident!("a").into(), int!(0), None)
 );
