@@ -375,7 +375,9 @@ impl Hoist for Pact {
 
         for item in self.items.iter() {
             match item {
-                PactItem::Const { name, annotation } => {
+                PactItem::Const {
+                    name, annotation, ..
+                } => {
                     let ty = Ty::from_annotation(annotation.clone(), ctx.solver)?;
                     // Local rather than Constant, which has to carry a value by the IR boundary
                     let dec = ctx.solver.dec_id(name, ty.clone(), DecKind::Local, ctx.vis);
@@ -391,6 +393,7 @@ impl Hoist for Pact {
                     parameters,
                     return_type,
                     default: body,
+                    ..
                 } => {
                     let is_method = parameters
                         .first()

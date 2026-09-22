@@ -647,6 +647,7 @@ stmt_test!(
             parameters: vec![],
             return_type: None,
             default: None,
+            location: shared::Location::default(),
         }]
     )
     .into_item()
@@ -662,6 +663,7 @@ stmt_test!(
             parameters: vec![],
             return_type: Some(Annotation::Unit),
             default: None,
+            location: shared::Location::default(),
         }]
     )
     .into_item()
@@ -677,6 +679,7 @@ stmt_test!(
             parameters: vec![],
             return_type: None,
             default: Some(Block::new_with_yield(vec![], int!(0)).into_expr()),
+            location: shared::Location::default(),
         }]
     )
     .into_item()
@@ -689,7 +692,8 @@ stmt_test!(
         ident!("Foo"),
         vec![PactItem::Const {
             name: ident!("FOO"),
-            annotation: Annotation::Kw(TyKw::Int)
+            annotation: Annotation::Kw(TyKw::Int),
+            location: shared::Location::default(),
         }]
     )
     .into_item()
@@ -704,18 +708,21 @@ stmt_test!(
             PactItem::Const {
                 name: ident!("ID"),
                 annotation: Annotation::Kw(TyKw::Int),
+                location: shared::Location::default(),
             },
             PactItem::Fn {
                 name: ident!("name"),
                 parameters: vec![],
                 return_type: Some(Annotation::Kw(TyKw::Str)),
                 default: None,
+                location: shared::Location::default(),
             },
             PactItem::Fn {
                 name: ident!("cost"),
                 parameters: vec![],
                 return_type: Some(Annotation::Kw(TyKw::Int)),
                 default: None,
+                location: shared::Location::default(),
             },
         ]
     )

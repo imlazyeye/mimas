@@ -503,7 +503,11 @@ impl<'s> Parser<'s> {
                         Annotation::Poison(Poison)
                     };
                     self.end_stmt(self.location(start));
-                    items.push(PactItem::Const { name, annotation });
+                    items.push(PactItem::Const {
+                        name,
+                        annotation,
+                        location: self.location(start),
+                    });
                 }
                 TokKind::Fn => {
                     let (name, parameters, return_type) = self.function_sig(false);
@@ -520,6 +524,7 @@ impl<'s> Parser<'s> {
                         parameters,
                         return_type,
                         default,
+                        location: self.location(start),
                     });
                 }
                 TokKind::Eof => {

@@ -5,6 +5,7 @@ use crate::{
     item::{IntoItem, ItemKind},
 };
 use itertools::Itertools;
+use shared::{Located, Location};
 
 /// Representation of a `pact` declaration in mimas.
 #[derive(Debug, PartialEq, Clone)]
@@ -40,11 +41,15 @@ impl std::fmt::Display for Pact {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum PactItem {
     /// A constant signature: `const NAME: T;`. Pacts cannot declare default values for constants
     /// (an `impl` block must always supply one).
-    Const { name: Ident, annotation: Annotation },
+    Const {
+        name: Ident,
+        annotation: Annotation,
+        location: Location,
+    },
     /// A method signature: `fn name(params) -> ret;` or, with a default body, `fn name(params) ->
     /// ret { body }`. Parameters may not have default values in a pact signature.
     Fn {
@@ -54,21 +59,73 @@ pub enum PactItem {
         /// `Some(body)` if the pact provides a default implementation. Impls may omit this method
         /// when a default exists.
         default: Option<Expr>,
+        location: Location,
     },
+}
+
+impl Located for PactItem {
+    fn location(&self) -> Location {
+        match self {
+            PactItem::Const { location, .. } | PactItem::Fn { location, .. } => *location,
+        }
+    }
+}
+
+impl PartialEq for PactItem {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                PactItem::Const {
+                    name, annotation, ..
+                },
+                PactItem::Const {
+                    name: other_name,
+                    annotation: other_annotation,
+                    ..
+                },
+            ) => (name, annotation) == (other_name, other_annotation),
+            (
+                PactItem::Fn {
+                    name,
+                    parameters,
+                    return_type,
+                    default,
+                    ..
+                },
+                PactItem::Fn {
+                    name: other_name,
+                    parameters: other_parameters,
+                    return_type: other_return_type,
+                    default: other_default,
+                    ..
+                },
+            ) => {
+                (name, parameters, return_type, default)
+                    == (
+                        other_name,
+                        other_parameters,
+                        other_return_type,
+                        other_default,
+                    )
+            }
+            _ => false,
+        }
+    }
 }
 
 #[mutants::skip]
 impl std::fmt::Display for PactItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PactItem::Const { name, annotation } => {
-                f.pad(&format!("const {}: {};", name, annotation))
-            }
+            PactItem::Const {
+                name, annotation, ..
+            } => f.pad(&format!("const {}: {};", name, annotation)),
             PactItem::Fn {
                 name,
                 parameters,
                 return_type,
                 default,
+                ..
             } => {
                 let param_str = parameters.iter().join(", ");
                 let sig = match return_type {

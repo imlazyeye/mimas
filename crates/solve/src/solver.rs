@@ -1642,9 +1642,9 @@ impl Solver {
                     for item in pact.items.iter() {
                         let PactItem::Fn {
                             default: Some(body),
-                            name: _,
                             parameters,
                             return_type,
+                            ..
                         } = item
                         else {
                             continue;
