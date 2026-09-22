@@ -30,7 +30,7 @@ pub struct Project {
 
 impl Project {
     pub fn load(files: Vec<(PathBuf, String)>, library: &Library<()>) -> Self {
-        // the full path, like the cli (`module @` takes its name from it)
+        // the full path, like the cli (`file_of` finds an error's file by it)
         let names: Vec<String> = files
             .iter()
             .map(|(path, _)| path.to_string_lossy().into_owned())
@@ -56,19 +56,19 @@ impl Project {
         let offset = file.offset(position)?;
         let (id, span) = file.ast.node_at(offset)?;
         let dec_id = resolutions.node_decs.get(&id).copied();
-        let dec = dec_id.map(|dec| &resolutions.decs[dec]);
         let ty = resolutions
             .node_tys
             .get(&id)
-            .or_else(|| dec.map(|dec| &dec.ty))?;
+            .or_else(|| dec_id.map(|dec| &resolutions.decs[dec].ty))?;
 
-        let text = match dec_id.zip(dec) {
+        let text = match dec_id {
             // a type named in a path or literal has no dec of its own, just the adt
             None => match ty {
                 Ty::Adt(aid) => resolutions.adt_path(*aid),
                 ty => ty.display(resolutions),
             },
-            Some((dec_id, dec)) => {
+            Some(dec_id) => {
+                let dec = &resolutions.decs[dec_id];
                 let (owner, decl) = match (&dec.kind, ty) {
                     (ResolvedDeclKind::Item { takes_self, .. }, Ty::Fn(header)) => (
                         resolutions.owner_path(dec_id),
@@ -103,13 +103,11 @@ impl Project {
 
     /// Where the name at `position` was declared.
     pub fn definition(&self, path: &Path, position: Position) -> Option<Location> {
-        let resolutions = self.analysis.as_ref().ok()?;
-        let file = self.files.get(path)?;
-        let (id, _) = file.ast.node_at(file.offset(position)?)?;
-        let dec = &resolutions.decs[*resolutions.node_decs.get(&id)?];
+        let (resolutions, dec) = self.dec_at(path, position)?;
+        let dec = &resolutions.decs[dec];
         let span = dec.location.span;
         // natives, builtins, and module segments are declared with no source behind them
-        if span.is_synthetic() || span.is_empty() {
+        if span.is_empty() {
             return None;
         }
         let (target_path, target) = self.files.get_index(dec.location.file_id)?;
@@ -250,8 +248,7 @@ impl Project {
 
         return Ok(WorkspaceEdit {
             changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
+            ..Default::default()
         });
 
         /// Whether the lexer reads this as one plain name.
@@ -261,7 +258,7 @@ impl Project {
                 lexer.next().map(|tok| tok.kind),
                 Some(TokKind::Ident(lexeme)) if lexeme == name
             );
-            first && matches!(lexer.next().map(|tok| tok.kind), None | Some(TokKind::Eof))
+            first && lexer.next().is_none()
         }
 
         /// How a project's idents group by what they resolve to, in walk order. Two of these
@@ -303,51 +300,18 @@ impl Project {
     /// Every dec that has to move with `target`. A pact member brings its whole family: the
     /// pact's own declaration and the matching method on each implementor.
     fn family(&self, resolutions: &Resolutions, target: DecId) -> Result<Vec<DecId>, String> {
-        let declared = |dec: &DecId| {
-            let span = resolutions.decs[*dec].location.span;
-            !span.is_synthetic() && !span.is_empty()
-        };
+        let declared = |dec: &DecId| !resolutions.decs[*dec].location.span.is_empty();
         if !declared(&target) {
             return Err("that name is built in, so there is no mimas source to rename".to_owned());
         }
 
-        let named_by_pact = resolutions
-            .pacts
+        let root = resolutions.decs[target].implements.unwrap_or(target);
+        let family: Vec<DecId> = resolutions
+            .decs
             .iter()
-            .find_map(|(pact_id, pact)| {
-                let name = pact.members.iter().find(|(_, dec)| **dec == target)?.0;
-                Some((pact_id, name.clone()))
-            })
-            .or_else(|| {
-                let (adt_id, name) = resolutions.adts.iter().find_map(|(adt_id, adt)| {
-                    let name = adt.methods.iter().find(|(_, dec)| **dec == target)?.0;
-                    Some((adt_id, name.clone()))
-                })?;
-                let pact_id = resolutions.adts[adt_id]
-                    .implements
-                    .iter()
-                    .copied()
-                    .find(|pact_id| resolutions.pacts[*pact_id].members.contains_key(&name))?;
-                Some((pact_id, name))
-            });
-
-        let Some((pact_id, name)) = named_by_pact else {
-            return Ok(vec![target]);
-        };
-
-        let mut family: Vec<DecId> = resolutions.pacts[pact_id]
-            .members
-            .get(&name)
-            .copied()
-            .into_iter()
+            .filter(|(dec_id, dec)| *dec_id == root || dec.implements == Some(root))
+            .map(|(dec_id, _)| dec_id)
             .collect();
-        for (_, adt) in resolutions.adts.iter() {
-            if adt.implements.contains(&pact_id)
-                && let Some(dec) = adt.methods.get(&name)
-            {
-                family.push(*dec);
-            }
-        }
         if !family.iter().all(declared) {
             return Err("part of this pact has no mimas source to rename".to_owned());
         }
@@ -386,19 +350,13 @@ impl Project {
         let mut bindings = Bindings::default();
         walk_stmts(file.ast.stmts(), &mut bindings);
 
-        let within = |position: &Position| {
-            let at = (position.line, position.character);
-            at >= (range.start.line, range.start.character)
-                && at <= (range.end.line, range.end.character)
-        };
-
         let hints = bindings
             .0
             .into_iter()
             .filter_map(|(id, span)| {
                 let dec = *resolutions.node_decs.get(&id)?;
                 let position = file.range(span)?.end;
-                if !within(&position) {
+                if !(range.start..=range.end).contains(&position) {
                     return None;
                 }
                 Some(InlayHint {
@@ -426,17 +384,23 @@ impl Project {
 
     /// Every file's diagnostics (an empty list clears what the editor last showed).
     pub fn diagnostics(&self) -> Vec<(Uri, Vec<Diagnostic>)> {
-        let mut per_file: Vec<Vec<Diagnostic>> = self.files.iter().map(|_| Vec::new()).collect();
-        for error in self.analysis.as_ref().err().into_iter().flatten() {
-            let Some(file_id) = self.file_of(error).or((!per_file.is_empty()).then_some(0)) else {
-                continue;
-            };
-            per_file[file_id].push(self.files[file_id].diagnostic(error));
-        }
+        let errors = self
+            .analysis
+            .as_ref()
+            .err()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         self.files
-            .keys()
-            .zip(per_file)
-            .filter_map(|(path, diagnostics)| Some((Uri::from_file_path(path).ok()?, diagnostics)))
+            .iter()
+            .enumerate()
+            .filter_map(|(file_id, (path, file))| {
+                let diagnostics = errors
+                    .iter()
+                    .filter(|error| self.file_of(error).unwrap_or(0) == file_id)
+                    .map(|error| file.diagnostic(error))
+                    .collect();
+                Some((Uri::from_file_path(path).ok()?, diagnostics))
+            })
             .collect()
     }
 

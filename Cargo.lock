@@ -2538,7 +2538,6 @@ dependencies = [
  "indexmap 2.14.0",
  "line-index",
  "lsp-server",
- "miette",
  "mimas-api",
  "mimas-library",
  "mimas-parse",

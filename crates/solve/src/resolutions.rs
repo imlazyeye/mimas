@@ -18,7 +18,7 @@ pub struct Resolutions {
     pub node_decs: IndexMap<NodeId, DecId>,
     pub decs: IdVec<DecId, ResolvedDecl>,
     pub adts: IdVec<AdtId, ResolvedAdt>,
-    pub pacts: IdVec<PactId, ResolvedPact>,
+    pub pact_names: IdVec<PactId, String>,
     pub module_paths: HashMap<AdtId, Vec<String>>,
     pub closure_captures: IndexMap<NodeId, Vec<DecId>>,
     pub root: ResolvedModule,
@@ -56,7 +56,7 @@ impl TyNames for Resolutions {
     }
 
     fn pact(&self, id: PactId) -> Option<String> {
-        self.pacts.get(id).map(|pact| pact.name.clone())
+        self.pact_names.get(id).cloned()
     }
 }
 
@@ -112,6 +112,7 @@ pub struct ResolvedDecl {
     pub location: Location,
     pub module: AdtId,
     pub owner: Option<AdtId>,
+    pub implements: Option<DecId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,11 +130,6 @@ pub enum ResolvedDeclKind {
     },
     Adt(AdtId),
     Pact(PactId),
-}
-
-pub struct ResolvedPact {
-    pub name: String,
-    pub members: IndexMap<String, DecId>,
 }
 
 pub struct ResolvedAdt {
@@ -244,6 +240,19 @@ impl From<Solver> for Resolutions {
             }
         }
 
+        // a pact impl's methods pair with the pact's members by name (a default the impl left out
+        // is already the member's own dec)
+        let mut implements: HashMap<DecId, DecId> = HashMap::new();
+        for &(pid, aid) in &solver.pact_impls {
+            for (name, field) in &solver.adts[aid].impls {
+                if let Some(&member) = solver.pact_members.get(&(pid, name.clone()))
+                    && member != field.dec
+                {
+                    implements.insert(field.dec, member);
+                }
+            }
+        }
+
         let tys: Vec<Ty> = solver
             .decs
             .iter()
@@ -280,23 +289,13 @@ impl From<Solver> for Resolutions {
                 location: dec.location,
                 module: dec.module,
                 owner: owners.get(&id).copied(),
+                implements: implements.get(&id).copied(),
             });
         }
 
-        let mut resolved_pacts = IdVec::new();
-        for (pid, pact) in solver.pacts.iter() {
-            let members = pact
-                .functions
-                .keys()
-                .filter_map(|name| {
-                    let dec = solver.pact_members.get(&(pid, name.clone()))?;
-                    Some((name.clone(), *dec))
-                })
-                .collect();
-            resolved_pacts.push(ResolvedPact {
-                name: pact.name.clone(),
-                members,
-            });
+        let mut pact_names = IdVec::new();
+        for (_, pact) in solver.pacts.iter() {
+            pact_names.push(pact.name.clone());
         }
 
         let closure_captures = solver
@@ -310,7 +309,7 @@ impl From<Solver> for Resolutions {
             node_decs: solver.node_decs,
             decs: resolved_decs,
             adts: resolved_adts,
-            pacts: resolved_pacts,
+            pact_names,
             module_paths: paths,
             closure_captures,
             root,

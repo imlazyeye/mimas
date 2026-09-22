@@ -46,22 +46,19 @@ impl SourceFile {
         #[allow(deprecated)]
         fn symbol(
             file: &SourceFile,
-            name: &str,
+            name: &Ident,
             kind: SymbolKind,
-            detail: Option<String>,
             range: Span,
-            selection: Span,
-            children: Vec<DocumentSymbol>,
         ) -> Option<DocumentSymbol> {
             Some(DocumentSymbol {
-                name: name.to_owned(),
-                detail,
+                name: name.lexeme.clone(),
+                detail: None,
                 kind,
                 tags: None,
                 deprecated: None,
                 range: file.range(range)?,
-                selection_range: file.range(selection)?,
-                children: (!children.is_empty()).then_some(children),
+                selection_range: file.range(name.location.span)?,
+                children: None,
             })
         }
 
@@ -79,16 +76,7 @@ impl SourceFile {
                             let FieldKey::Ident(name) = &field.name else {
                                 return None;
                             };
-                            let span = name.location.span;
-                            symbol(
-                                file,
-                                &name.lexeme,
-                                SymbolKind::Field,
-                                None,
-                                span,
-                                span,
-                                vec![],
-                            )
+                            symbol(file, name, SymbolKind::Field, name.location.span)
                         })
                         .collect();
                     (&struc.name, SymbolKind::Struct, None, fields)
@@ -98,9 +86,7 @@ impl SourceFile {
                         .members
                         .iter()
                         .filter_map(|(name, _)| {
-                            let span = name.location.span;
-                            let kind = SymbolKind::EnumMember;
-                            symbol(file, &name.lexeme, kind, None, span, span, vec![])
+                            symbol(file, name, SymbolKind::EnumMember, name.location.span)
                         })
                         .collect();
                     (&en.head, SymbolKind::Enum, None, variants)
@@ -114,8 +100,7 @@ impl SourceFile {
                                 PactItem::Const { name, .. } => (name, SymbolKind::Constant),
                                 PactItem::Fn { name, .. } => (name, SymbolKind::Method),
                             };
-                            let span = name.location.span;
-                            symbol(file, &name.lexeme, kind, None, span, span, vec![])
+                            symbol(file, name, kind, name.location.span)
                         })
                         .collect();
                     (&pact.name, SymbolKind::Interface, None, items)
@@ -140,16 +125,10 @@ impl SourceFile {
                 }
                 ItemKind::Use(_) | ItemKind::Poison(_) => return None,
             };
-            let selection = name.location.span;
-            symbol(
-                file,
-                &name.lexeme,
-                kind,
-                detail,
-                item.span(),
-                selection,
-                children,
-            )
+            let mut symbol = symbol(file, name, kind, item.span())?;
+            symbol.detail = detail;
+            symbol.children = (!children.is_empty()).then_some(children);
+            Some(symbol)
         }
 
         self.ast
@@ -159,17 +138,7 @@ impl SourceFile {
                 StmtKind::Item(item) => item_symbol(self, item),
                 StmtKind::Let(binding) => {
                     let name = binding.left.as_ident()?;
-                    let kind = SymbolKind::Variable;
-                    let selection = name.location.span;
-                    symbol(
-                        self,
-                        &name.lexeme,
-                        kind,
-                        None,
-                        stmt.span(),
-                        selection,
-                        vec![],
-                    )
+                    symbol(self, name, SymbolKind::Variable, stmt.span())
                 }
                 _ => None,
             })

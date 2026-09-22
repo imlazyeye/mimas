@@ -339,7 +339,7 @@ impl Hoist for Impl {
                 }
                 let header = ctx.solver.pacts[pid].functions[&name].0.clone();
                 let ty = ctx.solver.instantiate_pact_fn(&header, &Ty::Adt(adt));
-                let dec = ctx.solver.pact_default_decs[&(pid, name.clone())];
+                let dec = ctx.solver.pact_members[&(pid, name.clone())];
                 ctx.solver.adts[adt]
                     .impls
                     .insert(name, Field::new_constant(ty, ctx.location, dec));
@@ -376,18 +376,19 @@ impl Hoist for Pact {
                     name,
                     parameters,
                     return_type,
-                    default,
+                    default: body,
                 } => {
                     let is_method = parameters
                         .first()
                         .and_then(|b| b.left.as_ident())
                         .is_some_and(|i| i.lexeme == "self");
 
-                    let default = default
-                        .as_ref()
-                        .map(|v| Ty::Vid(ctx.solver.node_vid(v.id())));
+                    let default = body.as_ref().map(|v| Ty::Vid(ctx.solver.node_vid(v.id())));
 
                     let header = hoist_fn_header(ctx.solver, parameters, return_type, is_method)?;
+                    // Mint a Dec for each method (a defaulted one is what the dispatch table
+                    // points at when an impl omits it). Done at hoist so it exists before any body
+                    // solves, regardless of pact/impl source order.
                     let dec = ctx.solver.dec_id(
                         name,
                         Ty::Fn(header.clone()),
@@ -397,6 +398,11 @@ impl Hoist for Pact {
                     ctx.solver
                         .pact_members
                         .insert((pact_id, name.lexeme.clone()), dec);
+                    if let Some(body) = body {
+                        // def-site mapping: this is how compile finds the dec to lower the default
+                        // body into (emit.rs's Pact arm)
+                        ctx.solver.node_decs.insert(body.id(), dec);
+                    }
                     ctx.solver.pacts[pact_id]
                         .functions
                         .insert(name.lexeme.clone(), (header, default));
@@ -405,26 +411,6 @@ impl Hoist for Pact {
         }
 
         ctx.solver.pact_self = prev_self;
-
-        // Mint a Dec for each defaulted method so the dispatch table can point at the shared
-        // default when an impl omits it. Done at hoist so it exists before any body solves,
-        // regardless of pact/impl source order.
-        for item in self.items.iter() {
-            if let PactItem::Fn {
-                name,
-                default: Some(body),
-                ..
-            } = item
-            {
-                let dec = ctx.solver.pact_members[&(pact_id, name.lexeme.clone())];
-                ctx.solver
-                    .pact_default_decs
-                    .insert((pact_id, name.lexeme.clone()), dec);
-                // def-site mapping: this is how compile finds the dec to lower the default
-                // body into (emit.rs's Pact arm)
-                ctx.solver.node_decs.insert(body.id(), dec);
-            }
-        }
 
         let dec = ctx.solver.dec_id(
             &self.name,

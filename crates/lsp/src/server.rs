@@ -18,9 +18,6 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::project::Project;
 
-/// The protocol's code for "understood, but couldn't be done" -- clients surface the message.
-const REQUEST_FAILED: i32 = -32803;
-
 pub struct Server<'a> {
     connection: &'a Connection,
     library: Library<()>,
@@ -102,7 +99,7 @@ impl<'a> Server<'a> {
         let response = match serde_json::from_value::<R::Params>(req.params) {
             Ok(params) => match handle(self, params) {
                 Ok(result) => Response::new_ok(req.id, result),
-                Err(reason) => Response::new_err(req.id, REQUEST_FAILED, reason),
+                Err(reason) => Response::new_err(req.id, ErrorCode::RequestFailed as i32, reason),
             },
             Err(e) => Response::new_err(req.id, ErrorCode::InvalidParams as i32, e.to_string()),
         };
@@ -158,25 +155,20 @@ impl<'a> Server<'a> {
     fn hover(&self, params: HoverParams) -> Option<Hover> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.projects
-            .values()
-            .find_map(|project| project.hover(&path, position.position))
+        self.project(&path)?.hover(&path, position.position)
     }
 
     fn definition(&self, params: DefinitionParams) -> Option<Location> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.projects
-            .values()
-            .find_map(|project| project.definition(&path, position.position))
+        self.project(&path)?.definition(&path, position.position)
     }
 
     fn prepare_rename(&self, params: PrepareRenameParams) -> Option<Range> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.projects
-            .values()
-            .find_map(|project| project.prepare_rename(&path, position.position))
+        self.project(&path)?
+            .prepare_rename(&path, position.position)
     }
 
     fn rename(&self, params: RenameParams) -> Result<WorkspaceEdit, String> {
@@ -187,42 +179,39 @@ impl<'a> Server<'a> {
             .to_file_path()
             .map_err(|_| "that file isn't on disk".to_owned())?;
         let project = self
-            .projects
-            .values()
-            .find(|project| project.files.contains_key(&path))
+            .project(&path)
             .ok_or("that file isn't part of a project")?;
         project.rename(&path, position.position, &params.new_name, &self.library)
     }
 
     fn inlay_hints(&self, params: InlayHintParams) -> Option<Vec<InlayHint>> {
         let path = params.text_document.uri.to_file_path().ok()?;
-        self.projects
-            .values()
-            .find_map(|project| project.inlay_hints(&path, params.range))
+        self.project(&path)?.inlay_hints(&path, params.range)
     }
 
     fn highlights(&self, params: DocumentHighlightParams) -> Option<Vec<DocumentHighlight>> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.projects
-            .values()
-            .find_map(|project| project.highlights(&path, position.position))
+        self.project(&path)?.highlights(&path, position.position)
     }
 
     fn references(&self, params: ReferenceParams) -> Option<Vec<Location>> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
         let with_declaration = params.context.include_declaration;
-        self.projects
-            .values()
-            .find_map(|project| project.references(&path, position.position, with_declaration))
+        self.project(&path)?
+            .references(&path, position.position, with_declaration)
     }
 
     fn symbols(&self, params: DocumentSymbolParams) -> Option<Vec<DocumentSymbol>> {
         let path = params.text_document.uri.to_file_path().ok()?;
+        self.project(&path)?.symbols(&path)
+    }
+
+    fn project(&self, path: &Path) -> Option<&Project> {
         self.projects
             .values()
-            .find_map(|project| project.symbols(&path))
+            .find(|project| project.files.contains_key(path))
     }
 
     /// Reloads the project `path` belongs to, dropping any project it used to belong to, and
@@ -232,36 +221,33 @@ impl<'a> Server<'a> {
             .ancestors()
             .skip(1)
             .find(|dir| dir.join("main.mim").is_file())
-            .map_or_else(|| path.to_path_buf(), Path::to_path_buf);
+            .unwrap_or(path)
+            .to_path_buf();
         let mut paths = if root == path {
             vec![path.to_path_buf()]
         } else {
             solve::mim_files(&root).0
         };
         // open files aren't necessarily on disk yet, but are still part of the project
-        for open in self.open.keys() {
-            let in_root = if root == path {
-                open == path
-            } else {
-                open.starts_with(&root)
-            };
-            if in_root && !paths.contains(open) {
-                paths.push(open.clone());
-            }
-        }
+        paths.extend(
+            self.open
+                .keys()
+                .filter(|open| open.starts_with(&root))
+                .cloned(),
+        );
         paths.sort();
+        paths.dedup();
 
-        let mut files = Vec::new();
-        for path in paths {
-            let text = match self.open.get(&path) {
-                Some(text) => text.clone(),
-                None => match std::fs::read_to_string(&path) {
-                    Ok(text) => text,
-                    Err(_) => continue,
-                },
-            };
-            files.push((path, text));
-        }
+        let files = paths
+            .into_iter()
+            .filter_map(|path| {
+                let text = match self.open.get(&path) {
+                    Some(text) => text.clone(),
+                    None => std::fs::read_to_string(&path).ok()?,
+                };
+                Some((path, text))
+            })
+            .collect();
 
         // the projects this replaces: the one at this root, anything under it, and any other
         // that had this file (its root moved). their files start with cleared diagnostics
