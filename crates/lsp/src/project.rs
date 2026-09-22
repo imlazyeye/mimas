@@ -91,11 +91,20 @@ impl Project {
                 }
             }
         };
+        let docs = dec_id.and_then(|dec| {
+            let declared = resolutions.decs[dec].location;
+            let (_, declaring) = self.files.get_index(declared.file_id)?;
+            declaring.docs(declared.span)
+        });
+        let value = match docs {
+            Some(docs) => format!("```mimas\n{text}\n```\n\n---\n\n{docs}"),
+            None => format!("```mimas\n{text}\n```"),
+        };
 
         Some(Hover {
             contents: Contents::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: format!("```mimas\n{text}\n```"),
+                value,
             }),
             range: file.range(span),
         })
