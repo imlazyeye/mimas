@@ -6,13 +6,15 @@ use std::{
 use api::Library;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
-    DefinitionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentSymbol,
-    DocumentSymbolParams, Hover, HoverParams, InlayHint, InlayHintParams, Location,
-    LspNotificationMethod, LspRequestMethod, PrepareRenameParams, PublishDiagnosticsParams, Range,
-    ReferenceParams, RenameParams, TextDocumentContentChangeEvent, Uri, WorkspaceEdit,
+    DefinitionParams, DefinitionRequest, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams,
+    DocumentHighlightRequest, DocumentSymbol, DocumentSymbolParams, DocumentSymbolRequest, Hover,
+    HoverParams, HoverRequest, InlayHint, InlayHintParams, InlayHintRequest, Location,
+    LspNotificationMethod, PrepareRenameParams, PrepareRenameRequest, PublishDiagnosticsParams,
+    Range, ReferenceParams, ReferencesRequest, RenameParams, RenameRequest,
+    TextDocumentContentChangeEvent, Uri, WorkspaceEdit,
 };
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::project::Project;
 
@@ -55,93 +57,54 @@ impl<'a> Server<'a> {
         Ok(())
     }
 
-    fn handle_request(&mut self, req: Request) -> anyhow::Result<()> {
-        let response = match LspRequestMethod::from(req.method.as_str()) {
-            LspRequestMethod::TextDocumentHover => match params::<HoverParams>(req.params) {
-                Some(params) => Response::new_ok(req.id, self.hover(params)),
-                None => Response::new_err(
-                    req.id,
-                    ErrorCode::InvalidParams as i32,
-                    "malformed hover params".to_owned(),
-                ),
-            },
-            LspRequestMethod::TextDocumentDefinition => {
-                match params::<DefinitionParams>(req.params) {
-                    Some(params) => Response::new_ok(req.id, self.definition(params)),
-                    None => Response::new_err(
-                        req.id,
-                        ErrorCode::InvalidParams as i32,
-                        "malformed definition params".to_owned(),
-                    ),
-                }
-            }
-            LspRequestMethod::TextDocumentDocumentSymbol => {
-                match params::<DocumentSymbolParams>(req.params) {
-                    Some(params) => Response::new_ok(req.id, self.symbols(params)),
-                    None => Response::new_err(
-                        req.id,
-                        ErrorCode::InvalidParams as i32,
-                        "malformed document symbol params".to_owned(),
-                    ),
-                }
-            }
-            LspRequestMethod::TextDocumentReferences => {
-                match params::<ReferenceParams>(req.params) {
-                    Some(params) => Response::new_ok(req.id, self.references(params)),
-                    None => Response::new_err(
-                        req.id,
-                        ErrorCode::InvalidParams as i32,
-                        "malformed reference params".to_owned(),
-                    ),
-                }
-            }
-            LspRequestMethod::TextDocumentDocumentHighlight => {
-                match params::<DocumentHighlightParams>(req.params) {
-                    Some(params) => Response::new_ok(req.id, self.highlights(params)),
-                    None => Response::new_err(
-                        req.id,
-                        ErrorCode::InvalidParams as i32,
-                        "malformed document highlight params".to_owned(),
-                    ),
-                }
-            }
-            LspRequestMethod::TextDocumentInlayHint => {
-                match params::<InlayHintParams>(req.params) {
-                    Some(params) => Response::new_ok(req.id, self.inlay_hints(params)),
-                    None => Response::new_err(
-                        req.id,
-                        ErrorCode::InvalidParams as i32,
-                        "malformed inlay hint params".to_owned(),
-                    ),
-                }
-            }
-            LspRequestMethod::TextDocumentPrepareRename => {
-                match params::<PrepareRenameParams>(req.params) {
-                    Some(params) => Response::new_ok(req.id, self.prepare_rename(params)),
-                    None => Response::new_err(
-                        req.id,
-                        ErrorCode::InvalidParams as i32,
-                        "malformed prepare rename params".to_owned(),
-                    ),
-                }
-            }
-            LspRequestMethod::TextDocumentRename => match params::<RenameParams>(req.params) {
-                Some(params) => match self.rename(params) {
-                    Ok(edit) => Response::new_ok(req.id, edit),
-                    // the client shows this to whoever pressed F2
-                    Err(reason) => Response::new_err(req.id, REQUEST_FAILED, reason),
-                },
-                None => Response::new_err(
-                    req.id,
-                    ErrorCode::InvalidParams as i32,
-                    "malformed rename params".to_owned(),
-                ),
-            },
-            _ => Response::new_err(
+    fn handle_request(&self, req: Request) -> anyhow::Result<()> {
+        let mut req = Some(req);
+        self.on::<HoverRequest, _>(&mut req, Self::hover)?;
+        self.on::<DefinitionRequest, _>(&mut req, Self::definition)?;
+        self.on::<DocumentSymbolRequest, _>(&mut req, Self::symbols)?;
+        self.on::<ReferencesRequest, _>(&mut req, Self::references)?;
+        self.on::<DocumentHighlightRequest, _>(&mut req, Self::highlights)?;
+        self.on::<InlayHintRequest, _>(&mut req, Self::inlay_hints)?;
+        self.on::<PrepareRenameRequest, _>(&mut req, Self::prepare_rename)?;
+        self.on_fallible::<RenameRequest, _>(&mut req, Self::rename)?;
+
+        // anything still here is a method we never advertised
+        if let Some(req) = req {
+            let unhandled = Response::new_err(
                 req.id,
                 ErrorCode::MethodNotFound as i32,
                 format!("unhandled method {}", req.method),
-            ),
+            );
+            self.connection.sender.send(Message::Response(unhandled))?;
+        }
+        Ok(())
+    }
+
+    /// Answers `req` if it is an `R`, and leaves it alone otherwise.
+    fn on<R: lsp_types::Request, T: Serialize>(
+        &self,
+        req: &mut Option<Request>,
+        handle: impl FnOnce(&Self, R::Params) -> T,
+    ) -> anyhow::Result<()> {
+        self.on_fallible::<R, T>(req, |server, params| Ok(handle(server, params)))
+    }
+
+    /// [`Self::on`] for a request that can refuse, with a reason the client shows. Params that
+    /// don't parse are refused the same way rather than taking the server down with them.
+    fn on_fallible<R: lsp_types::Request, T: Serialize>(
+        &self,
+        req: &mut Option<Request>,
+        handle: impl FnOnce(&Self, R::Params) -> Result<T, String>,
+    ) -> anyhow::Result<()> {
+        let Some(req) = req.take_if(|req| req.method == R::METHOD.as_str()) else {
+            return Ok(());
+        };
+        let response = match serde_json::from_value::<R::Params>(req.params) {
+            Ok(params) => match handle(self, params) {
+                Ok(result) => Response::new_ok(req.id, result),
+                Err(reason) => Response::new_err(req.id, REQUEST_FAILED, reason),
+            },
+            Err(e) => Response::new_err(req.id, ErrorCode::InvalidParams as i32, e.to_string()),
         };
         self.connection.sender.send(Message::Response(response))?;
         Ok(())
