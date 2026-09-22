@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use api::Library;
 use indexmap::IndexMap;
-use lsp_types::{Contents, Diagnostic, Hover, Location, MarkupContent, MarkupKind, Position, Uri};
+use lsp_types::{
+    Contents, Diagnostic, DocumentSymbol, Hover, Location, MarkupContent, MarkupKind, Position, Uri,
+};
 use shared::{FileId, Ty};
 use solve::{Resolutions, ResolvedDeclKind};
 
@@ -106,6 +108,11 @@ impl Project {
             uri: Uri::from_file_path(target_path).ok()?,
             range: target.range(span)?,
         })
+    }
+
+    /// The outline of one file, which needs no analysis.
+    pub fn symbols(&self, path: &Path) -> Option<Vec<DocumentSymbol>> {
+        Some(self.files.get(path)?.symbols())
     }
 
     /// Every file's diagnostics (an empty list clears what the editor last showed).

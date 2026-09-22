@@ -7,8 +7,9 @@ use api::Library;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
     DefinitionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, Hover, HoverParams, Location, LspNotificationMethod,
-    LspRequestMethod, PublishDiagnosticsParams, TextDocumentContentChangeEvent, Uri,
+    DidOpenTextDocumentParams, DocumentSymbol, DocumentSymbolParams, Hover, HoverParams, Location,
+    LspNotificationMethod, LspRequestMethod, PublishDiagnosticsParams,
+    TextDocumentContentChangeEvent, Uri,
 };
 use serde::de::DeserializeOwned;
 
@@ -67,6 +68,16 @@ impl<'a> Server<'a> {
                         req.id,
                         ErrorCode::InvalidParams as i32,
                         "malformed definition params".to_owned(),
+                    ),
+                }
+            }
+            LspRequestMethod::TextDocumentDocumentSymbol => {
+                match params::<DocumentSymbolParams>(req.params) {
+                    Some(params) => Response::new_ok(req.id, self.symbols(params)),
+                    None => Response::new_err(
+                        req.id,
+                        ErrorCode::InvalidParams as i32,
+                        "malformed document symbol params".to_owned(),
                     ),
                 }
             }
@@ -139,6 +150,13 @@ impl<'a> Server<'a> {
         self.projects
             .values()
             .find_map(|project| project.definition(&path, position.position))
+    }
+
+    fn symbols(&self, params: DocumentSymbolParams) -> Option<Vec<DocumentSymbol>> {
+        let path = params.text_document.uri.to_file_path().ok()?;
+        self.projects
+            .values()
+            .find_map(|project| project.symbols(&path))
     }
 
     /// Reloads the project `path` belongs to, dropping any project it used to belong to, and

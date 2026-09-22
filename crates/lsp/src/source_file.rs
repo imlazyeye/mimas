@@ -1,7 +1,7 @@
 use line_index::{LineCol, LineIndex, TextSize, WideEncoding, WideLineCol};
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
-use parse::Ast;
-use shared::Span;
+use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Position, Range, SymbolKind};
+use parse::{Ast, FieldKey, Item, ItemKind, PactItem, StmtKind};
+use shared::{Located, Span};
 
 /// One file of a project, with the line index that maps between its byte offsets and LSP
 /// positions.
@@ -16,6 +16,144 @@ impl SourceFile {
             ast,
             lines: LineIndex::new(text),
         }
+    }
+
+    /// The file's outline -- its items, their members, and its top level bindings. Reads only the
+    /// ast, so it still answers while the project doesn't type check.
+    pub fn symbols(&self) -> Vec<DocumentSymbol> {
+        // `deprecated` is deprecated in favor of `tags`, but the struct still requires it, for some
+        // reason?
+        #[allow(deprecated)]
+        fn symbol(
+            file: &SourceFile,
+            name: &str,
+            kind: SymbolKind,
+            detail: Option<String>,
+            range: Span,
+            selection: Span,
+            children: Vec<DocumentSymbol>,
+        ) -> Option<DocumentSymbol> {
+            Some(DocumentSymbol {
+                name: name.to_owned(),
+                detail,
+                kind,
+                tags: None,
+                deprecated: None,
+                range: file.range(range)?,
+                selection_range: file.range(selection)?,
+                children: (!children.is_empty()).then_some(children),
+            })
+        }
+
+        fn item_symbol(file: &SourceFile, item: &Item) -> Option<DocumentSymbol> {
+            let (name, kind, detail, children) = match item.kind() {
+                ItemKind::Function(function) => {
+                    (&function.name, SymbolKind::Function, None, vec![])
+                }
+                ItemKind::Const(con) => (&con.left, SymbolKind::Constant, None, vec![]),
+                ItemKind::Struct(struc) => {
+                    let fields = struc
+                        .fields
+                        .iter()
+                        .filter_map(|field| {
+                            let FieldKey::Ident(name) = &field.name else {
+                                return None;
+                            };
+                            let span = name.location.span;
+                            symbol(
+                                file,
+                                &name.lexeme,
+                                SymbolKind::Field,
+                                None,
+                                span,
+                                span,
+                                vec![],
+                            )
+                        })
+                        .collect();
+                    (&struc.name, SymbolKind::Struct, None, fields)
+                }
+                ItemKind::Enum(en) => {
+                    let variants = en
+                        .members
+                        .iter()
+                        .filter_map(|(name, _)| {
+                            let span = name.location.span;
+                            let kind = SymbolKind::EnumMember;
+                            symbol(file, &name.lexeme, kind, None, span, span, vec![])
+                        })
+                        .collect();
+                    (&en.head, SymbolKind::Enum, None, variants)
+                }
+                ItemKind::Pact(pact) => {
+                    let items = pact
+                        .items
+                        .iter()
+                        .filter_map(|item| {
+                            let (name, kind) = match item {
+                                PactItem::Const { name, .. } => (name, SymbolKind::Constant),
+                                PactItem::Fn { name, .. } => (name, SymbolKind::Method),
+                            };
+                            let span = name.location.span;
+                            symbol(file, &name.lexeme, kind, None, span, span, vec![])
+                        })
+                        .collect();
+                    (&pact.name, SymbolKind::Interface, None, items)
+                }
+                ItemKind::Impl(imp) => {
+                    let methods = imp
+                        .items
+                        .iter()
+                        .filter_map(|item| {
+                            let mut symbol = item_symbol(file, item)?;
+                            if matches!(symbol.kind, SymbolKind::Function) {
+                                symbol.kind = SymbolKind::Method;
+                            }
+                            Some(symbol)
+                        })
+                        .collect();
+                    let detail = match &imp.pact {
+                        Some(pact) => format!("impl {}", pact.lexeme),
+                        None => "impl".to_owned(),
+                    };
+                    (&imp.target, SymbolKind::Class, Some(detail), methods)
+                }
+                ItemKind::Use(_) | ItemKind::Poison(_) => return None,
+            };
+            let selection = name.location.span;
+            symbol(
+                file,
+                &name.lexeme,
+                kind,
+                detail,
+                item.span(),
+                selection,
+                children,
+            )
+        }
+
+        self.ast
+            .stmts()
+            .iter()
+            .filter_map(|stmt| match stmt.kind() {
+                StmtKind::Item(item) => item_symbol(self, item),
+                StmtKind::Let(binding) => {
+                    let name = binding.left.as_ident()?;
+                    let kind = SymbolKind::Variable;
+                    let selection = name.location.span;
+                    symbol(
+                        self,
+                        &name.lexeme,
+                        kind,
+                        None,
+                        stmt.span(),
+                        selection,
+                        vec![],
+                    )
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn diagnostic(&self, error: &shared::Error) -> Diagnostic {
