@@ -1682,6 +1682,9 @@ impl Solve for Literal {
                             })
                         })?;
 
+                    if let FieldKey::Ident(key) = field_name {
+                        solver.note(key, target.ty.clone(), Some(target.dec));
+                    }
                     value.fulfill_ty(target.ty, solver)?;
                 }
 

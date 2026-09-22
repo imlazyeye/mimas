@@ -158,7 +158,7 @@ impl Hoist for parse::item::Enum {
                                 .iter()
                                 .map(|StructField { name, location, .. }| {
                                     let ty: Ty = ctx.solver.vid().into();
-                                    let ident = parse::Ident::new(name.to_string(), *location);
+                                    let ident = field_ident(name, *location);
                                     let dec = ctx.solver.dec_id(
                                         &ident,
                                         ty.clone(),
@@ -235,7 +235,7 @@ impl Hoist for Struct {
                      ..
                  }| {
                     let ty = Ty::Vid(ctx.solver.vid());
-                    let ident = parse::Ident::new(name.to_string(), *location);
+                    let ident = field_ident(name, *location);
                     let dec = ctx.solver.dec_id(
                         &ident,
                         ty.clone(),
@@ -388,6 +388,15 @@ impl Hoist for Pact {
                         .map(|v| Ty::Vid(ctx.solver.node_vid(v.id())));
 
                     let header = hoist_fn_header(ctx.solver, parameters, return_type, is_method)?;
+                    let dec = ctx.solver.dec_id(
+                        name,
+                        Ty::Fn(header.clone()),
+                        DecKind::Item { defaults: vec![] },
+                        ctx.vis,
+                    );
+                    ctx.solver
+                        .pact_members
+                        .insert((pact_id, name.lexeme.clone()), dec);
                     ctx.solver.pacts[pact_id]
                         .functions
                         .insert(name.lexeme.clone(), (header, default));
@@ -407,13 +416,7 @@ impl Hoist for Pact {
                 ..
             } = item
             {
-                let header = ctx.solver.pacts[pact_id].functions[&name.lexeme].0.clone();
-                let dec = ctx.solver.dec_id(
-                    name,
-                    Ty::Fn(header),
-                    DecKind::Item { defaults: vec![] },
-                    ctx.vis,
-                );
+                let dec = ctx.solver.pact_members[&(pact_id, name.lexeme.clone())];
                 ctx.solver
                     .pact_default_decs
                     .insert((pact_id, name.lexeme.clone()), dec);
@@ -519,4 +522,13 @@ fn hoist_fn_header(
     }
 
     Ok(FnHeader::new(solved_parameters, expected_ty, is_method))
+}
+
+/// A field's name as an ident. A named field hands back the one the parser made (tooling keys
+/// off its id), while a tuple field has only a number to go on.
+fn field_ident(name: &FieldKey, location: Location) -> Ident {
+    match name {
+        FieldKey::Ident(ident) => ident.clone(),
+        key => Ident::new(key.to_string(), location),
+    }
 }

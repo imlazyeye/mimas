@@ -18,7 +18,7 @@ pub struct Resolutions {
     pub node_decs: IndexMap<NodeId, DecId>,
     pub decs: IdVec<DecId, ResolvedDecl>,
     pub adts: IdVec<AdtId, ResolvedAdt>,
-    pub pact_names: IdVec<PactId, String>,
+    pub pacts: IdVec<PactId, ResolvedPact>,
     pub module_paths: HashMap<AdtId, Vec<String>>,
     pub closure_captures: IndexMap<NodeId, Vec<DecId>>,
     pub root: ResolvedModule,
@@ -56,7 +56,7 @@ impl TyNames for Resolutions {
     }
 
     fn pact(&self, id: PactId) -> Option<String> {
-        self.pact_names.get(id).cloned()
+        self.pacts.get(id).map(|pact| pact.name.clone())
     }
 }
 
@@ -129,6 +129,11 @@ pub enum ResolvedDeclKind {
     },
     Adt(AdtId),
     Pact(PactId),
+}
+
+pub struct ResolvedPact {
+    pub name: String,
+    pub members: IndexMap<String, DecId>,
 }
 
 pub struct ResolvedAdt {
@@ -278,9 +283,20 @@ impl From<Solver> for Resolutions {
             });
         }
 
-        let mut pact_names = IdVec::new();
-        for (_, pact) in solver.pacts.iter() {
-            pact_names.push(pact.name.clone());
+        let mut resolved_pacts = IdVec::new();
+        for (pid, pact) in solver.pacts.iter() {
+            let members = pact
+                .functions
+                .keys()
+                .filter_map(|name| {
+                    let dec = solver.pact_members.get(&(pid, name.clone()))?;
+                    Some((name.clone(), *dec))
+                })
+                .collect();
+            resolved_pacts.push(ResolvedPact {
+                name: pact.name.clone(),
+                members,
+            });
         }
 
         let closure_captures = solver
@@ -294,7 +310,7 @@ impl From<Solver> for Resolutions {
             node_decs: solver.node_decs,
             decs: resolved_decs,
             adts: resolved_adts,
-            pact_names,
+            pacts: resolved_pacts,
             module_paths: paths,
             closure_captures,
             root,

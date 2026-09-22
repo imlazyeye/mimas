@@ -1,6 +1,6 @@
 use crate::{
-    Access, Expr, ExprKind, FStringPart, FieldKey, Ident, Item, ItemKind, Literal, PactItem, Stmt,
-    StmtKind, Use,
+    Access, Expr, ExprKind, FStringPart, FieldKey, Ident, Item, ItemKind, Literal, Member,
+    PactItem, Stmt, StmtKind, StructField, Use,
     components::{Binding, Pat, PatKind},
 };
 
@@ -60,17 +60,21 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
         ItemKind::Pact(pact) => {
             visitor.ident(&pact.name);
             for item in &pact.items {
-                if let PactItem::Fn {
-                    parameters,
-                    default,
-                    ..
-                } = item
-                {
-                    for parameter in parameters {
-                        walk_binding(parameter, visitor);
-                    }
-                    if let Some(default) = default {
-                        walk_expr(default, visitor);
+                match item {
+                    PactItem::Const { name, .. } => visitor.ident(name),
+                    PactItem::Fn {
+                        name,
+                        parameters,
+                        default,
+                        ..
+                    } => {
+                        visitor.ident(name);
+                        for parameter in parameters {
+                            walk_binding(parameter, visitor);
+                        }
+                        if let Some(default) = default {
+                            walk_expr(default, visitor);
+                        }
                     }
                 }
             }
@@ -79,8 +83,19 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
             visitor.ident(&con.left);
             walk_expr(&con.right, visitor);
         }
-        ItemKind::Struct(struc) => visitor.ident(&struc.name),
-        ItemKind::Enum(en) => visitor.ident(&en.head),
+        ItemKind::Struct(struc) => {
+            visitor.ident(&struc.name);
+            walk_fields(&struc.fields, visitor);
+        }
+        ItemKind::Enum(en) => {
+            visitor.ident(&en.head);
+            for (name, member) in &en.members {
+                visitor.ident(name);
+                if let Member::Struct(fields) = member {
+                    walk_fields(fields, visitor);
+                }
+            }
+        }
         ItemKind::Use(us) => {
             let (path, items): (&[Ident], &[Ident]) = match us {
                 Use::Singular(path, item) => (path, std::slice::from_ref(item)),
@@ -92,6 +107,14 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
             }
         }
         ItemKind::Poison(_) => {}
+    }
+}
+
+fn walk_fields(fields: &[StructField], visitor: &mut impl Visitor) {
+    for field in fields {
+        if let FieldKey::Ident(name) = &field.name {
+            visitor.ident(name);
+        }
     }
 }
 
