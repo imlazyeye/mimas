@@ -7,9 +7,9 @@ use api::Library;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::{
     DefinitionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentSymbol, DocumentSymbolParams, Hover, HoverParams, Location,
-    LspNotificationMethod, LspRequestMethod, PublishDiagnosticsParams, ReferenceParams,
-    TextDocumentContentChangeEvent, Uri,
+    DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentSymbol,
+    DocumentSymbolParams, Hover, HoverParams, Location, LspNotificationMethod, LspRequestMethod,
+    PublishDiagnosticsParams, ReferenceParams, TextDocumentContentChangeEvent, Uri,
 };
 use serde::de::DeserializeOwned;
 
@@ -91,6 +91,16 @@ impl<'a> Server<'a> {
                     ),
                 }
             }
+            LspRequestMethod::TextDocumentDocumentHighlight => {
+                match params::<DocumentHighlightParams>(req.params) {
+                    Some(params) => Response::new_ok(req.id, self.highlights(params)),
+                    None => Response::new_err(
+                        req.id,
+                        ErrorCode::InvalidParams as i32,
+                        "malformed document highlight params".to_owned(),
+                    ),
+                }
+            }
             _ => Response::new_err(
                 req.id,
                 ErrorCode::MethodNotFound as i32,
@@ -160,6 +170,14 @@ impl<'a> Server<'a> {
         self.projects
             .values()
             .find_map(|project| project.definition(&path, position.position))
+    }
+
+    fn highlights(&self, params: DocumentHighlightParams) -> Option<Vec<DocumentHighlight>> {
+        let position = params.text_document_position_params;
+        let path = position.text_document.uri.to_file_path().ok()?;
+        self.projects
+            .values()
+            .find_map(|project| project.highlights(&path, position.position))
     }
 
     fn references(&self, params: ReferenceParams) -> Option<Vec<Location>> {

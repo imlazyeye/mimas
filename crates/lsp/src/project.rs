@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use api::Library;
 use indexmap::IndexMap;
 use lsp_types::{
-    Contents, Diagnostic, DocumentSymbol, Hover, Location, MarkupContent, MarkupKind, Position, Uri,
+    Contents, Diagnostic, DocumentHighlight, DocumentSymbol, Hover, Location, MarkupContent,
+    MarkupKind, Position, Uri,
 };
 use shared::{FileId, Ty};
-use solve::{Resolutions, ResolvedDeclKind};
+use solve::{Resolutions, ResolvedDeclKind, components::DecId};
 
 use crate::source_file::SourceFile;
 
@@ -118,10 +119,7 @@ impl Project {
         position: Position,
         with_declaration: bool,
     ) -> Option<Vec<Location>> {
-        let resolutions = self.analysis.as_ref().ok()?;
-        let file = self.files.get(path)?;
-        let (id, _) = file.ast.node_at(file.offset(position)?)?;
-        let target = *resolutions.node_decs.get(&id)?;
+        let (resolutions, target) = self.dec_at(path, position)?;
         let declared_at = resolutions.decs[target].location;
 
         let mut locations = Vec::new();
@@ -146,6 +144,32 @@ impl Project {
             }
         }
         Some(locations)
+    }
+
+    /// Every use of the name at `position` within its own file.
+    pub fn highlights(&self, path: &Path, position: Position) -> Option<Vec<DocumentHighlight>> {
+        let (resolutions, target) = self.dec_at(path, position)?;
+        let file = self.files.get(path)?;
+        let highlights = file
+            .idents()
+            .into_iter()
+            .filter(|(id, _)| resolutions.node_decs.get(id) == Some(&target))
+            .filter_map(|(_, span)| {
+                Some(DocumentHighlight {
+                    range: file.range(span)?,
+                    kind: None,
+                })
+            })
+            .collect();
+        Some(highlights)
+    }
+
+    /// The declaration the name at `position` resolves to.
+    fn dec_at(&self, path: &Path, position: Position) -> Option<(&Resolutions, DecId)> {
+        let resolutions = self.analysis.as_ref().ok()?;
+        let file = self.files.get(path)?;
+        let (id, _) = file.ast.node_at(file.offset(position)?)?;
+        Some((resolutions, *resolutions.node_decs.get(&id)?))
     }
 
     /// The outline of one file, which needs no analysis.
