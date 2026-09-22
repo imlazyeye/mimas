@@ -79,7 +79,7 @@ user.greet(); // Hello, mimas!
 
 ```admonish robust
 - **Guaranteed "Results"** -- mimas treats any panic as a bug, both in the compiler and the VM.
-- **Tested top to bottom** -- over **1,700 tests** cover every corner of the codebase. Even the tests are tested, thanks to [cargo mutants](https://mutants.rs/).
+- **Tested top to bottom** -- over **1,900 tests** cover every corner of the codebase. Even the tests are tested, thanks to [cargo mutants](https://mutants.rs/).
 - **Helpful diagnostics** -- bugs are caught at their source with clear reports powered by [miette](https://github.com/zkat/miette):
 
 <pre class="diagnostic">  <span style="font-weight:bold;filter: contrast(70%) brightness(190%);color:red;">error: </span> <span style="font-weight:bold;filter: contrast(70%) brightness(190%);color:gray;">non-exhaustive match</span>
