@@ -8,8 +8,9 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response
 use lsp_types::{
     DefinitionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentSymbol,
-    DocumentSymbolParams, Hover, HoverParams, Location, LspNotificationMethod, LspRequestMethod,
-    PublishDiagnosticsParams, ReferenceParams, TextDocumentContentChangeEvent, Uri,
+    DocumentSymbolParams, Hover, HoverParams, InlayHint, InlayHintParams, Location,
+    LspNotificationMethod, LspRequestMethod, PublishDiagnosticsParams, ReferenceParams,
+    TextDocumentContentChangeEvent, Uri,
 };
 use serde::de::DeserializeOwned;
 
@@ -101,6 +102,16 @@ impl<'a> Server<'a> {
                     ),
                 }
             }
+            LspRequestMethod::TextDocumentInlayHint => {
+                match params::<InlayHintParams>(req.params) {
+                    Some(params) => Response::new_ok(req.id, self.inlay_hints(params)),
+                    None => Response::new_err(
+                        req.id,
+                        ErrorCode::InvalidParams as i32,
+                        "malformed inlay hint params".to_owned(),
+                    ),
+                }
+            }
             _ => Response::new_err(
                 req.id,
                 ErrorCode::MethodNotFound as i32,
@@ -170,6 +181,13 @@ impl<'a> Server<'a> {
         self.projects
             .values()
             .find_map(|project| project.definition(&path, position.position))
+    }
+
+    fn inlay_hints(&self, params: InlayHintParams) -> Option<Vec<InlayHint>> {
+        let path = params.text_document.uri.to_file_path().ok()?;
+        self.projects
+            .values()
+            .find_map(|project| project.inlay_hints(&path, params.range))
     }
 
     fn highlights(&self, params: DocumentHighlightParams) -> Option<Vec<DocumentHighlight>> {

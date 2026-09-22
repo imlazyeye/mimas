@@ -5,6 +5,7 @@ use crate::{
 };
 
 pub trait Visitor {
+    fn stmt(&mut self, _stmt: &Stmt) {}
     fn item(&mut self, _item: &Item) {}
     fn expr(&mut self, _expr: &Expr) {}
     fn pat(&mut self, _pat: &Pat) {}
@@ -18,6 +19,7 @@ pub fn walk_stmts(stmts: &[Stmt], visitor: &mut impl Visitor) {
 }
 
 pub fn walk_stmt(stmt: &Stmt, visitor: &mut impl Visitor) {
+    visitor.stmt(stmt);
     match stmt.kind() {
         StmtKind::Let(l) => {
             walk_pat(&l.left, visitor);

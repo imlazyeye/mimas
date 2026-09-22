@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use api::Library;
 use indexmap::IndexMap;
 use lsp_types::{
-    Contents, Diagnostic, DocumentHighlight, DocumentSymbol, Hover, Location, MarkupContent,
-    MarkupKind, Position, Uri,
+    Contents, Diagnostic, DocumentHighlight, DocumentSymbol, Hover, InlayHint, InlayHintKind,
+    Label, Location, MarkupContent, MarkupKind, Position, Range, Uri,
 };
-use shared::{FileId, Ty};
+use parse::{NodeId, Stmt, StmtKind, Visitor, walk_stmts};
+use shared::{FileId, Span, Ty};
 use solve::{Resolutions, ResolvedDeclKind, components::DecId};
 
 use crate::source_file::SourceFile;
@@ -170,6 +171,63 @@ impl Project {
         let file = self.files.get(path)?;
         let (id, _) = file.ast.node_at(file.offset(position)?)?;
         Some((resolutions, *resolutions.node_decs.get(&id)?))
+    }
+
+    /// A `: type` after every `let` in `range` that was written without an annotation.
+    pub fn inlay_hints(&self, path: &Path, range: Range) -> Option<Vec<InlayHint>> {
+        #[derive(Default)]
+        struct Bindings(Vec<(NodeId, Span)>);
+
+        impl Visitor for Bindings {
+            fn stmt(&mut self, stmt: &Stmt) {
+                let StmtKind::Let(binding) = stmt.kind() else {
+                    return;
+                };
+                if binding.annotation.is_some() {
+                    return;
+                }
+                if let Some(name) = binding.left.as_ident() {
+                    self.0.push((name.id, name.location.span));
+                }
+            }
+        }
+
+        let resolutions = self.analysis.as_ref().ok()?;
+        let file = self.files.get(path)?;
+        let mut bindings = Bindings::default();
+        walk_stmts(file.ast.stmts(), &mut bindings);
+
+        let within = |position: &Position| {
+            let at = (position.line, position.character);
+            at >= (range.start.line, range.start.character)
+                && at <= (range.end.line, range.end.character)
+        };
+
+        let hints = bindings
+            .0
+            .into_iter()
+            .filter_map(|(id, span)| {
+                let dec = *resolutions.node_decs.get(&id)?;
+                let position = file.range(span)?.end;
+                if !within(&position) {
+                    return None;
+                }
+                Some(InlayHint {
+                    position,
+                    label: Label::String(format!(
+                        ": {}",
+                        resolutions.decs[dec].ty.display(resolutions)
+                    )),
+                    kind: Some(InlayHintKind::Type),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: None,
+                    data: None,
+                })
+            })
+            .collect();
+        Some(hints)
     }
 
     /// The outline of one file, which needs no analysis.

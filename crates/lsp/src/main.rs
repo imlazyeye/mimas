@@ -5,7 +5,8 @@ mod source_file;
 use lsp_server::Connection;
 use lsp_types::{
     DefinitionProvider, DocumentHighlightProvider, DocumentSymbolProvider, HoverProvider,
-    ReferencesProvider, ServerCapabilities, TextDocumentSync, TextDocumentSyncKind,
+    InlayHintProvider, ReferencesProvider, ServerCapabilities, TextDocumentSync,
+    TextDocumentSyncKind,
 };
 use server::Server;
 
@@ -18,6 +19,7 @@ fn main() -> anyhow::Result<()> {
         document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
         references_provider: Some(ReferencesProvider::Bool(true)),
         document_highlight_provider: Some(DocumentHighlightProvider::Bool(true)),
+        inlay_hint_provider: Some(InlayHintProvider::Bool(true)),
         ..Default::default()
     };
     connection.initialize(serde_json::to_value(capabilities)?)?;
