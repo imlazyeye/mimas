@@ -301,7 +301,7 @@ impl TokKind<'_> {
     }
 
     /// Returns if this is a comment.
-    pub(crate) fn is_comment(self) -> bool {
+    pub fn is_comment(self) -> bool {
         matches!(self, TokKind::Comment(_) | TokKind::DocComment(_))
     }
 

@@ -13,10 +13,11 @@ pub struct MimasScript {
 }
 
 impl MimasScript {
-    /// Whether the file's first token is `module`.
+    /// Whether the file's first token (past any comments) is `module`.
     pub(crate) fn is_module(&self) -> bool {
-        let mut lexer = Lexer::new(&self.source, 0, self.path.clone());
-        matches!(lexer.next(), Some(tok) if matches!(tok.kind, TokKind::Module))
+        let lexer = Lexer::new(&self.source, 0, self.path.clone());
+        let mut kinds = lexer.map(|tok| tok.kind).filter(|kind| !kind.is_comment());
+        matches!(kinds.next(), Some(TokKind::Module))
     }
 }
 
