@@ -306,7 +306,7 @@ impl Solve for Access {
                                 con = Some(c.clone());
                                 matches += 1;
                             } else if let Some((header, _)) = pact.functions.get(name) {
-                                fun = Some(header.clone());
+                                fun = Some((*pid, header.clone()));
                                 matches += 1;
                             }
                         }
@@ -330,7 +330,7 @@ impl Solve for Access {
                                 via: lhs.to_string(),
                             }
                             .into());
-                        } else if let Some(header) = fun {
+                        } else if let Some((pid, header)) = fun {
                             // `Self` in a parameter is the receiver's concrete type (Skolem). a
                             // bound doesn't pin that down, so any implementer would satisfy it and
                             // the callee would read another type's fields by slot. only a concrete
@@ -370,7 +370,10 @@ impl Solve for Access {
                             // and impl signature check. through a bound, a `Self` return is some
                             // implementer of it, so it widens to the bound and the skolem never
                             // escapes its pact; on `self` in a default body it stays `Self`.
-                            solver.instantiate_pact_fn(&header, &lhs)
+                            let ty = solver.instantiate_pact_fn(&header, &lhs);
+                            let member = solver.pact_members.get(&(pid, name.clone())).copied();
+                            solver.note(right.as_ident().unwrap(), ty.clone(), member);
+                            ty
                         } else {
                             return Err(FieldNotFound {
                                 src: solver.src(location),
@@ -617,10 +620,11 @@ impl Solve for Call {
                         ))
                     })
                 } else {
-                    lock.variants
-                        .get(&right.lexeme)
-                        .cloned()
-                        .map(|v| (v.layout().unwrap(), v, adt))
+                    let variant = lock.variants.get(&right.lexeme).cloned();
+                    if let Some(variant) = &variant {
+                        solver.note(right, Ty::Adt(adt), variant.dec());
+                    }
+                    variant.map(|v| (v.layout().unwrap(), v, adt))
                 }
             }
             ExprKind::Ident(ident) => match ident.query(solver)? {
@@ -1594,6 +1598,7 @@ impl Solve for Literal {
                                 })?;
 
                             let layout = variant.layout().unwrap();
+                            solver.note(right, Ty::Adt(adt), variant.dec());
                             let Variant::Struct(struct_variant) = variant else {
                                 Err(NotAStruct {
                                     src: solver.src(location),

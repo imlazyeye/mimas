@@ -191,7 +191,16 @@ impl Hoist for parse::item::Enum {
             };
             let layout = ctx.solver.push_adt(layout_adt);
 
-            let variant_ident = parse::Ident::synthetic(qualified);
+            // the parser's ident under the qualified name (tooling keys off its id)
+            let (written, _) = self
+                .members
+                .iter()
+                .find(|(written, _)| written.lexeme == name)
+                .expect("every variant comes from a member");
+            let variant_ident = parse::Ident {
+                lexeme: qualified,
+                ..written.clone()
+            };
             let dec = ctx.solver.dec_id(
                 &variant_ident,
                 Ty::Adt(id),
@@ -368,6 +377,11 @@ impl Hoist for Pact {
             match item {
                 PactItem::Const { name, annotation } => {
                     let ty = Ty::from_annotation(annotation.clone(), ctx.solver)?;
+                    // Local rather than Constant, which has to carry a value by the IR boundary
+                    let dec = ctx.solver.dec_id(name, ty.clone(), DecKind::Local, ctx.vis);
+                    ctx.solver
+                        .pact_members
+                        .insert((pact_id, name.lexeme.clone()), dec);
                     ctx.solver.pacts[pact_id]
                         .constants
                         .insert(name.lexeme.clone(), ty);

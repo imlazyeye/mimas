@@ -1433,6 +1433,8 @@ impl Solver {
                                     name: right.lexeme.clone(),
                                 })?
                             }
+                            let dec = self.adts[adt].variants[&right.lexeme].dec();
+                            self.note(right, Ty::Adt(adt), dec);
                             (adt, Some(right.lexeme.clone()))
                         }
                     }
