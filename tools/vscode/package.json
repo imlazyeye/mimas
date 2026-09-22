@@ -1,7 +1,7 @@
 {
     "name": "mimas",
     "displayName": "mimas",
-    "description": "Syntax highlighting, snippets, and language configuration for the mimas language.",
+    "description": "Syntax highlighting, snippets, diagnostics, and hover for the mimas language.",
     "version": "0.1.0",
     "publisher": "imlazyeye",
     "author": {
@@ -30,15 +30,21 @@
         "syntax"
     ],
     "engines": {
-        "vscode": "^1.74.0"
+        "vscode": "^1.91.0"
     },
+    "main": "./out/extension.js",
+    "activationEvents": [
+        "onLanguage:mimas"
+    ],
     "categories": [
         "Programming Languages",
         "Snippets"
     ],
     "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
         "sync-grammar": "node ./scripts/sync-grammar.mjs",
-        "vscode:prepublish": "node ./scripts/sync-grammar.mjs"
+        "vscode:prepublish": "node ./scripts/sync-grammar.mjs && npm run compile"
     },
     "contributes": {
         "languages": [
@@ -105,6 +111,35 @@
                     }
                 ]
             }
-        ]
+        ],
+        "configuration": {
+            "title": "mimas",
+            "properties": {
+                "mimas.serverPath": {
+                    "type": "string",
+                    "default": "mimas-lsp",
+                    "description": "Path to the mimas language server executable. Restart the extension host after changing it."
+                },
+                "mimas.trace.server": {
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "messages",
+                        "verbose"
+                    ],
+                    "default": "off",
+                    "description": "Log the messages exchanged with the mimas language server to the \"mimas\" output channel."
+                }
+            }
+        }
+    },
+    "dependencies": {
+        "vscode-languageclient": "^10.1.1"
+    },
+    "devDependencies": {
+        "@types/node": "^26.6.2",
+        "@types/vscode": "1.74",
+        "@vscode/vsce": "^4.0.0",
+        "typescript": "^7.0.2"
     }
 }

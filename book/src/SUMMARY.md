@@ -5,6 +5,7 @@
   - [Tour](./introduction/tour.md)
   - [Benchmarks](./introduction/benchmarks.md)
   - [Getting Started](./introduction/getting-started.md)
+  - [Language Server](./introduction/lsp.md)
 - [Language Reference](./reference.md)
   - [Variables & Constants](./reference/variables.md)
   - [Primitive Types](./reference/basic-types.md)

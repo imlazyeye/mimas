@@ -9,7 +9,8 @@ crates/bevy/target
 temp/
 .cargo/*
 !.cargo/mutants.toml
-*.vsix
-.vscode
+/.vscode
 .claude/
 profile.json*
+node_modules/
+tools/vscode/out/

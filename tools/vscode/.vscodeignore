@@ -1,3 +1,6 @@
 .vscode/**
 scripts/**
 **/.DS_Store
+src/**
+tsconfig.json
+out/**/*.map
