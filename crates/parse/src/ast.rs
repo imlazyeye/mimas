@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use miette::NamedSource;
-use shared::Result;
+use shared::{Located, Result, Span};
 
-use crate::{Expr, Stmt, StmtKind, errors::AlreadyInsideModule};
+use crate::{
+    Expr, Ident, Stmt, StmtKind, components::Pat, errors::AlreadyInsideModule, visit::Visitor,
+    walk_stmts,
+};
 
 /// A collection of statements.
 #[derive(Debug, Clone)]
@@ -37,6 +40,46 @@ impl Ast {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The innermost node whose span covers `offset` (a byte offset into the source), with that
+    /// span. Idents count as nodes, so a name wins over the expr or pat it sits in.
+    pub fn node_at(&self, offset: usize) -> Option<(NodeId, Span)> {
+        struct Innermost {
+            offset: usize,
+            found: Option<(NodeId, Span)>,
+        }
+        impl Innermost {
+            fn consider(&mut self, id: NodeId, span: Span) {
+                let covers = span.start <= self.offset && self.offset < span.end;
+                let tighter = self
+                    .found
+                    .is_none_or(|(_, found)| span.len() <= found.len());
+                if covers && tighter {
+                    self.found = Some((id, span));
+                }
+            }
+        }
+        impl Visitor for Innermost {
+            fn expr(&mut self, expr: &Expr) {
+                self.consider(expr.id(), expr.span());
+            }
+
+            fn pat(&mut self, pat: &Pat) {
+                self.consider(pat.id(), pat.span());
+            }
+
+            fn ident(&mut self, ident: &Ident) {
+                self.consider(ident.id, ident.span());
+            }
+        }
+
+        let mut innermost = Innermost {
+            offset,
+            found: None,
+        };
+        walk_stmts(&self.stmts, &mut innermost);
+        innermost.found
     }
 
     pub fn module_name(&self) -> Result<Option<String>> {

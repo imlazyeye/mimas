@@ -132,11 +132,13 @@ pub mod item {
 mod ast;
 pub mod errors;
 mod parser;
+pub mod visit;
 pub use ast::*;
 pub use expr::*;
 pub use item::*;
 pub use parser::*;
 pub use stmt::*;
+pub use visit::*;
 
 #[cfg(test)]
 mod tests {
@@ -145,6 +147,7 @@ mod tests {
 
     mod autogen_tok_tests;
     mod lex_tokens;
+    mod node_at;
     mod parse_exprs;
     mod parse_poison;
     mod parse_stmts;

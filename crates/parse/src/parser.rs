@@ -1092,17 +1092,19 @@ impl<'s> Parser<'s> {
     fn dot_access(&mut self, left: Expr) -> Expr {
         let start = left.span().start();
         let kind = AccessKind::try_from(self.advance().kind()).expect("dispatched on a dot");
+        // the member spans just its own token, not back to the start of the receiver
+        let member_start = self.next_start();
         let right = match self.peek() {
             TokKind::Ident(_) => {
                 let ident = self.require_ident();
-                self.new_expr(ident, start)
+                self.new_expr(ident, member_start)
             }
             // take the int token directly -- `parser.literal()` would chain further accesses,
             // which would steal a trailing `.foo()` from the *outer* dot (`a.0.pairs()` would
             // misparse as `a . (0.pairs())`). The outer chain_accesses loop owns chaining.
             TokKind::Int(index) => {
                 self.advance();
-                self.new_expr(Literal::Int(index), start)
+                self.new_expr(Literal::Int(index), member_start)
             }
             _ => {
                 self.error_here(InvalidDotAccess {

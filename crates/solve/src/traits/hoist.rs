@@ -158,10 +158,7 @@ impl Hoist for parse::item::Enum {
                                 .iter()
                                 .map(|StructField { name, location, .. }| {
                                     let ty: Ty = ctx.solver.vid().into();
-                                    let ident = parse::Ident {
-                                        lexeme: name.to_string(),
-                                        location: *location,
-                                    };
+                                    let ident = parse::Ident::new(name.to_string(), *location);
                                     let dec = ctx.solver.dec_id(
                                         &ident,
                                         ty.clone(),
@@ -238,10 +235,7 @@ impl Hoist for Struct {
                      ..
                  }| {
                     let ty = Ty::Vid(ctx.solver.vid());
-                    let ident = parse::Ident {
-                        lexeme: name.to_string(),
-                        location: *location,
-                    };
+                    let ident = parse::Ident::new(name.to_string(), *location);
                     let dec = ctx.solver.dec_id(
                         &ident,
                         ty.clone(),

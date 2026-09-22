@@ -1025,11 +1025,7 @@ expr_test!(
     "self.bar()",
     Call::new(
         Access::Dot {
-            left: Ident {
-                lexeme: "self".into(),
-                location: Default::default(),
-            }
-            .into_expr(),
+            left: Ident::new("self", Default::default()).into_expr(),
             right: ident_expr!("bar"),
             kind: AccessKind::Direct,
         }
@@ -1161,11 +1157,7 @@ expr_test!(
     identity_access,
     "self.bar",
     Access::Dot {
-        left: Ident {
-            lexeme: "self".into(),
-            location: Default::default(),
-        }
-        .into_expr(),
+        left: Ident::new("self", Default::default()).into_expr(),
         right: ident_expr!("bar"),
         kind: AccessKind::Direct,
     }

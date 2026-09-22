@@ -1,4 +1,4 @@
-use crate::expr::*;
+use crate::{NodeId, expr::*};
 use shared::{Located, Location, Span};
 
 /// Representation of an identifier in mimas, which could be any variable.
@@ -8,13 +8,16 @@ pub struct Ident {
     pub lexeme: String,
     /// The location of the original token.
     pub location: Location,
+    /// Lets the solver record what the name resolved to (tooling reads it, the compile doesn't).
+    pub id: NodeId,
 }
 impl Ident {
     /// Creates a new identifier.
-    pub(crate) fn new(lexeme: impl Into<String>, location: Location) -> Self {
+    pub fn new(lexeme: impl Into<String>, location: Location) -> Self {
         Self {
             lexeme: lexeme.into(),
             location,
+            id: NodeId::new(),
         }
     }
 

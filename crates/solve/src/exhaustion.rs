@@ -551,11 +551,5 @@ impl Matrix {
 }
 
 fn wildcard_pat(location: shared::Location) -> Pat {
-    Pat::new(
-        PatKind::Ident(parse::Ident {
-            lexeme: "_".into(),
-            location,
-        }),
-        location,
-    )
+    Pat::new(PatKind::Ident(parse::Ident::new("_", location)), location)
 }
