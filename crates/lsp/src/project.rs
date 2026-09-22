@@ -1,12 +1,19 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use api::Library;
 use indexmap::IndexMap;
 use lsp_types::{
     Contents, Diagnostic, DocumentHighlight, DocumentSymbol, Hover, InlayHint, InlayHintKind,
-    Label, Location, MarkupContent, MarkupKind, Position, Range, Uri,
+    Label, Location, MarkupContent, MarkupKind, Position, Range, TextEdit, Uri, WorkspaceEdit,
 };
-use parse::{NodeId, Stmt, StmtKind, Visitor, walk_stmts};
+use parse::{
+    NodeId, Stmt, StmtKind, Visitor,
+    lex::{Lexer, TokKind},
+    walk_stmts,
+};
 use shared::{FileId, Span, Ty};
 use solve::{Resolutions, ResolvedDeclKind, components::DecId};
 
@@ -33,7 +40,7 @@ impl Project {
         let files = files
             .into_iter()
             .zip(loaded.asts)
-            .map(|((path, text), ast)| (path, SourceFile::new(&text, ast)))
+            .map(|((path, text), ast)| (path, SourceFile::new(text, ast)))
             .collect();
         let analysis = if loaded.errors.is_empty() {
             Ok(Resolutions::from(loaded.solver))
@@ -163,6 +170,188 @@ impl Project {
             })
             .collect();
         Some(highlights)
+    }
+
+    /// The range F2 should offer to edit, or nothing when the name can't be renamed.
+    pub fn prepare_rename(&self, path: &Path, position: Position) -> Option<Range> {
+        let (resolutions, target) = self.dec_at(path, position)?;
+        self.family(resolutions, target).ok()?;
+        let file = self.files.get(path)?;
+        let (_, span) = file.ast.node_at(file.offset(position)?)?;
+        file.range(span)
+    }
+
+    /// Renames the name at `position` everywhere it appears, or says why it can't.
+    pub fn rename(
+        &self,
+        path: &Path,
+        position: Position,
+        new_name: &str,
+        library: &Library<()>,
+    ) -> Result<WorkspaceEdit, String> {
+        if !is_identifier(new_name) {
+            return Err(format!("`{new_name}` isn't a valid mimas name"));
+        }
+        let (resolutions, target) = self
+            .dec_at(path, position)
+            .ok_or("there is nothing to rename here")?;
+        let family = self.family(resolutions, target)?;
+
+        // every written occurrence of anything in the family, per file
+        let mut spans: Vec<Vec<Span>> = self.files.iter().map(|_| Vec::new()).collect();
+        for (file_id, (_, file)) in self.files.iter().enumerate() {
+            for (id, span) in file.idents() {
+                if resolutions
+                    .node_decs
+                    .get(&id)
+                    .is_some_and(|dec| family.contains(dec))
+                {
+                    spans[file_id].push(span);
+                }
+            }
+        }
+
+        // the scopes are gone by now, so the check for a name that captures something else is to
+        // make the edit and see whether the project still solves
+        let probe = self
+            .files
+            .iter()
+            .zip(&spans)
+            .map(|((path, file), spans)| (path.clone(), renamed(&file.text, spans, new_name)))
+            .collect();
+        let probe = Project::load(probe, library);
+        let Ok(probed) = probe.analysis.as_ref() else {
+            return Err(format!("renaming to `{new_name}` would not compile"));
+        };
+        if shape(&self.files, resolutions) != shape(&probe.files, probed) {
+            return Err(format!(
+                "renaming to `{new_name}` would change what another name refers to"
+            ));
+        }
+
+        let changes = self
+            .files
+            .iter()
+            .zip(&spans)
+            .filter(|(_, spans)| !spans.is_empty())
+            .filter_map(|((path, file), spans)| {
+                let edits = spans
+                    .iter()
+                    .filter_map(|span| {
+                        Some(TextEdit {
+                            range: file.range(*span)?,
+                            new_text: new_name.to_owned(),
+                        })
+                    })
+                    .collect();
+                Some((Uri::from_file_path(path).ok()?, edits))
+            })
+            .collect();
+
+        return Ok(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        });
+
+        /// Whether the lexer reads this as one plain name.
+        fn is_identifier(name: &str) -> bool {
+            let mut lexer = Lexer::new(name, 0, "<rename>".to_owned());
+            let first = matches!(
+                lexer.next().map(|tok| tok.kind),
+                Some(TokKind::Ident(lexeme)) if lexeme == name
+            );
+            first && matches!(lexer.next().map(|tok| tok.kind), None | Some(TokKind::Eof))
+        }
+
+        /// How a project's idents group by what they resolve to, in walk order. Two of these
+        /// differ when an edit quietly rebinds a name it didn't touch.
+        fn shape(
+            files: &IndexMap<PathBuf, SourceFile>,
+            resolutions: &Resolutions,
+        ) -> Vec<Vec<usize>> {
+            files
+                .values()
+                .map(|file| {
+                    let mut seen: HashMap<DecId, usize> = HashMap::new();
+                    file.idents()
+                        .into_iter()
+                        .map(|(id, _)| match resolutions.node_decs.get(&id) {
+                            Some(dec) => {
+                                let next = seen.len() + 1;
+                                *seen.entry(*dec).or_insert(next)
+                            }
+                            None => 0,
+                        })
+                        .collect()
+                })
+                .collect()
+        }
+
+        /// `text` with every span replaced. Back to front, so the earlier spans keep their offsets.
+        fn renamed(text: &str, spans: &[Span], new_name: &str) -> String {
+            let mut spans = spans.to_vec();
+            spans.sort_by_key(|span| std::cmp::Reverse(span.start));
+            let mut text = text.to_owned();
+            for span in spans {
+                text.replace_range(span.start..span.end, new_name);
+            }
+            text
+        }
+    }
+
+    /// Every dec that has to move with `target`. A pact member brings its whole family: the
+    /// pact's own declaration and the matching method on each implementor.
+    fn family(&self, resolutions: &Resolutions, target: DecId) -> Result<Vec<DecId>, String> {
+        let declared = |dec: &DecId| {
+            let span = resolutions.decs[*dec].location.span;
+            !span.is_synthetic() && !span.is_empty()
+        };
+        if !declared(&target) {
+            return Err("that name is built in, so there is no mimas source to rename".to_owned());
+        }
+
+        let named_by_pact = resolutions
+            .pacts
+            .iter()
+            .find_map(|(pact_id, pact)| {
+                let name = pact.members.iter().find(|(_, dec)| **dec == target)?.0;
+                Some((pact_id, name.clone()))
+            })
+            .or_else(|| {
+                let (adt_id, name) = resolutions.adts.iter().find_map(|(adt_id, adt)| {
+                    let name = adt.methods.iter().find(|(_, dec)| **dec == target)?.0;
+                    Some((adt_id, name.clone()))
+                })?;
+                let pact_id = resolutions.adts[adt_id]
+                    .implements
+                    .iter()
+                    .copied()
+                    .find(|pact_id| resolutions.pacts[*pact_id].members.contains_key(&name))?;
+                Some((pact_id, name))
+            });
+
+        let Some((pact_id, name)) = named_by_pact else {
+            return Ok(vec![target]);
+        };
+
+        let mut family: Vec<DecId> = resolutions.pacts[pact_id]
+            .members
+            .get(&name)
+            .copied()
+            .into_iter()
+            .collect();
+        for (_, adt) in resolutions.adts.iter() {
+            if adt.implements.contains(&pact_id)
+                && let Some(dec) = adt.methods.get(&name)
+            {
+                family.push(*dec);
+            }
+        }
+        if !family.iter().all(declared) {
+            return Err("part of this pact has no mimas source to rename".to_owned());
+        }
+        Ok(family)
     }
 
     /// The declaration the name at `position` resolves to.

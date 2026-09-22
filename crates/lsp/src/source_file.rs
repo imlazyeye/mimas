@@ -8,15 +8,17 @@ use shared::{Located, Span};
 /// One file of a project, with the line index that maps between its byte offsets and LSP
 /// positions.
 pub struct SourceFile {
+    pub text: String,
     pub ast: Ast,
     lines: LineIndex,
 }
 
 impl SourceFile {
-    pub fn new(text: &str, ast: Ast) -> Self {
+    pub fn new(text: String, ast: Ast) -> Self {
         Self {
+            lines: LineIndex::new(&text),
+            text,
             ast,
-            lines: LineIndex::new(text),
         }
     }
 

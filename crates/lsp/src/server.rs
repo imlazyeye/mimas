@@ -9,12 +9,15 @@ use lsp_types::{
     DefinitionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentSymbol,
     DocumentSymbolParams, Hover, HoverParams, InlayHint, InlayHintParams, Location,
-    LspNotificationMethod, LspRequestMethod, PublishDiagnosticsParams, ReferenceParams,
-    TextDocumentContentChangeEvent, Uri,
+    LspNotificationMethod, LspRequestMethod, PrepareRenameParams, PublishDiagnosticsParams, Range,
+    ReferenceParams, RenameParams, TextDocumentContentChangeEvent, Uri, WorkspaceEdit,
 };
 use serde::de::DeserializeOwned;
 
 use crate::project::Project;
+
+/// The protocol's code for "understood, but couldn't be done" -- clients surface the message.
+const REQUEST_FAILED: i32 = -32803;
 
 pub struct Server<'a> {
     connection: &'a Connection,
@@ -112,6 +115,28 @@ impl<'a> Server<'a> {
                     ),
                 }
             }
+            LspRequestMethod::TextDocumentPrepareRename => {
+                match params::<PrepareRenameParams>(req.params) {
+                    Some(params) => Response::new_ok(req.id, self.prepare_rename(params)),
+                    None => Response::new_err(
+                        req.id,
+                        ErrorCode::InvalidParams as i32,
+                        "malformed prepare rename params".to_owned(),
+                    ),
+                }
+            }
+            LspRequestMethod::TextDocumentRename => match params::<RenameParams>(req.params) {
+                Some(params) => match self.rename(params) {
+                    Ok(edit) => Response::new_ok(req.id, edit),
+                    // the client shows this to whoever pressed F2
+                    Err(reason) => Response::new_err(req.id, REQUEST_FAILED, reason),
+                },
+                None => Response::new_err(
+                    req.id,
+                    ErrorCode::InvalidParams as i32,
+                    "malformed rename params".to_owned(),
+                ),
+            },
             _ => Response::new_err(
                 req.id,
                 ErrorCode::MethodNotFound as i32,
@@ -181,6 +206,29 @@ impl<'a> Server<'a> {
         self.projects
             .values()
             .find_map(|project| project.definition(&path, position.position))
+    }
+
+    fn prepare_rename(&self, params: PrepareRenameParams) -> Option<Range> {
+        let position = params.text_document_position_params;
+        let path = position.text_document.uri.to_file_path().ok()?;
+        self.projects
+            .values()
+            .find_map(|project| project.prepare_rename(&path, position.position))
+    }
+
+    fn rename(&self, params: RenameParams) -> Result<WorkspaceEdit, String> {
+        let position = params.text_document_position_params;
+        let path = position
+            .text_document
+            .uri
+            .to_file_path()
+            .map_err(|_| "that file isn't on disk".to_owned())?;
+        let project = self
+            .projects
+            .values()
+            .find(|project| project.files.contains_key(&path))
+            .ok_or("that file isn't part of a project")?;
+        project.rename(&path, position.position, &params.new_name, &self.library)
     }
 
     fn inlay_hints(&self, params: InlayHintParams) -> Option<Vec<InlayHint>> {

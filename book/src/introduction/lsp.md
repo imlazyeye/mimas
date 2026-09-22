@@ -1,7 +1,7 @@
 # Language Server
 
 mimas ships a language server to use in the editor of your choice. It is still very young but offers
-diagnostics, hover, navigation, outlines, and inlay hints.
+diagnostics, hover, navigation, rename, outlines, and inlay hints.
 
 ## What it supports
 
@@ -45,6 +45,11 @@ The same names work in reverse: ask for a declaration's references and you'll ge
 in the project, wherever it lives. Resting your cursor on a name also highlights its other uses in
 the file you're reading.
 
+### Rename
+
+Renaming rewrites a name everywhere it appears in the project. Renaming a member of a
+[pact](../reference/pacts.md) carries every implementation with it, so the two can't drift apart.
+
 ### Outline
 
 Your editor's outline, breadcrumbs, and symbol search list what a file declares -- types with their
@@ -65,8 +70,8 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 - **The solver is not resilient.** This means that any error will cut off type information and
   you'll be left with only that error in the editor. Everything but diagnostics and the outline
   goes quiet until the project checks cleanly again, which you'll notice most while mid-keystroke.
-- **No completion, rename, formatting, signature help, or code actions.** These are the obvious
-  next steps, but none of them exist today.
+- **No completion, formatting, signature help, or code actions.** These are the obvious next
+  steps, but none of them exist today.
 - **Navigation stops at the language boundary.** Natives from the standard library, builtin types
   like `int`, and module names have no mimas source to jump to, so nothing happens. This will come
   in the future.
