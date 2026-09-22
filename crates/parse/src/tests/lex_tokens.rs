@@ -36,18 +36,97 @@ tok_test!(invalid_dollar: "$" => Invalid("$"));
 tok_test!(invalid_backslash: "\\" => Invalid("\\"));
 tok_test!(invalid_multibyte: "a § b" => Ident("a"), Invalid("§"), Ident("b"));
 
-tok_test!(line_comment_skipped: "1 // a comment\n2" => Int(1), Int(2));
-tok_test!(comment_only: "// nothing here" =>);
-tok_test!(comment_trailing_eof: "1 // tail" => Int(1));
+tok_test!(line_comment: "1 // a comment\n2" => Int(1), Comment("// a comment"), Int(2));
+tok_test!(comment_only: "// nothing here" => Comment("// nothing here"));
+tok_test!(comment_trailing_eof: "1 // tail" => Int(1), Comment("// tail"));
+tok_test!(doc_comment: "/// docs" => DocComment("/// docs"));
 
-tok_test!(block_comment_skipped: "1 /* a comment */ 2" => Int(1), Int(2));
-tok_test!(block_comment_only: "/* nothing here */" =>);
-tok_test!(block_comment_multiline: "1 /* a\nb\nc */ 2" => Int(1), Int(2));
-tok_test!(block_comment_empty_body: "1 /**/ 2" => Int(1), Int(2));
-tok_test!(block_comment_nested: "1 /* a /* b */ c */ 2" => Int(1), Int(2));
-tok_test!(block_comment_shared_slash: "1 /*/ 2 */ 3" => Int(1), Int(3));
-tok_test!(block_comment_holds_line_comment: "1 /* // not a line comment */ 2" => Int(1), Int(2));
-tok_test!(block_comment_between_tokens: "a/*x*/+/*y*/b" => Ident("a"), Plus, Ident("b"));
+tok_test!(
+    comment_lines_merge,
+    "// a
+     //
+     // b
+     1",
+    Comment(
+        "// a
+     //
+     // b"
+    ),
+    Int(1),
+);
+
+tok_test!(
+    doc_comment_lines_merge,
+    "/// a
+     ///
+     /// b",
+    DocComment(
+        "/// a
+     ///
+     /// b"
+    ),
+);
+
+tok_test!(
+    crlf_comment_lines_merge,
+    "// a\r
+     // b\r
+     1",
+    Comment(
+        "// a\r
+     // b"
+    ),
+    Int(1),
+);
+
+tok_test!(
+    blank_line_splits_comments,
+    "// a
+
+     // b",
+    Comment("// a"),
+    Comment("// b"),
+);
+
+tok_test!(
+    doc_comment_splits_from_comment,
+    "// a
+     /// b
+     // c",
+    Comment("// a"),
+    DocComment("/// b"),
+    Comment("// c"),
+);
+
+tok_test!(
+    comment_before_slash,
+    "// a
+     / 2",
+    Comment("// a"),
+    Slash,
+    Int(2),
+);
+
+tok_test!(
+    line_comment_then_block_comment,
+    "// a
+     /* b */",
+    Comment("// a"),
+    Comment("/* b */"),
+);
+
+tok_test!(block_comment: "1 /* a comment */ 2" => Int(1), Comment("/* a comment */"), Int(2));
+tok_test!(block_comment_only: "/* nothing here */" => Comment("/* nothing here */"));
+tok_test!(block_comment_multiline: "1 /* a\nb\nc */ 2" =>
+    Int(1), Comment("/* a\nb\nc */"), Int(2));
+tok_test!(block_comment_empty_body: "1 /**/ 2" => Int(1), Comment("/**/"), Int(2));
+tok_test!(block_comment_nested: "1 /* a /* b */ c */ 2" =>
+    Int(1), Comment("/* a /* b */ c */"), Int(2));
+tok_test!(block_comment_shared_slash: "1 /*/ 2 */ 3" => Int(1), Comment("/*/ 2 */"), Int(3));
+tok_test!(block_comment_holds_line_comment: "1 /* // not a line comment */ 2" =>
+    Int(1), Comment("/* // not a line comment */"), Int(2));
+tok_test!(block_comment_between_tokens: "a/*x*/+/*y*/b" =>
+    Ident("a"), Comment("/*x*/"), Plus, Comment("/*y*/"), Ident("b"));
 tok_test!(block_comment_ignored_in_string: "\"/* not */\"" => String("/* not */"));
 tok_test!(division_not_a_comment: "6 / 2" => Int(6), Slash, Int(2));
 

@@ -94,6 +94,8 @@ pub enum TokKind<'s> {
     FString(&'s str),
     Hex(&'s str),
     Invalid(&'s str),
+    Comment(&'s str),
+    DocComment(&'s str),
     /// Ends every token stream the parser reads. The lexer never produces one.
     Eof,
 }
@@ -191,6 +193,8 @@ impl Display for TokKind<'_> {
             TokKind::FString(s) => return f.pad(&format!("f\"{s}\"")),
             TokKind::Hex(hex) => hex,
             TokKind::Invalid(_) => "INVALID_TOKEN",
+            TokKind::Comment(s) => return f.pad(s.as_ref()),
+            TokKind::DocComment(s) => return f.pad(s.as_ref()),
             TokKind::Eof => return f.pad("end of input"),
         };
         f.pad(s)
@@ -294,6 +298,11 @@ impl TokKind<'_> {
     /// Returns if this is an identifier.
     pub(crate) fn is_ident(self) -> bool {
         matches!(self, TokKind::Ident(_))
+    }
+
+    /// Returns if this is a comment.
+    pub(crate) fn is_comment(self) -> bool {
+        matches!(self, TokKind::Comment(_) | TokKind::DocComment(_))
     }
 
     /// Returns if this is a keyword that starts a statement wherever it shows up. Recovery

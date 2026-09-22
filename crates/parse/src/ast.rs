@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use hashbrown::HashMap;
 use miette::NamedSource;
 use shared::{Located, Result, Span};
 
@@ -16,11 +17,23 @@ pub struct Ast {
     /// from post-parse checks (e.g. [`Self::module_name`]) so they render with snippets.
     src: NamedSource<Arc<str>>,
     stmts: Vec<Stmt>,
+    /// Doc comments without their slashes, keyed by where the token after each starts.
+    docs: HashMap<usize, String>,
 }
 impl Ast {
     /// Creates a new Ast with the given statements.
-    pub(crate) fn new(name: String, src: NamedSource<Arc<str>>, stmts: Vec<Stmt>) -> Self {
-        Self { name, src, stmts }
+    pub(crate) fn new(
+        name: String,
+        src: NamedSource<Arc<str>>,
+        stmts: Vec<Stmt>,
+        docs: HashMap<usize, String>,
+    ) -> Self {
+        Self {
+            name,
+            src,
+            stmts,
+            docs,
+        }
     }
 
     /// Consumes the Ast into its inner collection of statements.
@@ -80,6 +93,12 @@ impl Ast {
         };
         walk_stmts(&self.stmts, &mut innermost);
         innermost.found
+    }
+
+    /// The doc comment above the token starting at `position` (a byte offset into the source),
+    /// without its slashes. An item's doc is at the start of its span.
+    pub fn docs_for(&self, position: usize) -> Option<&str> {
+        self.docs.get(&position).map(String::as_str)
     }
 
     pub fn module_name(&self) -> Result<Option<String>> {

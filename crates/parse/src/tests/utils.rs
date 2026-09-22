@@ -8,6 +8,9 @@ macro_rules! tok {
 #[macro_export]
 macro_rules! tok_test {
     ($name:ident: $src:expr => $($should_be:expr), * $(,)?) => {
+        $crate::tok_test!($name, $src, $($should_be),*);
+    };
+    ($name:ident, $src:expr, $($should_be:expr), * $(,)?) => {
         #[cfg(test)]
         #[test]
         fn $name() {

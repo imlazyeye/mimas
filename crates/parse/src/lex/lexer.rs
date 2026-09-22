@@ -127,17 +127,10 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    /// Chomp a `/* ... */` block comment if one starts at the cursor. Nests like Rust's, so
+    /// Chomps the rest of the block comment whose `/*` is at `start`. Nests like Rust's, so
     /// commenting out a region that already contains a block comment closes at the right `*/`.
-    /// Returns whether the cursor is actually on an `/*`.
-    fn construct_block_comment(&mut self) -> bool {
-        if !(self.char_stream.match_peek('/') && self.char_stream.match_peek('*')) {
-            self.char_stream.reset_peeks();
-            return false;
-        }
-        let start = self.char_stream.position();
-        self.char_stream.chomp_peeks();
-
+    /// Returns the whole comment.
+    fn construct_block_comment(&mut self, start: usize) -> &'s str {
         // `prev` is cleared after each delimiter so a shared slash can't count twice --
         // `/*/` must not open-and-close, matching rustc.
         let mut depth = 1usize;
@@ -161,7 +154,7 @@ impl<'s> Lexer<'s> {
                 _ => prev = Some(c),
             }
         }
-        true
+        &self.source[start..self.char_stream.position()]
     }
 }
 
@@ -189,10 +182,7 @@ impl<'s> Lex<'s, Tok<TokKind<'s>>, TokKind<'s>> for Lexer<'s> {
 
     fn lex(&mut self) -> ChompyResult<Option<Tok<TokKind<'s>>>> {
         // whitespace in one go -- massive amounts of whitespace can cause enormously deep stacks
-        while self.char_stream.match_chomp_with(|c| c.is_whitespace())
-            || self.construct_comment(&["//"]).is_some()
-            || self.construct_block_comment()
-        {}
+        while self.char_stream.match_chomp_with(|c| c.is_whitespace()) {}
         let start = self.char_stream.position();
         let rest = &self.source[start..];
         let kind = if let Some(hex) = self.construct_hex("0x") {
@@ -416,7 +406,34 @@ impl<'s> Lex<'s, Tok<TokKind<'s>>, TokKind<'s>> for Lexer<'s> {
                     }
                 }
                 '/' => {
-                    if self.match_chomp('=') {
+                    if self.match_chomp('/') {
+                        let is_doc = self.match_chomp('/');
+                        let stream = &mut self.char_stream;
+                        loop {
+                            while stream.match_chomp_with(|c| c != '\n' && c != '\r') {}
+                            // carry on into the next line if it's the same kind of comment
+                            stream.match_peek('\r');
+                            stream.match_peek('\n');
+                            stream.peek_while(|c| c == ' ' || c == '\t');
+                            if stream.match_peek('/')
+                                && stream.match_peek('/')
+                                && stream.match_peek('/') == is_doc
+                            {
+                                stream.chomp_peeks();
+                            } else {
+                                stream.reset_peeks();
+                                break;
+                            }
+                        }
+                        let text = &self.source[start..self.char_stream.position()];
+                        if is_doc {
+                            TokKind::DocComment(text)
+                        } else {
+                            TokKind::Comment(text)
+                        }
+                    } else if self.match_chomp('*') {
+                        TokKind::Comment(self.construct_block_comment(start))
+                    } else if self.match_chomp('=') {
                         TokKind::SlashEqual
                     } else {
                         TokKind::Slash

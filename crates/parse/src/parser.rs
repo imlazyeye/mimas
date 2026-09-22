@@ -3,6 +3,7 @@ use chompy::{
     lex::{Lex, Tok, Token},
     utils::Located as _,
 };
+use hashbrown::HashMap;
 use lex::{Lexer, TokKind, interp_end};
 use miette::NamedSource;
 use shared::{FileId, Located, Location, Span};
@@ -13,6 +14,8 @@ use std::{cell::Cell, sync::Arc};
 pub struct Parser<'s> {
     /// Always ends with an `Eof`.
     tokens: Vec<Tok<TokKind<'s>>>,
+    /// Each doc comment, keyed by the index of the token after it.
+    docs: HashMap<usize, &'s str>,
     /// Index of the next token in `tokens`.
     next: usize,
     /// Spent by looking at the next token and refilled by taking it. Running out means the
@@ -48,6 +51,21 @@ impl<'s> Parser<'s> {
     fn with_src(mut lexer: Lexer<'s>, src: NamedSource<Arc<str>>) -> Self {
         let mut tokens: Vec<_> = lexer.by_ref().collect();
         tokens.push(Tok::new(TokKind::Eof, lexer.end()));
+
+        // Remove the comments from the stream, keep them for later
+        let docs = tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, tok)| tok.kind().is_comment())
+            .enumerate()
+            .filter_map(|(removed, (og_index, tok))| match tok.kind() {
+                // once the comments are out, the token after this one is at `og_index - removed`
+                TokKind::DocComment(text) => Some((og_index - removed, text)),
+                _ => None,
+            })
+            .collect();
+        tokens.retain(|tok| !tok.kind().is_comment());
+
         let errors = lexer
             .take_errors()
             .into_iter()
@@ -62,6 +80,7 @@ impl<'s> Parser<'s> {
             .collect();
         Self {
             tokens,
+            docs,
             next: 0,
             fuel: Cell::new(FUEL),
             errors,
@@ -92,7 +111,24 @@ impl<'s> Parser<'s> {
             let label = err.labels().and_then(|mut labels| labels.next());
             label.map_or(0, |label| label.offset())
         });
-        (Ast::new(self.file_name, self.src, statements), self.errors)
+        let docs = self
+            .docs
+            .iter()
+            .map(|(&at, doc)| {
+                let lines: Vec<_> = doc
+                    .lines()
+                    .map(|line| {
+                        let line = line.trim_start().trim_start_matches('/');
+                        line.strip_prefix(' ').unwrap_or(line)
+                    })
+                    .collect();
+                (self.tokens[at].span().start(), lines.join("\n"))
+            })
+            .collect();
+        (
+            Ast::new(self.file_name, self.src, statements, docs),
+            self.errors,
+        )
     }
 
     /// The Ast, if the source parsed cleanly. What most callers want -- see [Self::into_ast]

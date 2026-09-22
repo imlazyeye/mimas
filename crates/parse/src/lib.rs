@@ -146,6 +146,7 @@ mod tests {
     mod utils;
 
     mod autogen_tok_tests;
+    mod docs_for;
     mod lex_tokens;
     mod node_at;
     mod parse_exprs;
