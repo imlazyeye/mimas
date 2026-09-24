@@ -39,16 +39,17 @@ impl MimasReg {
 
 inventory::collect!(MimasReg);
 
-/// A doc-comment harvested from a `#[native]` / `#[mimas]` item, submitted via [`inventory`] and
-/// keyed by the item's full Rust path (`concat!(module_path!(), "::", <ident>)`). The install path
-/// joins these onto the [`ApiFunction`]/[`ApiMethod`] it builds by matching the path against
-/// [`std::any::type_name_of_val`] of the registered fn, so the receiver/module -- known only at the
-/// `api.add_*` call site, not the macro -- never has to travel with the doc.
+/// A doc comment harvested from a `#[native]` fn, submitted via [`inventory`] and keyed by the
+/// item's full Rust path (`concat!(module_path!(), "::", <ident>)`). The install path joins these
+/// onto the [`ApiFunction`]/[`ApiMethod`] it builds by matching the path against
+/// [`std::any::type_name_of_val`] of the registered fn, since `#[native]` leaves the `api.add_*`
+/// call to the host. `#[mimas]` items don't come through here: their generated registration sets
+/// the doc directly.
 ///
 /// Like every inventory registry this is subject to the link-pruning footgun (a submission in an
-/// unreferenced object file can be dropped under `codegen-units > 1`). That only affects the
-/// doc-generation build, which we own and can pin to `codegen-units = 1`; missing a doc degrades to
-/// an empty string, never a wrong signature.
+/// unreferenced object file can be dropped under `codegen-units > 1`), so a `#[native]` fn in a
+/// dependency crate can lose its doc. A missing doc degrades to an empty string, never a wrong
+/// signature.
 pub struct NativeDoc {
     pub path: &'static str,
     pub doc: &'static str,
@@ -97,11 +98,11 @@ impl<'a, 'gc> Api<'a, 'gc> {
         f.install_method(self, name)
     }
 
-    pub fn add_method_named<F, Marker>(&mut self, name: impl Into<String>, f: F)
+    pub fn add_method_named<F, Marker>(&mut self, name: impl Into<String>, f: F) -> NativeId
     where
         F: IntoMethod<'gc, Marker>,
     {
-        f.install_method(self, name.into());
+        f.install_method(self, name.into())
     }
 
     /// Associated functions don't carry a `self` arg the macro can introspect, so the receiver
@@ -122,14 +123,14 @@ impl<'a, 'gc> Api<'a, 'gc> {
 
     /// [`Self::add_assoc`] with the receiver resolved from a registered adt -- what `#[mimas]
     /// impl` uses for `self`-less fns, whose generated shim name isn't the mimas-facing one.
-    pub fn add_assoc_of<T, F, Marker>(&mut self, name: impl Into<String>, f: F)
+    pub fn add_assoc_of<T, F, Marker>(&mut self, name: impl Into<String>, f: F) -> NativeId
     where
         T: MimasType<'gc>,
         F: IntoFn<'gc, Marker>,
     {
         let recv_ty =
             T::mimas_ty(self.library.registry()).expect("assoc receiver must be a registered adt");
-        f.install_assoc(self, recv_ty, name.into());
+        f.install_assoc(self, recv_ty, name.into())
     }
 
     pub fn mark_intrinsic(&mut self, nid: NativeId, i: Intrinsic) {
@@ -362,7 +363,7 @@ impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
 pub trait IntoFn<'gc, Marker>: Copy + 'static {
     fn install(self, api: &mut Api<'_, 'gc>, name: String, module: Vec<String>) -> NativeId;
 
-    fn install_assoc(self, api: &mut Api<'_, 'gc>, recv_ty: Ty, name: String);
+    fn install_assoc(self, api: &mut Api<'_, 'gc>, recv_ty: Ty, name: String) -> NativeId;
 }
 
 pub trait IntoMethod<'gc, Marker>: Copy + 'static {
@@ -399,7 +400,7 @@ macro_rules! impl_into_fn {
             }
 
             #[allow(non_snake_case, unused_variables, unused_mut)]
-            fn install_assoc(self, api: &mut Api<'_, 'gc>, recv_ty: Ty, name: String) {
+            fn install_assoc(self, api: &mut Api<'_, 'gc>, recv_ty: Ty, name: String) -> NativeId {
                 let reg = api.library.registry();
                 let parameters = vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*];
                 let return_ty = <R as IntoNativeResult<'gc>>::return_ty(reg);
@@ -422,6 +423,7 @@ macro_rules! impl_into_fn {
                     call: (),
                 });
                 api.store_native(id, native);
+                id
             }
         }
     };

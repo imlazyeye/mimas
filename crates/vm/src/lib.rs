@@ -34,3 +34,6 @@ pub use conversion::{Arg, Args};
 // crate has to be reachable through `vm`. re-exporting it here means downstream crates that
 // author natives only need a `vm` dependency, never a direct `inventory` one.
 pub use ::inventory;
+
+#[cfg(feature = "export-api")]
+pub mod export;

@@ -99,10 +99,11 @@ fn expand_mimas(attr: TokenStream, item: TokenStream) -> Result<TokenStream2, sy
 
     match syn::parse::<syn::Item>(item)? {
         syn::Item::Fn(mut function) => {
-            let submission = doc_submission(&function.sig.ident, &collect_doc(&function.attrs));
+            let doc = collect_doc(&function.attrs);
             convert::expand_conversion(&mut function)?;
-            let registration = register::fn_registration(&function.sig.ident, module.as_deref());
-            Ok(quote!(#function #registration #submission))
+            let registration =
+                register::fn_registration(&function.sig.ident, module.as_deref(), &doc);
+            Ok(quote!(#function #registration))
         }
         // struct / enum: emit the same impls the derives would (so don't *also* `#[derive]`
         // them) plus the `add_adt` submission

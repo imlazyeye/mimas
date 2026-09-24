@@ -55,6 +55,17 @@ pub use macros::{MimasEnum, MimasStruct, mimas, native};
 pub use shared::{Literal, Ty};
 pub use vm::{Ctx, Val, Vm, api::Api};
 
+/// A host run from its cargo target dir already writes `target/mimas/api.json`. Call this to
+/// put the manifest somewhere else, like a copy committed for modders.
+///
+/// ```no_run
+/// let library = mimas::Vm::new().install_library(mimas::library::std);
+/// mimas::write_api(&library, "scripts/api.json".as_ref())?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+#[cfg(feature = "export-api")]
+pub use vm::export::write_api;
+
 /// Compiles the given source with mimas's std included.
 pub fn compile_source(source: &str) -> Result<vm::Vm, vm::ExecuteError> {
     vm::Vm::compile(source, library::std)

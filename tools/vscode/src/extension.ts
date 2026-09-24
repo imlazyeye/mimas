@@ -1,10 +1,30 @@
 import { existsSync } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
-import { ExtensionContext, window, workspace } from "vscode";
+import { delimiter, isAbsolute, join, relative } from "node:path";
+import { commands, ConfigurationTarget, ExtensionContext, window, workspace } from "vscode";
 import { LanguageClient, TransportKind } from "vscode-languageclient/node";
 
+let client: LanguageClient | undefined;
+
 export function activate(context: ExtensionContext) {
-    const command = workspace.getConfiguration("mimas").get<string>("serverPath", "mimas-lsp");
+    context.subscriptions.push(
+        commands.registerCommand("mimas.restartServer", restartServer),
+        commands.registerCommand("mimas.selectApiManifest", selectApiManifest),
+        workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration("mimas.apiPath") || e.affectsConfiguration("mimas.serverPath")) {
+                restartServer();
+            }
+        }),
+    );
+    startServer();
+}
+
+export function deactivate() {
+    return client?.stop();
+}
+
+function startServer() {
+    const config = workspace.getConfiguration("mimas");
+    const command = config.get<string>("serverPath", "mimas-lsp");
     if (!findExecutable(command)) {
         window.showWarningMessage(
             `mimas: language server \`${command}\` not found, so only syntax highlighting is on. ` +
@@ -12,14 +32,45 @@ export function activate(context: ExtensionContext) {
         );
         return;
     }
-    const client = new LanguageClient(
+    client = new LanguageClient(
         "mimas",
         "mimas",
         { command, transport: TransportKind.stdio },
-        { documentSelector: [{ scheme: "file", language: "mimas" }] },
+        {
+            documentSelector: [{ scheme: "file", language: "mimas" }],
+            initializationOptions: {
+                apiPath: config.get<string>("apiPath") || undefined,
+            },
+        },
     );
-    context.subscriptions.push(client);
     client.start().catch((e) => window.showErrorMessage(`mimas: language server failed to start: ${e}`));
+}
+
+async function restartServer() {
+    const old = client;
+    client = undefined;
+    // a server that never started refuses to stop
+    await old?.dispose().catch(() => {});
+    startServer();
+}
+
+// saved relative to the workspace folder when it's inside one, so the setting survives a moved checkout
+async function selectApiManifest() {
+    const root = workspace.workspaceFolders?.[0]?.uri;
+    const picked = await window.showOpenDialog({
+        defaultUri: root,
+        canSelectMany: false,
+        filters: { "API manifest": ["json"] },
+        openLabel: "Use Manifest",
+    });
+    if (!picked?.[0]) {
+        return;
+    }
+    const path = picked[0].fsPath;
+    const inRoot = root && relative(root.fsPath, path);
+    const value = inRoot && !inRoot.startsWith("..") && !isAbsolute(inRoot) ? inRoot : path;
+    const target = root ? ConfigurationTarget.Workspace : ConfigurationTarget.Global;
+    await workspace.getConfiguration("mimas").update("apiPath", value, target);
 }
 
 // a path is checked where the server will be spawned from (the workspace folder), a bare name on PATH

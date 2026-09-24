@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use api::Library;
+use api::{ApiEntry, Library, NativeId};
 use indexmap::IndexMap;
 use lsp_types::*;
 use parse::{
@@ -12,7 +12,7 @@ use parse::{
     lex::{Lexer, TokKind},
     walk_stmts,
 };
-use shared::{FileId, Span, Ty};
+use shared::{AdtId, FileId, Span, Ty};
 use solve::{Resolutions, ResolvedDeclKind, Solver, components::DecId};
 
 use crate::source_file::SourceFile;
@@ -55,7 +55,7 @@ impl Analysis {
         Self { files, resolutions }
     }
 
-    pub fn hover(&self, path: &Path, position: Position) -> Option<Hover> {
+    pub fn hover(&self, path: &Path, position: Position, library: &Library<()>) -> Option<Hover> {
         let resolutions = self.resolutions.as_ref().ok()?;
         let file = self.files.get(path)?;
         let offset = file.offset(position)?;
@@ -96,11 +96,51 @@ impl Analysis {
                 }
             }
         };
-        let docs = dec_id.and_then(|dec| {
-            let declared = resolutions.decs[dec].location;
-            let (_, declaring) = self.files.get_index(declared.file_id)?;
-            declaring.docs(declared.span)
-        });
+        let adt_doc = |aid: AdtId| {
+            let adt = library.adts().iter().find(|adt| adt.adt_id == aid)?;
+            Some(adt.doc.as_str())
+        };
+        let native_doc = |native: NativeId| {
+            let (_, entry) = library.natives().find(|(id, _)| *id == native)?;
+            Some(match entry {
+                ApiEntry::Function(f) => f.doc.as_str(),
+                ApiEntry::Method(m) => m.doc.as_str(),
+                ApiEntry::Constant(c) => c.doc.as_str(),
+            })
+        };
+        // host items are declared in rust, so their docs come from the library instead
+        let host_docs = match dec_id.map(|dec| (dec, &resolutions.decs[dec].kind)) {
+            Some((
+                _,
+                ResolvedDeclKind::Item {
+                    native: Some(native),
+                    ..
+                },
+            )) => native_doc(*native),
+            Some((dec, ResolvedDeclKind::Constant(_))) => resolutions
+                .native_constants
+                .get(&dec)
+                .and_then(|native| native_doc(*native)),
+            Some((_, ResolvedDeclKind::Adt(aid))) => adt_doc(*aid),
+            Some((_, ResolvedDeclKind::Variant { parent, layout })) => library
+                .adts()
+                .iter()
+                .find(|adt| adt.adt_id == *parent)
+                .and_then(|adt| adt.variants.iter().find(|v| v.layout_id == *layout))
+                .map(|variant| variant.doc.as_str()),
+            None => match ty {
+                Ty::Adt(aid) => adt_doc(*aid),
+                _ => None,
+            },
+            _ => None,
+        };
+        let docs = dec_id
+            .and_then(|dec| {
+                let declared = resolutions.decs[dec].location;
+                let (_, declaring) = self.files.get_index(declared.file_id)?;
+                declaring.docs(declared.span)
+            })
+            .or(host_docs.filter(|doc| !doc.is_empty()));
         let value = match docs {
             Some(docs) => format!("```mimas\n{text}\n```\n\n---\n\n{docs}"),
             None => format!("```mimas\n{text}\n```"),

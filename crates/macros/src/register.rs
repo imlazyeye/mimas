@@ -24,12 +24,23 @@ pub fn submission(unique: &Ident, phase: TokenStream2, add: TokenStream2) -> Tok
     }
 }
 
-pub fn fn_registration(fn_ident: &Ident, module: Option<&str>) -> TokenStream2 {
+pub fn fn_registration(fn_ident: &Ident, module: Option<&str>, doc: &str) -> TokenStream2 {
     let add = match module {
-        Some(path) => quote!(api.module(#path).add(#fn_ident);),
-        None => quote!(api.add(#fn_ident);),
+        Some(path) => quote!(api.module(#path).add(#fn_ident)),
+        None => quote!(api.add(#fn_ident)),
     };
-    submission(fn_ident, quote!(PHASE_FN), add)
+    submission(fn_ident, quote!(PHASE_FN), documented(add, doc))
+}
+
+/// `add` is an expression yielding the new entry's `NativeId`.
+pub fn documented(add: TokenStream2, doc: &str) -> TokenStream2 {
+    if doc.is_empty() {
+        return quote!(#add;);
+    }
+    quote! {
+        let __id = #add;
+        api.library.set_doc(__id, #doc);
+    }
 }
 
 pub fn adt_registration(type_ident: &Ident, module: Option<&str>) -> TokenStream2 {

@@ -40,3 +40,4 @@ gc-arena = "0.7"
 miette = { version = "7.6", features = ["fancy"] }
 thiserror = "1"
 walkdir = "2"
+serde = { version = "1", features = ["derive"] }

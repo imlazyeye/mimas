@@ -4,10 +4,14 @@ use shared::IdVec;
 
 use crate::{ApiAdt, ApiConstant, ApiEntry, ApiFunction, ApiMethod, Intrinsic, NativeId, Registry};
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound(deserialize = "C: Default")))]
 pub struct Library<C> {
     natives: IdVec<NativeId, ApiEntry<C>>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     intrinsics: HashMap<NativeId, Intrinsic>,
     adts: Vec<ApiAdt>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     registry: Registry,
 }
 
@@ -55,6 +59,15 @@ impl<C> Library<C> {
 
     pub fn constant(&mut self, c: ApiConstant) -> NativeId {
         self.natives.push(ApiEntry::Constant(c))
+    }
+
+    pub fn set_doc(&mut self, id: NativeId, doc: impl Into<String>) {
+        let doc = doc.into();
+        match &mut self.natives[id] {
+            ApiEntry::Function(f) => f.doc = doc,
+            ApiEntry::Method(m) => m.doc = doc,
+            ApiEntry::Constant(c) => c.doc = doc,
+        }
     }
 
     pub fn mark_instrinsic(&mut self, nid: NativeId, i: Intrinsic) {

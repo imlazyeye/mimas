@@ -21,6 +21,7 @@ pub struct Resolutions {
     pub pact_names: IdVec<PactId, String>,
     pub module_paths: HashMap<AdtId, Vec<String>>,
     pub closure_captures: IndexMap<NodeId, Vec<DecId>>,
+    pub native_constants: HashMap<DecId, NativeId>,
     pub root: ResolvedModule,
     pub sources: HashMap<FileId, NamedSource<Arc<str>>>,
 }
@@ -312,6 +313,7 @@ impl From<Solver> for Resolutions {
             pact_names,
             module_paths: paths,
             closure_captures,
+            native_constants: solver.native_constants,
             root,
             sources: solver.sources,
         }

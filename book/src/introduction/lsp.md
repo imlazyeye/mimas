@@ -1,13 +1,9 @@
 # Language Server
 
 mimas ships a language server to use in the editor of your choice. It is still very young but offers
-diagnostics, hover, navigation, rename, outlines, and inlay hints for scripting use.
-
-```admonish warning title="Host types are not yet seen"
-The server only knows the standard library. If your scripts use functions or types that a Rust
-host provides, it will report them as errors and give you little else. See
-[what it does not support](#what-it-does-not-support).
-```
+diagnostics, hover, navigation, rename, outlines, and inlay hints for scripting use. Scripts that
+use a Rust host's functions and types are checked against that host's API once it has run -- see
+[Host APIs](#host-apis).
 
 ## What it supports
 
@@ -22,7 +18,8 @@ compiler however you use it). This will be improved in future releases.
 ### Hover
 
 Hovering a name shows what it is and what type it has. If its declaration has a `///` doc comment,
-that shows underneath.
+that shows underneath. For a function or type a Rust host registers, that's the `///` on the Rust
+item.
 
 | You hover | You get |
 | --- | --- |
@@ -74,23 +71,17 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 
 ## What it does not support
 
-- **Only the standard library is known.** The server can't see the functions, types, and
-  constants a host registers from Rust (through `#[mimas]`, the Bevy plugin, or by hand), so a
-  script that uses them gets an undefined-name error at the first one. Because the solver stops at
-  its first error (see below), that also leaves the rest of the project without type information.
-  For now the server is only useful for scripts that stick to `std`.
 - **The solver is not resilient.** This means that any error will cut off type information and
   you'll be left with only that error in the editor. Everything but diagnostics and the outline
   goes quiet until the project checks cleanly again, which you'll notice most while mid-keystroke.
 - **No completion, formatting, signature help, or code actions.** These are the obvious next
   steps, but none of them exist today.
-- **Navigation stops at the language boundary.** Natives from the standard library, builtin types
-  like `int`, and module names have no mimas source to jump to, so nothing happens. This will come
-  in the future.
-- **A project is a directory.** The server walks up from the file you opened to the nearest
-  directory holding a script and treats that as the project: its scripts at the top, its modules
-  anywhere below, the way `mimas check` does. A module with no script above it is checked with
-  the modules beside it.
+- **Navigation stops at the language boundary.** Natives from the standard library or a host,
+  builtin types like `int`, and module names have no mimas source to jump to, so nothing happens.
+  We will support navigating to the Rust definition in the future.
+- **One host per workspace.** The server loads a single file, found from the first workspace
+  folder. A workspace whose crates embed mimas with different APIs, or several workspace folders,
+  all share it.
 
 ## Setting it up
 
@@ -122,4 +113,35 @@ vim.lsp.config.mimas = {
     root_markers = { "Cargo.toml", ".git" },
 }
 vim.lsp.enable("mimas")
+```
+
+### Host APIs
+
+When a Rust host embeds mimas, its scripts use the functions, types, and constants it registers.
+The server learns about those from a file the host writes. Running the host from its cargo target
+dir writes its API to `target/mimas/api.json`, which the server finds by asking `cargo` where your
+target dir is. You'll be notified if it can't find that file. After you change the host's API, run
+it again, and diagnostics pick up the change on your next edit.
+
+- The host and the server have to be the same version of mimas. On a mismatch, the server shows a
+  warning and falls back to the standard library alone.
+- To turn the automatic write off, depend on `mimas` with `default-features = false`.
+- Only a binary running from inside a cargo target dir writes the file automatically, so a shipped
+  build never does, and neither do test or bench builds. If you want to export it yourself (e.g.
+  for modding support), call `mimas::write_api`.
+
+```rust
+let library = mimas::Vm::new().install_library(mimas::library::std);
+mimas::write_api(&library, "scripts/api.json".as_ref())?;
+```
+
+In VS Code, the `mimas.apiPath` setting points the server at a different file (relative to the
+workspace folder), or turns it off with `off`, which leaves the standard library alone. The
+**mimas: Select Host API Manifest** command sets it with a file dialog, and **mimas: Restart
+Language Server** restarts the server, which also happens on its own when the setting changes.
+Other editors pass the same value as `apiPath` in the server's initialization options. In Neovim,
+add it to the config above:
+
+```lua
+init_options = { apiPath = "path/to/api.json" },
 ```

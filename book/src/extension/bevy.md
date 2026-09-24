@@ -108,6 +108,8 @@ bevy::update(move_along);
 
 `Velocity` reaches the script without being registered for it. Any component or resource that derives bevy's `Reflect` with `#[reflect(Component)]` or `#[reflect(Resource)]` is reachable as long as mimas can represent its fields. Bevy's own types live in a `bevy` module, like `bevy::Transform` and `bevy::Visibility`, and your app's types sit at the root.
 
+Running the app through cargo also writes these types out for the [language server](../introduction/lsp.md#host-apis), so hovering `Velocity` in a script shows its `///` docs, and Bevy's own types show theirs.
+
 ## Scripts and modules
 
 `MimasPlugin::default()` loads every `.mim` file under `assets/scripts` at startup. `MimasPlugin::folder(path)` loads another folder instead, and `MimasPlugin::new([path, ..])` loads just the scripts you name, which is what a web build needs, since a folder can't be listed over HTTP. A file that starts with a `module` declaration compiles into every other script and never runs on its own. Every other file compiles into its own Vm, shared by the entities whose `Script` points at it.

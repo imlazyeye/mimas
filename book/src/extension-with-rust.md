@@ -19,8 +19,8 @@ print(roll(20));
 
 Nothing about this is dynamic: the signature you write in Rust becomes the signature the mimas compiler enforces at every call site, so a script that misuses your API fails to compile rather than failing at runtime.
 
-```admonish warning title="The language server doesn't see your API yet"
-The [language server](./introduction/lsp.md) only knows the standard library, so in your editor, scripts that use anything you register from Rust will show errors that aren't real. The compiler inside your host still checks them correctly.
+```admonish note title="Your API in the editor"
+The [language server](./introduction/lsp.md) checks scripts against your API once your host has run through cargo. See [Host APIs](./introduction/lsp.md#host-apis).
 ```
 
 | Page | Covers |

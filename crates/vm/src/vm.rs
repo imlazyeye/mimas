@@ -1649,6 +1649,8 @@ impl Vm {
     {
         let mut vm = Self::new();
         let library = vm.install_library(install_lib);
+        #[cfg(feature = "export-api")]
+        crate::export::auto_export(&library);
         let (program, sources) = Self::build_program(files, &library)?;
 
         vm.load_program(program);

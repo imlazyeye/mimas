@@ -43,6 +43,7 @@ pub struct Solver {
     pub(crate) sources: HashMap<FileId, NamedSource<Arc<str>>>,
 
     pub(crate) dec_to_native: HashMap<DecId, NativeBinding>,
+    pub(crate) native_constants: HashMap<DecId, NativeId>,
 
     pub(crate) control_flow: ControlFlow,
     pub(crate) ribs: Ribs,
@@ -77,6 +78,7 @@ impl Solver {
             module_items: IndexMap::new(),
             sources: HashMap::new(),
             dec_to_native: HashMap::new(),
+            native_constants: HashMap::new(),
             non_value: None,
         };
         solver.ribs.push_import();
@@ -1077,6 +1079,7 @@ impl Solver {
                         DecKind::Constant(Some(lit)),
                         Vis::Public,
                     );
+                    self.native_constants.insert(dec_id, id);
                     // an assoc constant (`Player::MAX_HEALTH`) lands in the adt's impls,
                     // same slot a lang `impl` const hoists into
                     if let Some(recv) = &c.recv_ty {

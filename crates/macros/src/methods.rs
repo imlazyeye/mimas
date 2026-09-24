@@ -1,4 +1,8 @@
-use crate::{collect_doc, convert::expand_conversion, doc_submission, register::submission};
+use crate::{
+    collect_doc,
+    convert::expand_conversion,
+    register::{documented, submission},
+};
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
@@ -33,9 +37,8 @@ pub fn expand_impl(block: ItemImpl) -> Result<TokenStream2, syn::Error> {
         match item {
             ImplItem::Fn(method) => {
                 let (shim, add) = method_shim(&self_ident, method)?;
-                let doc = doc_submission(&shim.sig.ident, &collect_doc(&method.attrs));
-                out.extend(quote!(#shim #doc));
-                adds.extend(add);
+                out.extend(quote!(#shim));
+                adds.extend(documented(add, &collect_doc(&method.attrs)));
             }
             ImplItem::Const(c) => {
                 let ident = &c.ident;
@@ -64,8 +67,8 @@ pub fn expand_impl(block: ItemImpl) -> Result<TokenStream2, syn::Error> {
     Ok(quote!(#block #out #registration))
 }
 
-/// One method's shim plus its `api.add_*` call. The shim's signature is the method's minus
-/// `self` (with `Self` spelled concretely), run through the shared conversion, with the
+/// One method's shim plus its `api.add_*` call expression. The shim's signature is the method's
+/// minus `self` (with `Self` spelled concretely), run through the shared conversion, with the
 /// receiver inserted after ctx; its body delegates via UFCS.
 fn method_shim(
     self_ident: &Ident,
@@ -171,9 +174,9 @@ fn method_shim(
 
     let shim_ident = &shim.sig.ident;
     let add = if receiver.is_some() {
-        quote!(api.add_method_named(#name_str, #shim_ident);)
+        quote!(api.add_method_named(#name_str, #shim_ident))
     } else {
-        quote!(api.add_assoc_of::<#self_ident, _, _>(#name_str, #shim_ident);)
+        quote!(api.add_assoc_of::<#self_ident, _, _>(#name_str, #shim_ident))
     };
     Ok((shim, add))
 }

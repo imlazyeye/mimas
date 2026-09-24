@@ -30,6 +30,7 @@ bevy = { version = "0.19.1", default-features = false, features = [
     "keyboard",
     "mouse",
     "reflect_auto_register",
+    "reflect_documentation",
 ] }
 
 [dev-dependencies]
