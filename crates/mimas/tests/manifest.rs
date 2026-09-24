@@ -79,7 +79,7 @@ fn round_trip(library: &Library<()>) -> Library<()> {
 }
 
 fn errors(source: &str, library: &Library<()>) -> Vec<String> {
-    solve::Loaded::from_files([("main.mim", source)], library)
+    solve::Modules::from_files([("main.mim", source)], library)
         .errors
         .iter()
         .map(|e| format!("{e:?}"))
@@ -210,7 +210,7 @@ fn target_dir_needs_a_cargo_target() {
 #[test]
 fn host_constants_link_to_their_entry() {
     let library = round_trip(&installed());
-    let loaded = solve::Loaded::from_files([("main.mim", HOST_SCRIPT)], &library);
+    let loaded = solve::Modules::from_files([("main.mim", HOST_SCRIPT)], &library);
     assert!(loaded.errors.is_empty());
     let resolutions = solve::Resolutions::from(loaded.solver);
     let (dec, _) = resolutions
