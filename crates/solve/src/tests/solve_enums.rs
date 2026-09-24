@@ -214,3 +214,20 @@ test_fail!(
     "enum E { A } let e = E::B {};",
     "enum E { A(int) } let e = E::Z(0);",
 );
+
+test_fail!(
+    tuple_index_on_enum,
+    "enum Foo { Fizz(int), Buzz }
+    impl Foo {
+        fn test(self) -> bool {
+            0 == self.0
+        }
+    }",
+    "enum Foo { Fizz(int) } let f = Foo::Fizz(0); let x = f.0;",
+);
+
+test_fail!(
+    field_access_on_enum,
+    "enum Foo { A { x: int }, B } let f = Foo::A { x = 0 }; let x = f.x;",
+    "enum Foo { A { x: int } } let f = Foo::A { x = 0 }; let x = f.x;",
+);
