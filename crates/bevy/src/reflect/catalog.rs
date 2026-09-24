@@ -74,9 +74,9 @@ impl Catalog {
             let reflected = &self.types[id];
             let info = reflected.info;
             let binding = api.add_adt_described(*id, |registry| {
-                let variant = |name: &str, members: Members| ApiVariantShape {
+                let variant = |name: &str, doc: &'static str, members: Members| ApiVariantShape {
                     name: name.to_string(),
-                    doc: "",
+                    doc,
                     fields: match members {
                         Members::Unit => ApiVariantFields::Unit,
                         Members::Tuple(_) => ApiVariantFields::Tuple(
@@ -101,19 +101,25 @@ impl Catalog {
                         variants
                             .iter()
                             .enumerate()
-                            .map(|(i, v)| variant(v.name(), Members::of(info, i).expect(TAKEN)))
+                            .map(|(i, v)| {
+                                variant(
+                                    v.name(),
+                                    v.docs().unwrap_or_default(),
+                                    Members::of(info, i).expect(TAKEN),
+                                )
+                            })
                             .collect(),
                     ),
                     _ => (
                         ApiAdtKind::Struct,
-                        vec![variant("@", Members::of(info, 0).expect(TAKEN))],
+                        vec![variant("@", "", Members::of(info, 0).expect(TAKEN))],
                     ),
                 };
                 ApiAdtDescriptor {
                     name: name(info),
                     module: module(info),
                     kind,
-                    doc: "",
+                    doc: info.docs().unwrap_or_default(),
                     variants,
                 }
             });

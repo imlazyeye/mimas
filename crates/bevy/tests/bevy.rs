@@ -53,6 +53,7 @@ struct Mask(u64);
 /// A variant of each kind.
 #[derive(Reflect, Default, PartialEq, Debug)]
 enum Mood {
+    /// Nothing's wrong.
     #[default]
     Calm,
     Hurt(i64),
@@ -889,5 +890,37 @@ fn bevy_crates_cover_the_registry() {
     assert!(
         missing.is_empty(),
         "add these to `BEVY_CRATES`: {missing:?}"
+    );
+}
+
+#[test]
+fn reflected_docs_reach_the_library() {
+    static DOCS: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+    let (mut app, _, _script) = scripted(COUNT_UP);
+    app.script_installer(|api| {
+        let mut docs = DOCS.lock().unwrap();
+        for adt in api.library.adts() {
+            docs.push((adt.name.clone(), adt.doc.clone()));
+            for variant in &adt.variants {
+                let name = format!("{}::{}", adt.name, variant.name);
+                docs.push((name, variant.doc.clone()));
+            }
+        }
+    });
+    run_ok(&mut app, 3);
+
+    let docs = DOCS.lock().unwrap();
+    let doc = |name: &str| {
+        docs.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, d)| d.as_str())
+    };
+    assert_eq!(doc("Counter"), Some(" A component scripts count with."));
+    assert_eq!(doc("Mood::Calm"), Some(" Nothing's wrong."));
+    assert_eq!(doc("Mood::Hurt"), Some(""));
+    assert!(
+        doc("Transform")
+            .unwrap()
+            .starts_with(" Describe the position of an entity")
     );
 }
