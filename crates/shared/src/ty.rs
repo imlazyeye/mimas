@@ -16,6 +16,7 @@ pub const INTERNAL_TY_MARKER: &str = "?mimas<";
 /// Every type that mimas works off of. Check the [book](https://mim.as/reference/basic-types.html)
 /// for more details.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Ty {
     /// The unit type, written `()`: truly nothing, the result of an expression that was never
     /// going to hand back a value. An empty block, a `for` loop, and a function with no return all
@@ -244,6 +245,7 @@ pub struct Pact {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnParam {
     /// Source-level name when available (fn definitions). `None` for closures, natives,
     /// and types derived purely by inference where there's no declaration to read.
@@ -263,6 +265,7 @@ impl FnParam {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnHeader {
     pub parameters: Vec<FnParam>,
     pub return_ty: Box<Ty>,

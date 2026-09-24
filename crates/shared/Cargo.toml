@@ -18,3 +18,7 @@ mutants.workspace = true
 miette.workspace = true
 chompy.workspace = true
 indexmap.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+serde = ["dep:serde"]

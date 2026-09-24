@@ -4,10 +4,14 @@ use shared::IdVec;
 
 use crate::{ApiAdt, ApiConstant, ApiEntry, ApiFunction, ApiMethod, Intrinsic, NativeId, Registry};
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound(deserialize = "C: Default")))]
 pub struct Library<C> {
     natives: IdVec<NativeId, ApiEntry<C>>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     intrinsics: HashMap<NativeId, Intrinsic>,
     adts: Vec<ApiAdt>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     registry: Registry,
 }
 

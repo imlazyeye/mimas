@@ -215,3 +215,44 @@ macro_rules! id {
         )*
     }
 }
+
+#[cfg(feature = "serde")]
+mod serde_impls {
+    use super::{Id, IdVec};
+    use crate::{AdtId, PactId, Vid};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    macro_rules! serde_id {
+        ($($name:ident),*) => {
+            $(
+                impl Serialize for $name {
+                    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                        u32::from(*self).serialize(serializer)
+                    }
+                }
+
+                impl<'de> Deserialize<'de> for $name {
+                    fn deserialize<D: Deserializer<'de>>(
+                        deserializer: D,
+                    ) -> Result<Self, D::Error> {
+                        u32::deserialize(deserializer).map(Self::from)
+                    }
+                }
+            )*
+        };
+    }
+
+    serde_id!(AdtId, PactId, Vid);
+
+    impl<I: Id, T: Serialize> Serialize for IdVec<I, T> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.inner.serialize(serializer)
+        }
+    }
+
+    impl<'de, I: Id, T: Deserialize<'de>> Deserialize<'de> for IdVec<I, T> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Vec::deserialize(deserializer).map(Self::from)
+        }
+    }
+}

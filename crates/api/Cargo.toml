@@ -14,3 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
+serde = { workspace = true, optional = true }
+
+[features] 
+serde = ["dep:serde", "shared/serde"]
