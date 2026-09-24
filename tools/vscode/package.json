@@ -112,13 +112,30 @@
                 ]
             }
         ],
+        "commands": [
+            {
+                "command": "mimas.restartServer",
+                "title": "Restart Language Server",
+                "category": "mimas"
+            },
+            {
+                "command": "mimas.selectApiManifest",
+                "title": "Select Host API Manifest",
+                "category": "mimas"
+            }
+        ],
         "configuration": {
             "title": "mimas",
             "properties": {
                 "mimas.serverPath": {
                     "type": "string",
                     "default": "mimas-lsp",
-                    "description": "Path to the mimas language server executable. Restart the extension host after changing it."
+                    "description": "Path to the mimas language server executable."
+                },
+                "mimas.apiPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "The host API manifest a Rust host writes when run from its cargo target dir. Relative paths start from the workspace folder, empty means mimas/api.json in the cargo target dir, and off means std only. \"mimas: Select Host API Manifest\" picks one with a file dialog."
                 },
                 "mimas.trace.server": {
                     "type": "string",

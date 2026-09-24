@@ -7,7 +7,7 @@ use api::Library;
 use indexmap::{IndexMap, IndexSet};
 use lsp_types::{Diagnostic, Uri};
 
-use crate::{analysis::Analysis, project::Project};
+use crate::{analysis::Analysis, host_api::std_library, project::Project};
 
 /// Every project the editor has touched, by root directory, and the text of every open file.
 pub struct Workspace {
@@ -19,7 +19,7 @@ pub struct Workspace {
 impl Default for Workspace {
     fn default() -> Self {
         Self {
-            library: vm::Vm::new().install_library(library::std),
+            library: std_library(),
             open: HashMap::new(),
             projects: HashMap::new(),
         }

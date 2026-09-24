@@ -30,7 +30,7 @@ pub fn write_api(library: &Library<()>, path: &Path) -> std::io::Result<()> {
 
     // No need to write this if it's the same as last time
     if let Ok(data) = std::fs::read(path)
-        && data == output
+    && data == output
     {
         return Ok(());
     }

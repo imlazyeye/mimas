@@ -1,20 +1,28 @@
+use crate::{host_api::HostApi, workspace::Workspace};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::*;
 use serde::{Serialize, de::DeserializeOwned};
-
-use crate::workspace::Workspace;
+use std::path::PathBuf;
 
 pub struct Server<'a> {
     connection: &'a Connection,
     workspace: Workspace,
+    host_api: HostApi,
 }
 
 impl<'a> Server<'a> {
-    pub fn new(connection: &'a Connection) -> Self {
-        Self {
+    pub fn new(
+        connection: &'a Connection,
+        api_path: Option<PathBuf>,
+        expect_api: bool,
+    ) -> anyhow::Result<Self> {
+        let mut server = Self {
             connection,
             workspace: Workspace::default(),
-        }
+            host_api: HostApi::new(api_path, expect_api),
+        };
+        server.refresh_library()?;
+        Ok(server)
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
@@ -124,6 +132,7 @@ impl<'a> Server<'a> {
         let Ok(path) = uri.to_file_path() else {
             return Ok(());
         };
+        self.refresh_library()?;
         for (uri, diagnostics) in self.workspace.update(&path, text) {
             self.publish_diagnostics(uri, diagnostics)?;
         }
@@ -200,6 +209,27 @@ impl<'a> Server<'a> {
     fn symbols(&self, params: DocumentSymbolParams) -> Option<Vec<DocumentSymbol>> {
         let path = params.text_document.uri.to_file_path().ok()?;
         self.workspace.analysis(&path)?.symbols(&path)
+    }
+
+    /// Swaps in the host's API when its manifest has changed since the last look.
+    fn refresh_library(&mut self) -> anyhow::Result<()> {
+        let (library, message) = self.host_api.refresh();
+        if let Some(library) = library {
+            self.workspace.library = library;
+        }
+        if let Some((kind, message)) = message {
+            self.show_message(kind, message)?;
+        }
+        Ok(())
+    }
+
+    fn show_message(&self, kind: MessageType, message: String) -> anyhow::Result<()> {
+        let note = Notification::new(
+            LspNotificationMethod::WindowShowMessage.as_str().to_owned(),
+            ShowMessageParams { kind, message },
+        );
+        self.connection.sender.send(Message::Notification(note))?;
+        Ok(())
     }
 
     fn publish_diagnostics(

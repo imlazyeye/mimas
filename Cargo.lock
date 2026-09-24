@@ -2446,6 +2446,7 @@ dependencies = [
  "mimas-shared",
  "mimas-solve",
  "mimas-vm",
+ "serde_json",
 ]
 
 [[package]]
