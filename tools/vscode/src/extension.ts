@@ -4,8 +4,10 @@ import { commands, ConfigurationTarget, ExtensionContext, window, workspace } fr
 import { LanguageClient, TransportKind } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
+let extensionPath = "";
 
 export function activate(context: ExtensionContext) {
+    extensionPath = context.extensionPath;
     context.subscriptions.push(
         commands.registerCommand("mimas.restartServer", restartServer),
         commands.registerCommand("mimas.selectApiManifest", selectApiManifest),
@@ -24,7 +26,7 @@ export function deactivate() {
 
 function startServer() {
     const config = workspace.getConfiguration("mimas");
-    const command = config.get<string>("serverPath", "mimas-lsp");
+    const command = config.get<string>("serverPath") || defaultServer();
     if (!findExecutable(command)) {
         window.showWarningMessage(
             `mimas: language server \`${command}\` not found, so only syntax highlighting is on. ` +
@@ -71,6 +73,12 @@ async function selectApiManifest() {
     const value = inRoot && !inRoot.startsWith("..") && !isAbsolute(inRoot) ? inRoot : path;
     const target = root ? ConfigurationTarget.Workspace : ConfigurationTarget.Global;
     await workspace.getConfiguration("mimas").update("apiPath", value, target);
+}
+
+// the platform-specific builds of the extension ship the server, the universal one doesn't
+function defaultServer(): string {
+    const bundled = join(extensionPath, "server", process.platform === "win32" ? "mimas-lsp.exe" : "mimas-lsp");
+    return existsSync(bundled) ? bundled : "mimas-lsp";
 }
 
 // a path is checked where the server will be spawned from (the workspace folder), a bare name on PATH

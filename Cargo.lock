@@ -2533,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-lsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "gen-lsp-types",
