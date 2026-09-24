@@ -12,6 +12,12 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Changed
 
+- **Breaking**: The project structure no longer utilizes a `main.mim` file.
+  - Scripts (files that don't declare a module) are individual executables and cannot see one another
+  - Scripts can see and use any module within its directory (including sub-direrctories)
+  - `mimas run <directory>` can still be used as long as your project as a singular script
+  - Projects with multiple scripts can still use `mimas run <script_file>`
+  - Scripts must be in the base folder to avoid complexity with module structure. This may be refined in the future based on feedback.
 - The parser now recovers from syntax errors, so the `mimas` CLI reports every syntax error in a file instead of stopping at the first. Embedding through the `mimas` crate still returns only the first.
 - Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint.
 

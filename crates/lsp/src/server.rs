@@ -1,40 +1,19 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
-
-use api::Library;
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
-use lsp_types::{
-    DefinitionParams, DefinitionRequest, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentHighlight, DocumentHighlightParams,
-    DocumentHighlightRequest, DocumentSymbol, DocumentSymbolParams, DocumentSymbolRequest, Hover,
-    HoverParams, HoverRequest, InlayHint, InlayHintParams, InlayHintRequest, Location,
-    LspNotificationMethod, PrepareRenameParams, PrepareRenameRequest, PublishDiagnosticsParams,
-    Range, ReferenceParams, ReferencesRequest, RenameParams, RenameRequest,
-    TextDocumentContentChangeEvent, Uri, WorkspaceEdit,
-};
+use lsp_types::*;
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::project::Project;
+use crate::workspace::Workspace;
 
 pub struct Server<'a> {
     connection: &'a Connection,
-    library: Library<()>,
-    /// The editor's text for every open file, which wins over what's on disk.
-    open: HashMap<PathBuf, String>,
-    /// Keyed by root (the directory holding `main.mim`, or the lone file itself).
-    projects: HashMap<PathBuf, Project>,
+    workspace: Workspace,
 }
 
 impl<'a> Server<'a> {
     pub fn new(connection: &'a Connection) -> Self {
-        let library = vm::Vm::new().install_library(library::std);
         Self {
             connection,
-            library,
-            open: HashMap::new(),
-            projects: HashMap::new(),
+            workspace: Workspace::default(),
         }
     }
 
@@ -145,29 +124,33 @@ impl<'a> Server<'a> {
         let Ok(path) = uri.to_file_path() else {
             return Ok(());
         };
-        match text {
-            Some(text) => self.open.insert(path.clone(), text),
-            None => self.open.remove(&path),
-        };
-        self.reanalyze(&path)
+        for (uri, diagnostics) in self.workspace.update(&path, text) {
+            self.publish_diagnostics(uri, diagnostics)?;
+        }
+        Ok(())
     }
 
     fn hover(&self, params: HoverParams) -> Option<Hover> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.project(&path)?.hover(&path, position.position)
+        self.workspace
+            .analysis(&path)?
+            .hover(&path, position.position)
     }
 
     fn definition(&self, params: DefinitionParams) -> Option<Location> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.project(&path)?.definition(&path, position.position)
+        self.workspace
+            .analysis(&path)?
+            .definition(&path, position.position)
     }
 
     fn prepare_rename(&self, params: PrepareRenameParams) -> Option<Range> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.project(&path)?
+        self.workspace
+            .analysis(&path)?
             .prepare_rename(&path, position.position)
     }
 
@@ -179,104 +162,44 @@ impl<'a> Server<'a> {
             .to_file_path()
             .map_err(|_| "that file isn't on disk".to_owned())?;
         let project = self
+            .workspace
             .project(&path)
             .ok_or("that file isn't part of a project")?;
-        project.rename(&path, position.position, &params.new_name, &self.library)
+        project.rename(
+            &path,
+            position.position,
+            &params.new_name,
+            &self.workspace.library,
+        )
     }
 
     fn inlay_hints(&self, params: InlayHintParams) -> Option<Vec<InlayHint>> {
         let path = params.text_document.uri.to_file_path().ok()?;
-        self.project(&path)?.inlay_hints(&path, params.range)
+        self.workspace
+            .analysis(&path)?
+            .inlay_hints(&path, params.range)
     }
 
     fn highlights(&self, params: DocumentHighlightParams) -> Option<Vec<DocumentHighlight>> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.project(&path)?.highlights(&path, position.position)
+        self.workspace
+            .analysis(&path)?
+            .highlights(&path, position.position)
     }
 
     fn references(&self, params: ReferenceParams) -> Option<Vec<Location>> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
         let with_declaration = params.context.include_declaration;
-        self.project(&path)?
+        self.workspace
+            .project(&path)?
             .references(&path, position.position, with_declaration)
     }
 
     fn symbols(&self, params: DocumentSymbolParams) -> Option<Vec<DocumentSymbol>> {
         let path = params.text_document.uri.to_file_path().ok()?;
-        self.project(&path)?.symbols(&path)
-    }
-
-    fn project(&self, path: &Path) -> Option<&Project> {
-        self.projects
-            .values()
-            .find(|project| project.files.contains_key(path))
-    }
-
-    /// Reloads the project `path` belongs to, dropping any project it used to belong to, and
-    /// publishes diagnostics for every file in it (and clears them for files that left).
-    fn reanalyze(&mut self, path: &Path) -> anyhow::Result<()> {
-        let root = path
-            .ancestors()
-            .skip(1)
-            .find(|dir| dir.join("main.mim").is_file())
-            .unwrap_or(path)
-            .to_path_buf();
-        let mut paths = if root == path {
-            vec![path.to_path_buf()]
-        } else {
-            solve::mim_files(&root).0
-        };
-        // open files aren't necessarily on disk yet, but are still part of the project
-        paths.extend(
-            self.open
-                .keys()
-                .filter(|open| open.starts_with(&root))
-                .cloned(),
-        );
-        paths.sort();
-        paths.dedup();
-
-        let files = paths
-            .into_iter()
-            .filter_map(|path| {
-                let text = match self.open.get(&path) {
-                    Some(text) => text.clone(),
-                    None => std::fs::read_to_string(&path).ok()?,
-                };
-                Some((path, text))
-            })
-            .collect();
-
-        // the projects this replaces: the one at this root, anything under it, and any other
-        // that had this file (its root moved). their files start with cleared diagnostics
-        let mut cleared: Vec<Uri> = Vec::new();
-        self.projects.retain(|key, project| {
-            let stale = key.starts_with(&root) || project.files.contains_key(path);
-            if stale {
-                cleared.extend(
-                    project
-                        .files
-                        .keys()
-                        .filter_map(|p| Uri::from_file_path(p).ok()),
-                );
-            }
-            !stale
-        });
-
-        let project = Project::load(files, &self.library);
-        for (uri, diagnostics) in project.diagnostics() {
-            cleared.retain(|c| *c != uri);
-            self.publish_diagnostics(uri, diagnostics)?;
-        }
-        for uri in cleared {
-            self.publish_diagnostics(uri, Vec::new())?;
-        }
-        if !project.files.is_empty() {
-            self.projects.insert(root, project);
-        }
-        Ok(())
+        self.workspace.analysis(&path)?.symbols(&path)
     }
 
     fn publish_diagnostics(

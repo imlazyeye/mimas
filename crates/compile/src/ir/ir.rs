@@ -53,7 +53,7 @@ impl Ir {
         r
     }
 
-    pub fn lower(&mut self, stmts: &[parse::Stmt]) {
+    pub fn lower<'a>(&mut self, stmts: impl IntoIterator<Item = &'a parse::Stmt>) {
         for stmt in stmts {
             self.stmt(stmt);
         }

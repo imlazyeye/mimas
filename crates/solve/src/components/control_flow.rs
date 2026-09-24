@@ -2,6 +2,7 @@ use shared::IdVec;
 
 shared::id!(pub FlowId);
 
+#[derive(Clone)]
 pub(crate) struct ControlFlow {
     flows: IdVec<FlowId, Flow>,
     flow_stack: Vec<FlowId>,

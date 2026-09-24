@@ -1,6 +1,8 @@
+mod analysis;
 mod project;
 mod server;
 mod source_file;
+mod workspace;
 
 use lsp_server::Connection;
 use lsp_types::{

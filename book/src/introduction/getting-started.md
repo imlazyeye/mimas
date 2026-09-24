@@ -18,10 +18,10 @@ mimas doesn't "build" to any compiled files, it just runs off of scripts. The bu
 
 ```sh
 mimas check my_script.mim # runs a script through the parsers/type checker
-mimas check my_project    # you can also check a directory recursively for all .mim files
+mimas check my_project    # checks every script at the top of a directory, each with the modules below
 
 mimas run my_script.mim   # executes a script
-mimas run my_project      # searches for the `main.mim` file and executes it
+mimas run my_project      # runs the directory's one script
 
 mimas my_script.mim       # you can also drop the "run" and just type "mimas"
 ```

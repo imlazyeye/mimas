@@ -27,14 +27,15 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Checks the validity of the provided directory of mimas code.
+    /// Checks a script with the modules below its directory, or every script at the top of a
+    /// directory.
     Check {
         /// The path to the project directory to run on. Uses the current directory if not
         /// provided.
         #[clap(parse(from_os_str))]
         path: Option<PathBuf>,
     },
-    /// Runs a mimas script, or a project directory containing a main.mim.
+    /// Runs a script with the modules below its directory, or a directory's only script.
     Run {
         /// The path to the project directory to run on. Uses the current directory if not
         /// provided.

@@ -1665,7 +1665,7 @@ impl Vm {
     ) -> std::result::Result<(Program, Sources), ExecuteError> {
         use solve::Resolutions;
 
-        let mut loaded = solve::load_files(files.iter().copied(), library);
+        let mut loaded = solve::Modules::from_files(files.iter().copied(), library);
         // todo: only the first error makes it out
         if !loaded.errors.is_empty() {
             return Err(loaded.errors.swap_remove(0).into());

@@ -52,6 +52,7 @@ mod tests {
     #[macro_use]
     pub mod solve_test_utils;
 
+    mod directory;
     mod reduce_exprs;
     mod solve_enums;
     mod solve_exprs;

@@ -147,3 +147,29 @@ tok_test!(not_in_operator: "!in" => NotIn);
 tok_test!(not_in_before_space: "!in xs" => NotIn, Ident("xs"));
 tok_test!(bang_before_in_prefixed_ident: "!inside" => Bang, Ident("inside"));
 tok_test!(bang_before_in_ident: "!in_range" => Bang, Ident("in_range"));
+
+is_module_test!(module_declaration_first:
+    "module @;
+     pub fn f() {}"
+    => true
+);
+is_module_test!(module_named: "module a::b;" => true);
+is_module_test!(module_after_comments:
+    "// about
+     /// docs
+     /* block */
+     module foo;"
+    => true
+);
+is_module_test!(script_with_use:
+    "use foo;
+     print(1);"
+    => false
+);
+is_module_test!(module_after_a_statement_is_a_script:
+    "let x = 1;
+     module @;"
+    => false
+);
+is_module_test!(empty_source_is_a_script: "" => false);
+is_module_test!(only_a_comment_is_a_script: "// nothing here" => false);

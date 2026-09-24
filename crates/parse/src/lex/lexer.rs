@@ -35,6 +35,14 @@ define_error!(
     }
 );
 
+/// Whether `source` opens with a `module` declaration, past any comments.
+pub fn is_module(source: &str) -> bool {
+    let mut kinds = Lexer::new(source, 0, String::new())
+        .map(|tok| tok.kind)
+        .filter(|kind| !kind.is_comment());
+    matches!(kinds.next(), Some(TokKind::Module))
+}
+
 #[derive(Debug)]
 pub struct Lexer<'s> {
     source: &'s str,

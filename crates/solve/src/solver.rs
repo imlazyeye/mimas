@@ -22,6 +22,7 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Clone)]
 pub struct Solver {
     pub(crate) decs: IdVec<DecId, Dec>,
     pub(crate) adts: IdVec<AdtId, Adt>,
@@ -2029,11 +2030,13 @@ impl Default for Solver {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct LoopRun {
     pub collect_ty: Option<Ty>,
     pub break_ty: Option<Ty>,
 }
 
+#[derive(Clone)]
 pub(crate) struct FnRun {
     pub expected_ty: Ty,
 }
@@ -2042,12 +2045,14 @@ pub(crate) struct FnRun {
 // fresh vids per call site instead of sharing one set of inference variables. `recv` carries the
 // pattern type for the receiver (e.g. `[Anon(0)]` for `Vec<T>`) -- methods use it at dispatch to
 // reject receivers whose element type doesn't fit.
+#[derive(Clone)]
 pub(crate) struct NativeFnSig {
     pub params: Vec<Option<Ty>>,
     pub return_ty: Option<Ty>,
     pub recv: Option<Ty>,
 }
 
+#[derive(Clone)]
 pub(crate) struct NativeBinding {
     pub id: NativeId,
     pub sig: NativeFnSig,

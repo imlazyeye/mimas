@@ -87,9 +87,10 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 - **Navigation stops at the language boundary.** Natives from the standard library, builtin types
   like `int`, and module names have no mimas source to jump to, so nothing happens. This will come
   in the future.
-- **One project is one directory.** The server walks up from the file you opened to the nearest
-  directory holding a `main.mim` and treats every `.mim` beneath it as the project. A file with no
-  `main.mim` above it is a project of one.
+- **A project is a directory.** The server walks up from the file you opened to the nearest
+  directory holding a script and treats that as the project: its scripts at the top, its modules
+  anywhere below, the way `mimas check` does. A module with no script above it is checked with
+  the modules beside it.
 
 ## Setting it up
 
@@ -118,7 +119,7 @@ be started for the `mimas` language on `.mim` files. In Neovim, for example:
 vim.lsp.config.mimas = {
     cmd = { "mimas-lsp" },
     filetypes = { "mimas" },
-    root_markers = { "main.mim" },
+    root_markers = { "Cargo.toml", ".git" },
 }
 vim.lsp.enable("mimas")
 ```
