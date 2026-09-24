@@ -54,4 +54,10 @@ pub enum Commands {
         #[clap(parse(from_os_str))]
         path: Option<PathBuf>,
     },
+    /// Dumps the API of the standard library manifest to a JSON file.
+    ExportApi {
+        /// The path to export the API to.
+        #[clap(parse(from_os_str))]
+        path: PathBuf,
+    },
 }

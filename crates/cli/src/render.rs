@@ -41,8 +41,17 @@ pub fn emit(diag: &dyn miette::Diagnostic, color: bool) {
 
     eprintln!("{buf}");
 
-    if buf.contains(shared::INTERNAL_TY_MARKER) {
-        let note = "note: the `?mimas<...>` shown above is an unresolved internal type -- mimas should have resolved it before showing this error, so its presence here is a bug on our end. please report this case.";
+    let marker_to_show = if buf.contains(shared::INTERNAL_VID_MARKER) {
+        Some(shared::INTERNAL_VID_MARKER)
+    } else if buf.contains(shared::INTERNAL_ANON_MARKER) {
+        Some(shared::INTERNAL_ANON_MARKER)
+    } else {
+        None
+    };
+    if let Some(marker) = marker_to_show {
+        let note = format!(
+            "note: the type marked with {marker} above is an unresolved internal type -- mimas should have resolved it before showing this error, so its presence here is a bug on our end. please report this case."
+        );
         if use_color {
             eprintln!("{}", note.italic().bright_black());
         } else {

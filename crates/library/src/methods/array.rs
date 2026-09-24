@@ -13,6 +13,7 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.mark_intrinsic(id, Intrinsic::In);
     let id = api.add_method(push);
     api.mark_intrinsic(id, Intrinsic::Push);
+    api.add_method(insert);
     api.add_method(pop);
     api.add_method(shuffle);
     api.add_method(extend);
@@ -59,6 +60,11 @@ fn contains(_arr: &[anon::T<'gc>], _val: anon::T<'gc>) -> bool {
 #[native]
 fn push(_arr: &mut Vec<anon::T<'gc>>, _val: anon::T<'gc>) {
     unreachable!("intrinsics cannot be reached")
+}
+
+#[native]
+fn insert(arr: &mut Vec<anon::T<'gc>>, index: usize, val: anon::T<'gc>) {
+    arr.insert(index, val);
 }
 
 #[native]

@@ -2,11 +2,18 @@ use macros::native;
 use vm::{Ctx, DictMap, Str, anon, api::Api};
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
+    api.add_method(get);
     api.add_method(len);
     api.add_method(contains_key);
     api.add_method(insert);
     api.add_method(remove);
     api.add_method(pairs);
+}
+
+/// TODO: intrinsic
+#[native]
+fn get(d: &DictMap<'gc, anon::T<'gc>>, key: Str<'gc>) -> Option<anon::T<'gc>> {
+    d.get(&key).copied()
 }
 
 #[native]
@@ -22,6 +29,7 @@ fn contains_key<'gc>(ctx: Ctx<'gc>, d: &DictMap<'gc>, key: String) -> bool {
     d.contains_key(&key)
 }
 
+/// TODO: intrinsic
 #[native]
 fn insert(
     d: &mut DictMap<'gc, anon::T<'gc>>,

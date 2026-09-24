@@ -8,10 +8,13 @@ impl Vid {
     pub const UNKNOWN: Vid = Vid(u32::MAX);
 }
 
-/// Prefix used by the Display impls for [Ty::Vid] and [Ty::Anon]. Diagnostic emitters scan rendered
+/// Prefix used by the Display impls for [Ty::Vid]. Diagnostic emitters scan rendered
 /// messages for this token; if they see it, an unresolved/internal type leaked into something
 /// user-facing -- a real mimas bug, not the user's fault. See [INTERNAL_TY_LEAK_NOTE].
-pub const INTERNAL_TY_MARKER: &str = "?mimas<";
+pub const INTERNAL_VID_MARKER: &str = "?v";
+
+/// Same as [INTERNAL_VID_MARKER] but for [Ty::Anon].
+pub const INTERNAL_ANON_MARKER: &str = "?a";
 
 /// Every type that mimas works off of. Check the [book](https://mim.as/reference/basic-types.html)
 /// for more details.
@@ -401,8 +404,8 @@ impl Ty {
             // both vids and anons mark "an internal type slot that should have been resolved
             // before reaching a user-visible message". the shared `?mimas<...>` prefix lets the
             // diag emitter recognize either as a leak and attach an explanatory note.
-            Ty::Vid(vid) => format!("{INTERNAL_TY_MARKER}T{}>", vid.index()),
-            Ty::Anon(n) => format!("{INTERNAL_TY_MARKER}A{n}>"),
+            Ty::Vid(vid) => format!("{INTERNAL_VID_MARKER}{}", vid.index()),
+            Ty::Anon(n) => format!("{INTERNAL_ANON_MARKER}{n}"),
             Ty::Identity(_) | Ty::Skolem(_) => "Self".into(),
             Ty::Adt(id) => match names.adt(*id) {
                 // module adts are spelled `<module:foo>` internally

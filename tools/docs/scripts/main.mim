@@ -1,0 +1,107 @@
+// todo: deny in CI if this generates diffs to the book
+
+use std::parse::Value;
+
+fn ty(input: str, anons: ~{str}) -> str {
+    while let matches = input.find("\\?[av](\\d*)") {
+        let key = matches[1];
+        if key !in anons {
+            anons[key] = match anons.len() {
+                0 => "T",
+                1 => "U",
+                2 => "V",
+                3 => "W",
+                _ => panic("too many anons!")
+            };
+        }
+        input = input.replace(matches[0], anons[key]!);
+    }
+    input
+}
+
+fn adt_names() -> [str] {
+    for x in api().get("adts")!.as_array()! { 
+        collect x.as_dict()!.get("name")!.as_str()!;
+    }
+
+}
+
+fn api() -> ~{Value} {
+    std::parse::from_json(docs::std_api())!.as_dict()!
+}
+
+let api = api();
+let natives = api.get("natives")!.as_array()!;
+let adts = api.get("adts")!.as_array()!;
+
+let api = for x in natives collect x.as_dict()!;
+let adts = for x in adts collect x.as_dict()!;
+
+for item in api {
+    let item = if let method? = item["Method"]?.as_dict() {
+        let item = Item::method(method);
+        // item.render();
+        print(item.render());
+    } else {
+
+    };
+
+}
+
+/// A representation of a module, ready for export.
+struct Module {
+    name: str,
+    items: [Item],
+}
+
+enum Item {
+    Method {
+        name: str,
+        recv_ty: str,
+        args: [(str, str)],
+        doc: str,
+    },
+}
+
+impl Item {
+    fn method(value: ~{Value}) -> Self {
+        Self::Method {
+            name = value["name"]!.as_str()!,
+            recv_ty = docs::display_ty(value["recv_ty"]!)!,
+            args = [],
+            doc = value["doc"]!.as_str()!,
+        }
+    }
+
+    fn render(self) -> str {
+        match self {
+            Item::Method { name, recv_ty, args, doc } => {
+                let anons = ~{};
+                let out = f"### `{name}`";
+                let args = for (name, t) in args collect f"name: {ty(t, anons)}";
+
+                // if the recv_ty is a primitive (or its internal ty is a pure generic) then we
+                // can just show "self". otherwise, we'll show the type bound on it
+                recv_ty = ty(recv_ty, anons);
+                let is_basic_shape = match recv_ty {
+                    "int" | "float" | "str" | "T?" | "[T]" | "~{T}" => true,
+                    n if n in adt_names() => true,
+                    _ => false
+                };
+
+                let self_insert = if is_basic_shape {
+                    "self"
+                } else {
+                    f"self: {recv_ty}"
+                };
+
+                args.insert(0, self_insert);
+
+                out += f"\n\n```mimas\nfn {name}({args.join(",")})\n```";
+                out += f"\n\n{doc}\n";
+                out
+            }
+        }
+    }
+}
+

@@ -20,7 +20,9 @@ path = "src/main.rs"
 parse = { package = "mimas-parse", path = "../parse", version = "0.2.0" }
 solve = { package = "mimas-solve", path = "../solve", version = "0.2.0" }
 compile = { package = "mimas-compile", path = "../compile", version = "0.2.0" }
-vm = { package = "mimas-vm", path = "../vm", version = "0.2.0" }
+vm = { package = "mimas-vm", path = "../vm", version = "0.2.0", features = [
+    "export-api",
+] }
 library = { package = "mimas-library", path = "../library", version = "0.2.0" }
 api = { package = "mimas-api", path = "../api", version = "0.2.0" }
 shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }

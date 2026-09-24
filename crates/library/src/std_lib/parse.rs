@@ -10,10 +10,10 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
         m.add(from_json);
         m.add(to_json);
     }
-    api.add_method(Value::as_dict);
-    api.add_method(Value::as_array);
-    api.add_method(Value::as_str);
-    api.add_method(Value::as_float);
+    api.add_method(as_dict);
+    api.add_method(as_array);
+    api.add_method(as_str);
+    api.add_method(as_float);
 }
 
 #[native]
@@ -29,7 +29,7 @@ fn to_json(v: Value) -> Raisable<String> {
 }
 
 #[derive(MimasEnum)]
-enum Value {
+pub enum Value {
     Null,
     Bool(bool),
     Number(f64),
@@ -38,32 +38,31 @@ enum Value {
     Object(HashMap<String, Value>),
 }
 
-impl Value {
-    #[native]
-    fn as_dict(value: Value) -> Option<HashMap<String, Value>> {
-        let Self::Object(dict) = value else {
-            return None;
-        };
-        Some(dict)
-    }
+#[native]
+fn as_dict(value: Value) -> Option<HashMap<String, Value>> {
+    let Value::Object(dict) = value else {
+        return None;
+    };
+    Some(dict)
+}
 
-    #[native]
-    fn as_array(value: Value) -> Option<Vec<Value>> {
-        let Self::Array(arr) = value else { return None };
-        Some(arr)
-    }
+#[native]
+fn as_array(value: Value) -> Option<Vec<Value>> {
+    let Value::Array(arr) = value else { return None };
+    Some(arr)
+}
 
-    #[native]
-    fn as_str(value: Value) -> Option<String> {
-        let Self::String(s) = value else { return None };
-        Some(s)
-    }
+#[native]
+fn as_str(value: Value) -> Option<String> {
+    let Value::String(s) = value else { return None };
+    Some(s)
+}
 
-    #[native]
-    fn as_float(value: Value) -> Option<f64> {
-        let Self::Number(f) = value else { return None };
-        Some(f)
-    }
+/// Returns the value as a float or `None` if it is `null`.
+#[native]
+fn as_float(value: Value) -> Option<f64> {
+    let Value::Number(f) = value else { return None };
+    Some(f)
 }
 
 impl From<serde_json::Value> for Value {

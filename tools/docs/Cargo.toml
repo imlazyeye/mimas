@@ -1,0 +1,11 @@
+[package]
+name = "docs"
+version = "0.2.0"
+edition = "2024"
+publish = false
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+mimas = { path = "../../crates/mimas" }
+serde_json = "1"

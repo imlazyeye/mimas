@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "examples/*"]
+members = ["crates/*", "examples/*", "tools/docs"]
 # bevy is huge, so its crate + the examples stay out of the default workspace build. mimas pulls
 # crates/bevy in only through its optional `bevy` feature.
 exclude = ["examples/bevy", "crates/bevy"]
