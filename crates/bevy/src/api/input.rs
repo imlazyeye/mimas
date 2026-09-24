@@ -36,7 +36,7 @@ pub(crate) fn install(api: &mut Api) {
         for (name, check) in checks {
             input.add_described(
                 format!("{prefix}{name}"),
-                vec![Some(ty.clone())],
+                vec![("button".to_string(), Some(ty.clone()))],
                 Ty::Bool,
                 move |ctx, args| {
                     let button = Convert::to_rust(ctx, args[0])

@@ -21,10 +21,15 @@ pub(crate) fn install(api: &mut Api, catalog: &Arc<Catalog>) {
     let mut bevy = api.module("bevy");
     for hook in Hook::ALL {
         let catalog = catalog.clone();
-        bevy.add_described(hook.name(), vec![None], Ty::Unit, move |ctx, args| {
-            register(ctx, &catalog, hook, args[0])?;
-            Ok(Val::Null)
-        });
+        bevy.add_described(
+            hook.name(),
+            vec![("f".to_string(), None)],
+            Ty::Unit,
+            move |ctx, args| {
+                register(ctx, &catalog, hook, args[0])?;
+                Ok(Val::Null)
+            },
+        );
     }
 
     let mut time = api.module("bevy::time");

@@ -64,7 +64,7 @@ pub(crate) fn install(api: &mut Api, catalog: &Arc<Catalog>) {
         let holder = if resource {
             vec![]
         } else {
-            vec![entity.clone()]
+            vec![("entity".to_string(), entity.clone())]
         };
         api.add_assoc_described(ty.clone(), "get", holder.clone(), maybe.clone(), {
             let catalog = catalog.clone();
@@ -77,7 +77,7 @@ pub(crate) fn install(api: &mut Api, catalog: &Arc<Catalog>) {
         api.add_assoc_described(
             ty.clone(),
             "insert",
-            [holder, vec![ty.clone()]].concat(),
+            [holder, vec![("value".to_string(), ty.clone())]].concat(),
             Ty::Unit,
             {
                 let catalog = catalog.clone();
@@ -93,15 +93,21 @@ pub(crate) fn install(api: &mut Api, catalog: &Arc<Catalog>) {
         if resource {
             continue;
         }
-        api.add_assoc_described(ty.clone(), "remove", vec![entity.clone()], maybe, {
-            let catalog = catalog.clone();
-            move |ctx, args| {
-                let target = entity_arg(ctx, args[0])?;
-                ctx.fixture::<HookScope>().forget(Some(target), id);
-                let removed = ctx.world(|world| catalog.get(id).remove(world, ctx, target));
-                Ok(removed.unwrap_or(Val::Null))
-            }
-        });
+        api.add_assoc_described(
+            ty.clone(),
+            "remove",
+            vec![("entity".to_string(), entity.clone())],
+            maybe,
+            {
+                let catalog = catalog.clone();
+                move |ctx, args| {
+                    let target = entity_arg(ctx, args[0])?;
+                    ctx.fixture::<HookScope>().forget(Some(target), id);
+                    let removed = ctx.world(|world| catalog.get(id).remove(world, ctx, target));
+                    Ok(removed.unwrap_or(Val::Null))
+                }
+            },
+        );
         let component = stored.id;
         api.add_assoc_described(
             ty,
@@ -209,14 +215,21 @@ pub(crate) fn install_message<T: Message + FromReflect + Typed>(api: &mut Api) {
             Ok(Val::Array(ctx.new_array(messages)))
         },
     );
-    api.add_assoc_described(ty.clone(), "write", vec![ty], Ty::Unit, |ctx, args| {
-        let message: T = Convert::to_rust(ctx, args[0])
-            .ok_or_else(|| RtErr::InvalidArgument("that value isn't the message type".into()))?;
-        ctx.world(|world| {
-            world.write_message(message);
-        });
-        Ok(Val::Null)
-    });
+    api.add_assoc_described(
+        ty.clone(),
+        "write",
+        vec![("message".to_string(), ty)],
+        Ty::Unit,
+        |ctx, args| {
+            let message: T = Convert::to_rust(ctx, args[0]).ok_or_else(|| {
+                RtErr::InvalidArgument("that value isn't the message type".into())
+            })?;
+            ctx.world(|world| {
+                world.write_message(message);
+            });
+            Ok(Val::Null)
+        },
+    );
 }
 
 /// Which messages an entity has already read. Lives on the entity to survive reloads.

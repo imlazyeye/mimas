@@ -1,7 +1,5 @@
 use crate::{
-    collect_doc,
-    convert::expand_conversion,
-    register::{documented, submission},
+    collect_doc, convert::expand_conversion, meta_submission, param_names, register::submission,
 };
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
@@ -38,7 +36,7 @@ pub fn expand_impl(block: ItemImpl) -> Result<TokenStream2, syn::Error> {
             ImplItem::Fn(method) => {
                 let (shim, add) = method_shim(&self_ident, method)?;
                 out.extend(quote!(#shim));
-                adds.extend(documented(add, &collect_doc(&method.attrs)));
+                adds.extend(quote!(#add;));
             }
             ImplItem::Const(c) => {
                 let ident = &c.ident;
@@ -178,6 +176,15 @@ fn method_shim(
     } else {
         quote!(api.add_assoc_of::<#self_ident, _, _>(#name_str, #shim_ident))
     };
+
+    if let Some(submission) = meta_submission(
+        &shim.sig.ident,
+        &param_names(&shim.sig),
+        &collect_doc(&method.attrs),
+    ) {
+        shim.block.stmts.insert(0, submission);
+    }
+
     Ok((shim, add))
 }
 

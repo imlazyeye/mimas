@@ -52,6 +52,10 @@ fn run(src: &str) -> String {
     format!("{captured}")
 }
 
+fn names(parameters: &[(String, Option<Ty>)]) -> Vec<&str> {
+    parameters.iter().map(|(name, _)| name.as_str()).collect()
+}
+
 #[test]
 fn assoc_fn_constructs() {
     assert_eq!(
@@ -145,4 +149,56 @@ fn docs_come_from_the_registration() {
     assert_eq!(doc_of("greeting"), "Says hi.");
     assert_eq!(doc_of("heal"), "Heals by `amount`.");
     assert_eq!(doc_of("damage"), "");
+}
+
+#[test]
+fn parameter_names_come_from_the_registration() {
+    let library = vm::Vm::new().install_library(library::std);
+    let player = library
+        .adts()
+        .iter()
+        .find(|a| a.name == "Player")
+        .unwrap()
+        .adt_id;
+    let params_of = |name: &str| {
+        library
+            .natives()
+            .find_map(|(_, entry)| match entry {
+                ApiEntry::Function(f) if f.name == name => Some(names(&f.parameters)),
+                ApiEntry::Method(m) if m.name == name && m.recv_ty == Ty::Adt(player) => {
+                    Some(names(&m.parameters))
+                }
+                _ => None,
+            })
+            .expect("native was registered")
+    };
+    assert_eq!(params_of("new"), ["name"]);
+    assert_eq!(params_of("damage"), ["amount"]);
+    assert_eq!(params_of("drain_into"), ["sink"]);
+    assert_eq!(params_of("heal"), ["amount"]);
+}
+
+#[test]
+fn native_parameter_names_come_from_the_signature() {
+    let library = vm::Vm::new().install_library(library::std);
+    let write = library
+        .natives()
+        .find_map(|(_, entry)| match entry {
+            ApiEntry::Function(f) if f.name == "write" && f.module == ["std", "fs"] => {
+                Some(names(&f.parameters))
+            }
+            _ => None,
+        })
+        .expect("std::fs::write was registered");
+    let clamp = library
+        .natives()
+        .find_map(|(_, entry)| match entry {
+            ApiEntry::Method(m) if m.name == "clamp" && m.recv_ty == Ty::Float => {
+                Some(names(&m.parameters))
+            }
+            _ => None,
+        })
+        .expect("float.clamp was registered");
+    assert_eq!(write, ["path", "output"]);
+    assert_eq!(clamp, ["low", "high"]);
 }

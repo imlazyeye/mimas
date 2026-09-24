@@ -646,7 +646,7 @@ impl Solver {
     pub fn declare_native_fn(
         &mut self,
         name: String,
-        params: Vec<Option<Ty>>,
+        params: Vec<(String, Option<Ty>)>,
         return_ty: Option<Ty>,
         native_id: NativeId,
     ) -> DecId {
@@ -692,7 +692,7 @@ impl Solver {
         let materialized: Vec<Ty> = sig
             .params
             .iter()
-            .map(|p| self.materialize_slot(p, &mut memo))
+            .map(|(_, p)| self.materialize_slot(p, &mut memo))
             .collect();
         // trailing Option params are omittable: marking them defaulted lets the call-site
         // arity check pass, and the IR fills the empty slot with null (-> None natively)
@@ -2050,7 +2050,7 @@ pub(crate) struct FnRun {
 // reject receivers whose element type doesn't fit.
 #[derive(Clone)]
 pub(crate) struct NativeFnSig {
-    pub params: Vec<Option<Ty>>,
+    pub params: Vec<(String, Option<Ty>)>,
     pub return_ty: Option<Ty>,
     pub recv: Option<Ty>,
 }

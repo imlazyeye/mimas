@@ -39,23 +39,26 @@ impl MimasReg {
 
 inventory::collect!(MimasReg);
 
-/// A doc comment harvested from a `#[native]` fn, submitted via [`inventory`] and keyed by the
-/// item's full Rust path (`concat!(module_path!(), "::", <ident>)`). The install path joins these
-/// onto the [`ApiFunction`]/[`ApiMethod`] it builds by matching the path against
+/// Metadata harvested from a `#[native]` or `#[mimas]` fn, submitted via [`inventory`] and keyed
+/// by the item's full Rust path (`concat!(module_path!(), "::", <ident>)`). The install path joins
+/// these onto the [`ApiFunction`]/[`ApiMethod`] it builds by matching the path against
 /// [`std::any::type_name_of_val`] of the registered fn, since `#[native]` leaves the `api.add_*`
-/// call to the host. `#[mimas]` items don't come through here: their generated registration sets
-/// the doc directly.
+/// call to the host. Parameter identifiers are also tracked in order to display the function
+/// signature. For a `#[mimas]` impl method the registered fn is its generated shim, so the shim
+/// is what submits.
 ///
-/// Like every inventory registry this is subject to the link-pruning footgun (a submission in an
-/// unreferenced object file can be dropped under `codegen-units > 1`), so a `#[native]` fn in a
-/// dependency crate can lose its doc. A missing doc degrades to an empty string, never a wrong
-/// signature.
-pub struct NativeDoc {
+/// A `#[native]` fn inside an `impl` block never matches, because the macro can't see the type
+/// its path needs. Like every inventory registry this is also subject to the link-pruning footgun
+/// (a submission in an unreferenced object file can be dropped under `codegen-units > 1`), so a
+/// `#[native]` fn in a dependency crate can lose its entry. Either way the names degrade to
+/// `arg{i}` and the doc to an empty string, never a wrong signature.
+pub struct NativeMeta {
     pub path: &'static str,
+    pub parameters: &'static [&'static str],
     pub doc: &'static str,
 }
 
-inventory::collect!(NativeDoc);
+inventory::collect!(NativeMeta);
 
 pub type NativeFnReg = for<'a, 'gc> fn(&mut Api<'a, 'gc>);
 
@@ -64,14 +67,31 @@ pub struct Api<'a, 'gc> {
     pub library: &'a mut Library<()>,
 }
 
-/// Look up the doc-comment for a native by its full Rust path (`type_name_of_val(&f)`). Empty when
-/// the item carried no `///` -- or when the submission was pruned (see [`NativeDoc`]).
-fn doc_for(path: &str) -> String {
-    inventory::iter::<NativeDoc>
+/// Looks up what `#[native]` or `#[mimas]` submitted for the fn at `path` (`type_name_of_val(&f)`) and pairs
+/// `tys` with their names. `skip` drops leading names `tys` doesn't cover, like a method's
+/// receiver. Names fall back to `arg{i}` and the doc to an empty string when the submission is
+/// missing or doesn't line up (see [`NativeMeta`]).
+fn native_meta(
+    path: &str,
+    skip: usize,
+    tys: Vec<Option<Ty>>,
+) -> (String, Vec<(String, Option<Ty>)>) {
+    let meta = inventory::iter::<NativeMeta>
         .into_iter()
-        .find(|d| d.path == path)
-        .map(|d| d.doc.to_string())
-        .unwrap_or_default()
+        .find(|m| m.path == path);
+    let names = meta
+        .and_then(|m| m.parameters.get(skip..))
+        .filter(|names| names.len() == tys.len());
+    let parameters = tys
+        .into_iter()
+        .enumerate()
+        .map(|(i, ty)| {
+            let name = names.map_or_else(|| format!("arg{i}"), |names| names[i].to_string());
+            (name, ty)
+        })
+        .collect();
+    let doc = meta.map(|m| m.doc.to_string()).unwrap_or_default();
+    (doc, parameters)
 }
 
 impl<'a, 'gc> Api<'a, 'gc> {
@@ -221,7 +241,7 @@ impl<'a, 'gc> Api<'a, 'gc> {
         &mut self,
         recv_ty: Ty,
         name: impl Into<String>,
-        parameters: Vec<Ty>,
+        parameters: Vec<(String, Ty)>,
         return_ty: Ty,
         call: impl for<'g> Fn(Ctx<'g>, &[Val<'g>]) -> RtResult<Val<'g>> + 'static,
     ) {
@@ -229,7 +249,7 @@ impl<'a, 'gc> Api<'a, 'gc> {
         let id = self.library.method(ApiMethod {
             recv_ty,
             name: name.into(),
-            parameters: parameters.into_iter().map(Some).collect(),
+            parameters: parameters.into_iter().map(|(n, t)| (n, Some(t))).collect(),
             return_ty: Some(return_ty),
             takes_self: false,
             doc: String::new(),
@@ -322,7 +342,7 @@ impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
     pub fn add_described(
         &mut self,
         name: impl Into<String>,
-        parameters: Vec<Option<Ty>>,
+        parameters: Vec<(String, Option<Ty>)>,
         return_ty: Ty,
         call: impl for<'g> Fn(Ctx<'g>, &[Val<'g>]) -> RtResult<Val<'g>> + 'static,
     ) {
@@ -381,9 +401,12 @@ macro_rules! impl_into_fn {
             #[allow(non_snake_case, unused_variables, unused_mut)]
             fn install(self, api: &mut Api<'_, 'gc>, name: String, module: Vec<String>) -> NativeId {
                 let reg = api.library.registry();
-                let parameters = vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*];
                 let return_ty = <R as IntoNativeResult<'gc>>::return_ty(reg);
-                let doc = doc_for(std::any::type_name_of_val(&self));
+                let (doc, parameters) = native_meta(
+                    std::any::type_name_of_val(&self),
+                    0,
+                    vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*],
+                );
                 let native = make_native(&api.ctx, move |ctx, args| {
                     let mut it = args.iter().copied();
                     $(let $arg = <$arg as MimasType<'gc>>::from_value(
@@ -402,9 +425,12 @@ macro_rules! impl_into_fn {
             #[allow(non_snake_case, unused_variables, unused_mut)]
             fn install_assoc(self, api: &mut Api<'_, 'gc>, recv_ty: Ty, name: String) -> NativeId {
                 let reg = api.library.registry();
-                let parameters = vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*];
                 let return_ty = <R as IntoNativeResult<'gc>>::return_ty(reg);
-                let doc = doc_for(std::any::type_name_of_val(&self));
+                let (doc, parameters) = native_meta(
+                    std::any::type_name_of_val(&self),
+                    0,
+                    vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*],
+                );
                 let native = make_native(&api.ctx, move |ctx, args| {
                     let mut it = args.iter().copied();
                     $(let $arg = <$arg as MimasType<'gc>>::from_value(
@@ -454,9 +480,12 @@ macro_rules! impl_into_method {
                 let reg = api.library.registry();
                 let recv_ty = <Recv as MimasType<'gc>>::mimas_ty(reg)
                     .expect("native method receiver must have a concrete Ty");
-                let parameters = vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*];
                 let return_ty = <R as IntoNativeResult<'gc>>::return_ty(reg);
-                let doc = doc_for(std::any::type_name_of_val(&self));
+                let (doc, parameters) = native_meta(
+                    std::any::type_name_of_val(&self),
+                    1,
+                    vec![$(<$arg as MimasType<'gc>>::mimas_ty(reg),)*],
+                );
                 let native = make_native(&api.ctx, move |ctx, args| {
                     let mut it = args.iter().copied();
                     let recv = <Recv as MimasType<'gc>>::from_value(

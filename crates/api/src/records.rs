@@ -4,7 +4,7 @@ use shared::{AdtId, Literal, Ty};
 pub struct ApiFunction<C> {
     pub name: String,
     pub module: Vec<String>,
-    pub parameters: Vec<Option<Ty>>,
+    pub parameters: Vec<(String, Option<Ty>)>,
     pub return_ty: Option<Ty>,
     pub doc: String,
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -15,7 +15,7 @@ pub struct ApiFunction<C> {
 pub struct ApiMethod<C> {
     pub recv_ty: Ty,
     pub name: String,
-    pub parameters: Vec<Option<Ty>>,
+    pub parameters: Vec<(String, Option<Ty>)>,
     pub return_ty: Option<Ty>,
     pub takes_self: bool,
     pub doc: String,
