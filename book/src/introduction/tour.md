@@ -360,7 +360,7 @@ pub fn mix(a: int, b: int) -> int {
 ```
 
 ```mimas
-// main.mim -- a script
+// game.mim -- a script, which sees the modules beside it
 use colors;               // reach items via colors::RED
 use colors::{ RED, mix }; // or pull names in directly (also `colors::*`)
 

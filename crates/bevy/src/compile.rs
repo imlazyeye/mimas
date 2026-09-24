@@ -57,7 +57,7 @@ pub(crate) fn compile_scripts(
         .resource::<Assets<MimasScript>>()
         .iter()
         .map(|(id, script)| (id, script.clone()))
-        .partition(|(_, script)| script.is_module());
+        .partition(|(_, script)| parse::lex::is_module(&script.source));
     vms.by_asset
         .retain(|id, _| scripts.iter().any(|(script, _)| script == id));
 

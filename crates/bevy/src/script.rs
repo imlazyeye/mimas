@@ -3,22 +3,12 @@ use bevy::{
     prelude::*,
 };
 use miette::{GraphicalReportHandler, GraphicalTheme, Report};
-use parse::lex::{Lexer, TokKind};
 
 /// A loaded `.mim` file.
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct MimasScript {
     pub path: String,
     pub source: String,
-}
-
-impl MimasScript {
-    /// Whether the file's first token (past any comments) is `module`.
-    pub(crate) fn is_module(&self) -> bool {
-        let lexer = Lexer::new(&self.source, 0, self.path.clone());
-        let mut kinds = lexer.map(|tok| tok.kind).filter(|kind| !kind.is_comment());
-        matches!(kinds.next(), Some(TokKind::Module))
-    }
 }
 
 /// Loads `.mim` files as [`MimasScript`]s.

@@ -1,13 +1,17 @@
+use api::Library;
 use clap::Parser;
 use colored::Colorize;
 use num_format::{Locale, ToFormattedString};
+use parse::Ast;
+use solve::{Directory, Modules};
 use std::{path::PathBuf, time::Duration};
 
-mod build;
 mod ice;
 mod input;
 mod render;
+mod unit;
 pub use input::*;
+use unit::Unit;
 
 const ICE_EXIT_CODE: i32 = 101;
 
@@ -21,20 +25,11 @@ fn main() {
     }
     let status_code = match input.command {
         Some(Commands::Check { path }) => check(path, input.color),
-        Some(Commands::Build { path }) => build(
-            path,
-            vec![],
-            input.color,
-            false,
-            input.dump_bytes,
-            input.dump_ir,
-            input.time,
-        ),
-        Some(Commands::Run { path, script_args }) => build(
+        Some(Commands::Build { path }) => build(path, input.color, input.dump_bytes, input.dump_ir),
+        Some(Commands::Run { path, script_args }) => run(
             path,
             script_args,
             input.color,
-            true,
             input.dump_bytes,
             input.dump_ir,
             input.time,
@@ -46,22 +41,22 @@ fn main() {
 
 fn check(path: Option<PathBuf>, color: bool) -> i32 {
     let timer = std::time::Instant::now();
-    let path = resolve_path(path);
-    let (_vm, summary) = match ice::catch("check", || build::solve(&path)) {
-        Ok(s) => s,
-        Err(report) => {
-            report.emit();
-            return ICE_EXIT_CODE;
-        }
+    let unit = Unit::new(&resolve_path(path));
+    let library = vm::Vm::new().install_library(library::std);
+    let (directory, mut count) = match load(&unit, &library, color) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
     };
+    for file in unit.scripts(&directory) {
+        match solve(&directory.modules, file, color) {
+            Ok(script) => count += script.errors.len(),
+            Err(code) => return code,
+        }
+    }
     let total_duration = timer.elapsed();
-
-    emit_errors(&summary, color);
-    report_meta_errors(&summary);
 
     let seperator = "-".repeat(50);
     println!("{seperator}");
-    let count = summary.errors.len() + summary.io_errors.len();
     println!(
         "  {}",
         format!(
@@ -75,7 +70,7 @@ fn check(path: Option<PathBuf>, color: bool) -> i32 {
         "  {}",
         format!(
             "Ran on {} lines in {}.",
-            summary.lines_parsed.to_formatted_string(&Locale::en),
+            unit.lines().to_formatted_string(&Locale::en),
             format_duration(total_duration),
         )
         .italic()
@@ -83,37 +78,209 @@ fn check(path: Option<PathBuf>, color: bool) -> i32 {
     );
     println!("{seperator}");
 
-    i32::from(summary.had_errors())
+    i32::from(count > 0)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build(
+fn build(path: Option<PathBuf>, color: bool, disasm: bool, dump_ir: bool) -> i32 {
+    let timer = std::time::Instant::now();
+    let unit = Unit::new(&resolve_path(path));
+    let library = vm::Vm::new().install_library(library::std);
+    let (directory, mut count) = match load(&unit, &library, color) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let mut scripts = vec![];
+    for file in unit.scripts(&directory) {
+        match solve(&directory.modules, file, color) {
+            Ok(script) => {
+                count += script.errors.len();
+                scripts.push(script);
+            }
+            Err(code) => return code,
+        }
+    }
+    if count > 0 {
+        return 1;
+    }
+    for script in scripts {
+        if let Err(code) = compile(&directory.modules, script, &library, disasm, dump_ir) {
+            return code;
+        }
+    }
+
+    let seperator = "-".repeat(50);
+    println!("{seperator}");
+    println!(
+        "  {}",
+        format!(
+            "Compiled {} lines in {}.",
+            unit.lines().to_formatted_string(&Locale::en),
+            format_duration(timer.elapsed()),
+        )
+        .italic()
+        .bright_black()
+    );
+    println!("{seperator}");
+    0
+}
+
+fn run(
     path: Option<PathBuf>,
     script_args: Vec<String>,
     color: bool,
-    execute: bool,
     disasm: bool,
     dump_ir: bool,
     time: bool,
 ) -> i32 {
     let timer = std::time::Instant::now();
     let path = resolve_path(path);
-
-    let (mut vm, summary) = match ice::catch("check", || build::solve(&path)) {
-        Ok(s) => s,
-        Err(report) => {
-            report.emit();
-            return ICE_EXIT_CODE;
+    let unit = Unit::new(&path);
+    let mut vm = vm::Vm::new();
+    let library = vm.install_library(library::std);
+    let directory = match load(&unit, &library, color) {
+        Ok((directory, 0)) => directory,
+        Ok(_) => return 1,
+        Err(code) => return code,
+    };
+    let scripts = unit.scripts(&directory);
+    let file = match scripts[..] {
+        [file] => file,
+        [] => {
+            let error = "error".bright_red().bold();
+            println!("{error}: {} has no script to run", path.display());
+            return 1;
+        }
+        _ => {
+            let names: Vec<_> = scripts
+                .iter()
+                .map(|(file, _)| file.display().to_string())
+                .collect();
+            let error = "error".bright_red().bold();
+            println!(
+                "{error}: {} has several scripts, pick one to run: {}",
+                path.display(),
+                names.join(", ")
+            );
+            return 1;
         }
     };
-    emit_errors(&summary, color);
-    report_meta_errors(&summary);
-    if summary.had_errors() {
-        return 1;
-    }
+    let script = match solve(&directory.modules, file, color) {
+        Ok(script) if script.errors.is_empty() => script,
+        Ok(_) => return 1,
+        Err(code) => return code,
+    };
+    let sources = script.sources.clone();
+    let compiled = match compile(&directory.modules, script, &library, disasm, dump_ir) {
+        Ok(compiled) => compiled,
+        Err(code) => return code,
+    };
 
-    let lines = summary.lines_parsed;
-    let (stmts, solver, sources, intrinsics) = summary.into_compilation();
+    let mut resolved_args = Vec::with_capacity(script_args.len() + 1);
+    resolved_args.push(file.0.to_string_lossy().into_owned());
+    resolved_args.extend(script_args);
+    vm.fixture::<library::ScriptArgs>().set(resolved_args);
+
+    let result = ice::catch("execution", move || {
+        vm.load_program(compiled);
+        vm.set_sources(sources);
+        vm.run()
+    });
+    match result {
+        Err(report) => {
+            report.emit();
+            ICE_EXIT_CODE
+        }
+        Ok(Err(report)) => {
+            render::emit(report.as_ref(), color);
+            1
+        }
+        Ok(Ok(())) => {
+            if time {
+                eprintln!(
+                    "{}",
+                    format!("ran in {}", format_duration(timer.elapsed()))
+                        .italic()
+                        .bright_black()
+                );
+            }
+            0
+        }
+    }
+}
+
+/// Loads the unit's project and prints the errors outside its scripts, counting them, or says
+/// with which exit code that crashed.
+fn load<'a>(
+    unit: &'a Unit,
+    library: &Library<()>,
+    color: bool,
+) -> Result<(Directory<'a>, usize), i32> {
+    report_meta_errors(&unit.io_errors);
+    let directory = ice::catch("check", || {
+        Directory::load(&unit.files, &unit.root, library)
+    })
+    .map_err(|report| {
+        report.emit();
+        ICE_EXIT_CODE
+    })?;
+
+    for error in &directory.modules.errors {
+        render::emit(error.as_ref(), color);
+    }
+    for path in &directory.out_of_place_scripts {
+        println!(
+            "{}: {} has to sit at the top of its project ({})",
+            "error".bright_red().bold(),
+            path.display(),
+            unit.root.display()
+        );
+    }
+    let count = unit.io_errors.len()
+        + directory.modules.errors.len()
+        + directory.out_of_place_scripts.len();
+    return Ok((directory, count));
+
+    fn report_meta_errors(io_errors: &[std::io::Error]) {
+        if !io_errors.is_empty() {
+            println!(
+                "\n{}: The following errors occurred while trying to read your project's files...",
+                "error".bright_red().bold()
+            );
+            io_errors.iter().for_each(|error| {
+                println!("{error}");
+            })
+        }
+    }
+}
+
+/// Solves a script on top of the modules and prints its errors, or says with which exit code that
+/// crashed.
+fn solve(modules: &Modules, (path, text): &(PathBuf, String), color: bool) -> Result<Modules, i32> {
+    let script =
+        ice::catch("check", || modules.load([(path, text.as_str())])).map_err(|report| {
+            report.emit();
+            ICE_EXIT_CODE
+        })?;
+    for error in &script.errors {
+        render::emit(error.as_ref(), color);
+    }
+    Ok(script)
+}
+
+/// Compiles a script on top of the modules, or says with which exit code that crashed.
+fn compile(
+    modules: &Modules,
+    script: Modules,
+    library: &Library<()>,
+    disasm: bool,
+    dump_ir: bool,
+) -> Result<compile::Program, i32> {
+    let Modules {
+        asts,
+        sources,
+        solver,
+        ..
+    } = script;
     let srcs: std::collections::HashMap<usize, std::sync::Arc<str>> = if disasm {
         sources
             .iter()
@@ -122,10 +289,10 @@ fn build(
     } else {
         std::collections::HashMap::new()
     };
-    let program = match ice::catch("compilation", || {
-        let resolutions = solve::Resolutions::from(solver);
-        let mut ir = compile::Ir::new(resolutions, intrinsics);
-        ir.lower(&stmts);
+    let intrinsics = library.intrinsics().clone();
+    ice::catch("compilation", || {
+        let mut ir = compile::Ir::new(solve::Resolutions::from(solver), intrinsics);
+        ir.lower(modules.asts.iter().chain(&asts).flat_map(Ast::stmts));
         if dump_ir {
             println!("{ir}");
         }
@@ -133,63 +300,11 @@ fn build(
             .with_disasm(disasm)
             .with_sources(srcs)
             .compile(ir)
-    }) {
-        Ok(p) => p,
-        Err(report) => {
-            report.emit();
-            return ICE_EXIT_CODE;
-        }
-    };
-    if execute {
-        let mut resolved_args = Vec::with_capacity(script_args.len() + 1);
-        resolved_args.push(path.to_string_lossy().into_owned());
-        resolved_args.extend(script_args);
-        vm.fixture::<library::ScriptArgs>().set(resolved_args);
-
-        let result = ice::catch("execution", move || {
-            vm.load_program(program);
-            vm.set_sources(sources);
-            vm.run()
-        });
-        match result {
-            Err(report) => {
-                report.emit();
-                return ICE_EXIT_CODE;
-            }
-            Ok(Err(report)) => {
-                emit_runtime_error(&report, color);
-                return 1;
-            }
-            Ok(Ok(())) => {
-                if time {
-                    eprintln!(
-                        "{}",
-                        format!("ran in {}", format_duration(timer.elapsed()))
-                            .italic()
-                            .bright_black()
-                    );
-                }
-            }
-        }
-    }
-
-    if !execute {
-        let seperator = "-".repeat(50);
-        println!("{seperator}");
-        println!(
-            "  {}",
-            format!(
-                "Compiled {} lines in {}.",
-                lines.to_formatted_string(&Locale::en),
-                format_duration(timer.elapsed()),
-            )
-            .italic()
-            .bright_black()
-        );
-        println!("{seperator}");
-    }
-
-    0
+    })
+    .map_err(|report| {
+        report.emit();
+        ICE_EXIT_CODE
+    })
 }
 
 // bare `mimas foo.mim` means `mimas run foo.mim`; inject `run` when the first
@@ -207,28 +322,6 @@ fn massage_args(mut args: Vec<String>) -> Vec<String> {
 
 fn resolve_path(path: Option<PathBuf>) -> PathBuf {
     path.unwrap_or_else(|| std::env::current_dir().expect("Cannot access the current directory!"))
-}
-
-fn emit_runtime_error(report: &miette::Report, color: bool) {
-    render::emit(report.as_ref(), color);
-}
-
-fn emit_errors(summary: &build::SolveSummary, color: bool) {
-    for error in &summary.errors {
-        render::emit(error.as_ref(), color);
-    }
-}
-
-fn report_meta_errors(summary: &build::SolveSummary) {
-    if !summary.io_errors.is_empty() {
-        println!(
-            "\n{}: The following errors occurred while trying to read your project's files...",
-            "error".bright_red().bold()
-        );
-        summary.io_errors.iter().for_each(|error| {
-            println!("{error}");
-        })
-    }
 }
 
 fn format_duration(d: Duration) -> String {

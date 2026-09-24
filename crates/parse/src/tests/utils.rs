@@ -28,6 +28,17 @@ macro_rules! tok_test {
     };
 }
 
+#[macro_export]
+macro_rules! is_module_test {
+    ($name:ident: $src:expr => $expected:expr) => {
+        #[cfg(test)]
+        #[test]
+        fn $name() {
+            assert_eq!($crate::lex::is_module($src), $expected, "{:?}", $src);
+        }
+    };
+}
+
 /// Parses `source` into whatever Ast comes out, along with every error.
 #[cfg(test)]
 pub(crate) fn parse(source: &str) -> (crate::Ast, Vec<shared::Error>) {
