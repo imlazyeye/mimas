@@ -18,7 +18,8 @@ compiler however you use it). This will be improved in future releases.
 ### Hover
 
 Hovering a name shows what it is and what type it has. If its declaration has a `///` doc comment,
-that shows underneath.
+that shows underneath. For a function or type a Rust host registers, that's the `///` on the Rust
+item.
 
 | You hover | You get |
 | --- | --- |

@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use api::{ApiConstant, Library, Manifest, ManifestRef};
+use api::{ApiConstant, ApiEntry, Library, Manifest, ManifestRef};
 use mimas::{Literal, Ty, Vm, mimas, write_api};
 use vm::export::target_dir;
 
@@ -205,4 +205,20 @@ fn target_dir_needs_a_cargo_target() {
     let dir = scratch("no-target");
     assert_eq!(target_dir(&dir.join("debug").join("app")), None);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn host_constants_link_to_their_entry() {
+    let library = round_trip(&installed());
+    let loaded = solve::Loaded::from_files([("main.mim", HOST_SCRIPT)], &library);
+    assert!(loaded.errors.is_empty());
+    let resolutions = solve::Resolutions::from(loaded.solver);
+    let (dec, _) = resolutions
+        .decs
+        .iter()
+        .find(|(_, dec)| dec.name == "MAX")
+        .unwrap();
+    let native = resolutions.native_constants[&dec];
+    let (_, entry) = library.natives().find(|(id, _)| *id == native).unwrap();
+    assert!(matches!(entry, ApiEntry::Constant(c) if c.name == "MAX"));
 }

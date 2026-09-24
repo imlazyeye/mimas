@@ -6,6 +6,7 @@ fn greet(name: String) -> String {
 }
 
 #[mimas]
+/// What's up
 struct Player {
     name: String,
     health: i64,

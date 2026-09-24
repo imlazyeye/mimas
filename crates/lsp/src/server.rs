@@ -144,7 +144,7 @@ impl<'a> Server<'a> {
         let path = position.text_document.uri.to_file_path().ok()?;
         self.workspace
             .analysis(&path)?
-            .hover(&path, position.position)
+            .hover(&path, position.position, &self.workspace.library)
     }
 
     fn definition(&self, params: DefinitionParams) -> Option<Location> {
