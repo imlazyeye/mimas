@@ -590,17 +590,19 @@ impl Solve for Call {
     fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
         let adt = match self.left.kind() {
             ExprKind::Access(Access::DoubleColon { left, right }) => {
-                let adt = adt_from_type_path(left, solver).map_err(|_| {
-                    let ty = left
-                        .query(solver)
-                        .map(|t| t.to_string())
-                        .unwrap_or_default();
-                    NotAStruct {
-                        src: solver.src(location),
-                        at: location.into(),
-                        ty,
+                let adt = match adt_from_type_path(left, solver) {
+                    Ok(adt) => adt,
+                    Err(_) => {
+                        // an unknown head (`missing::f()`) reports itself as undefined
+                        let ty = left.query(solver)?.to_string();
+                        return Err(NotAStruct {
+                            src: solver.src(location),
+                            at: location.into(),
+                            ty,
+                        }
+                        .into());
                     }
-                })?;
+                };
 
                 let lock = &solver.adts[adt];
                 if lock.flags.contains(AdtFlags::IS_MODULE) {
