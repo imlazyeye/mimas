@@ -29,6 +29,8 @@ mimas-bevy = { path = "../bevy", version = "0.2.0", optional = true }
 [features]
 op-count = ["vm/op-count"]
 bevy = ["dep:mimas-bevy"]
+export-api = ["vm/export-api"]
+default = ["export-api"]
 
 [dev-dependencies]
 criterion = "0.5"
@@ -36,4 +38,3 @@ criterion = "0.5"
 [[bench]]
 name = "vm_benches"
 harness = false
-

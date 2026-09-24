@@ -2625,6 +2625,7 @@ dependencies = [
  "mutants",
  "pretty_assertions",
  "rustc-hash 2.1.2",
+ "serde_json",
  "smallvec",
  "thiserror 1.0.69",
 ]
