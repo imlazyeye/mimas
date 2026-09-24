@@ -1,7 +1,7 @@
 use crate::{
     Access, Expr, ExprKind, FStringPart, FieldKey, Ident, Item, ItemKind, Literal, Member,
     PactItem, Stmt, StmtKind, StructField, Use,
-    components::{Binding, Pat, PatKind},
+    components::{Annotation, Binding, Pat, PatKind},
 };
 
 pub trait Visitor {
@@ -23,6 +23,9 @@ pub fn walk_stmt(stmt: &Stmt, visitor: &mut impl Visitor) {
     match stmt.kind() {
         StmtKind::Let(l) => {
             walk_pat(&l.left, visitor);
+            if let Some(annotation) = &l.annotation {
+                walk_annotation(annotation, visitor);
+            }
             walk_expr(&l.right, visitor);
             if let Some(else_branch) = &l.else_branch {
                 walk_expr(else_branch, visitor);
@@ -46,6 +49,9 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
             for parameter in &function.parameters {
                 walk_binding(parameter, visitor);
             }
+            if let Some(return_type) = &function.return_type {
+                walk_annotation(return_type, visitor);
+            }
             walk_expr(&function.body, visitor);
         }
         ItemKind::Impl(imp) => {
@@ -61,16 +67,25 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
             visitor.ident(&pact.name);
             for item in &pact.items {
                 match item {
-                    PactItem::Const { name, .. } => visitor.ident(name),
+                    PactItem::Const {
+                        name, annotation, ..
+                    } => {
+                        visitor.ident(name);
+                        walk_annotation(annotation, visitor);
+                    }
                     PactItem::Fn {
                         name,
                         parameters,
+                        return_type,
                         default,
                         ..
                     } => {
                         visitor.ident(name);
                         for parameter in parameters {
                             walk_binding(parameter, visitor);
+                        }
+                        if let Some(return_type) = return_type {
+                            walk_annotation(return_type, visitor);
                         }
                         if let Some(default) = default {
                             walk_expr(default, visitor);
@@ -81,6 +96,9 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
         }
         ItemKind::Const(con) => {
             visitor.ident(&con.left);
+            if let Some(annotation) = &con.annotation {
+                walk_annotation(annotation, visitor);
+            }
             walk_expr(&con.right, visitor);
         }
         ItemKind::Struct(struc) => {
@@ -91,8 +109,13 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
             visitor.ident(&en.head);
             for (name, member) in &en.members {
                 visitor.ident(name);
-                if let Member::Struct(fields) = member {
-                    walk_fields(fields, visitor);
+                match member {
+                    Member::Struct(fields) => walk_fields(fields, visitor),
+                    Member::Tuple(annotations) => {
+                        for annotation in annotations {
+                            walk_annotation(annotation, visitor);
+                        }
+                    }
                 }
             }
         }
@@ -115,6 +138,7 @@ fn walk_fields(fields: &[StructField], visitor: &mut impl Visitor) {
         if let FieldKey::Ident(name) = &field.name {
             visitor.ident(name);
         }
+        walk_annotation(&field.annotation, visitor);
     }
 }
 
@@ -163,6 +187,9 @@ pub fn walk_expr(expr: &Expr, visitor: &mut impl Visitor) {
         ExprKind::Closure(closure) => {
             for parameter in &closure.parameters {
                 walk_binding(parameter, visitor);
+            }
+            if let Some(return_type) = &closure.return_type {
+                walk_annotation(return_type, visitor);
             }
             walk_expr(&closure.body, visitor);
         }
@@ -297,7 +324,37 @@ pub fn walk_pat(pat: &Pat, visitor: &mut impl Visitor) {
 
 pub fn walk_binding(binding: &Binding, visitor: &mut impl Visitor) {
     walk_pat(&binding.left, visitor);
+    if let Some(annotation) = &binding.annotation {
+        walk_annotation(annotation, visitor);
+    }
     if let Some(right) = &binding.right {
         walk_expr(right, visitor);
+    }
+}
+
+pub fn walk_annotation(annotation: &Annotation, visitor: &mut impl Visitor) {
+    match annotation {
+        Annotation::Ty(ident) => visitor.ident(ident),
+        Annotation::Path(idents) | Annotation::Bounds(idents) => {
+            for ident in idents {
+                visitor.ident(ident);
+            }
+        }
+        Annotation::Option(inner)
+        | Annotation::Result(inner)
+        | Annotation::Array(inner)
+        | Annotation::Dictionary(inner) => walk_annotation(inner, visitor),
+        Annotation::Tuple(members) => {
+            for member in members {
+                walk_annotation(member, visitor);
+            }
+        }
+        Annotation::Function(params, ret) => {
+            for param in params {
+                walk_annotation(param, visitor);
+            }
+            walk_annotation(ret, visitor);
+        }
+        Annotation::Unit | Annotation::Kw(_) | Annotation::Poison(_) => {}
     }
 }

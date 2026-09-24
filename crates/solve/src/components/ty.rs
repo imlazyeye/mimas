@@ -120,13 +120,20 @@ impl TyExt for Ty {
                     .map(|v| Ty::from_annotation(v, solver))
                     .collect::<Result<_>>()?,
             )),
-            Annotation::Ty(ident) => ident.query(solver),
+            Annotation::Ty(ident) => {
+                let ty = ident.query(solver)?;
+                let dec = solver.ribs.resolve(&ident);
+                solver.note(&ident, ty.clone(), dec);
+                Ok(ty)
+            }
             Annotation::Path(segments) => {
                 let mut iter = segments.into_iter();
                 let head = iter
                     .next()
                     .expect("path annotation has at least two segments");
                 let mut ty = head.query(solver)?;
+                let dec = solver.ribs.resolve(&head);
+                solver.note(&head, ty.clone(), dec);
                 for segment in iter {
                     let adt = match ty.clone().normalized(solver) {
                         Ty::Adt(adt) | Ty::Identity(adt) => adt,
@@ -153,6 +160,7 @@ impl TyExt for Ty {
                             at: segment.location.into(),
                             field_name: segment.lexeme.clone(),
                         })?;
+                    solver.note(&segment, field.ty.clone(), Some(field.dec));
                     ty = field.ty;
                 }
                 Ok(ty.normalized(solver))
@@ -161,6 +169,8 @@ impl TyExt for Ty {
                 let mut pacts = Vec::with_capacity(idents.len());
                 for ident in idents {
                     let ty = ident.query(solver)?;
+                    let dec = solver.ribs.resolve(&ident);
+                    solver.note(&ident, ty.clone(), dec);
                     let Some(pid) = ty.as_single_pact() else {
                         return Err(NotAPact {
                             src: solver.src(ident.location),
