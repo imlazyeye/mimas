@@ -1,0 +1,101 @@
+name: vscode
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_STRIP: debuginfo
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: package ${{ matrix.vsce || 'universal' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, rust: x86_64-unknown-linux-musl, vsce: linux-x64 alpine-x64 }
+          - { os: ubuntu-24.04-arm, rust: aarch64-unknown-linux-musl, vsce: linux-arm64 alpine-arm64 }
+          - { os: macos-latest, rust: aarch64-apple-darwin, vsce: darwin-arm64 }
+          - { os: macos-latest, rust: x86_64-apple-darwin, vsce: darwin-x64 }
+          - { os: windows-latest, rust: x86_64-pc-windows-msvc, vsce: win32-x64 }
+          - { os: windows-latest, rust: aarch64-pc-windows-msvc, vsce: win32-arm64 }
+          # no server, for every other platform, where the extension looks on PATH instead
+          - { os: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.rust
+        with:
+          targets: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.rust
+        with:
+          key: ${{ matrix.rust }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: tools/vscode/package-lock.json
+
+      - name: Build the server
+        if: matrix.rust
+        run: |
+          cargo build --release --locked -p mimas-lsp --target ${{ matrix.rust }}
+          mkdir -p tools/vscode/server
+          cp target/${{ matrix.rust }}/release/mimas-lsp${{ runner.os == 'Windows' && '.exe' || '' }} tools/vscode/server/
+
+      - name: Package
+        working-directory: tools/vscode
+        run: |
+          npm ci
+          if [ -z "${{ matrix.vsce }}" ]; then
+            npx vsce package
+          fi
+          for target in ${{ matrix.vsce }}; do
+            npx vsce package --target "$target"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.rust || 'universal' }}
+          path: tools/vscode/*.vsix
+
+  publish:
+    needs: package
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: tools/vscode/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+          path: vsix
+
+      - name: Publish to the marketplace
+        working-directory: tools/vscode
+        run: |
+          npm ci
+          npx vsce publish --packagePath ../../vsix/*.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Attach the packages to the release
+        run: gh release upload "$GITHUB_REF_NAME" vsix/*.vsix
+        env:
+          GH_TOKEN: ${{ github.token }}

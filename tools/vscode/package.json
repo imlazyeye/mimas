@@ -2,7 +2,7 @@
     "name": "mimas",
     "displayName": "mimas",
     "description": "Syntax highlighting, snippets, diagnostics, and hover for the mimas language.",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "publisher": "imlazyeye",
     "author": {
         "name": "Gabe Weiner"
@@ -44,7 +44,7 @@
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
         "sync-grammar": "node ./scripts/sync-grammar.mjs",
-        "vscode:prepublish": "node ./scripts/sync-grammar.mjs && npm run compile"
+        "vscode:prepublish": "node ./scripts/sync-grammar.mjs && node ./scripts/copy-license.mjs && npm run compile"
     },
     "contributes": {
         "languages": [
@@ -129,8 +129,8 @@
             "properties": {
                 "mimas.serverPath": {
                     "type": "string",
-                    "default": "mimas-lsp",
-                    "description": "Path to the mimas language server executable."
+                    "default": "",
+                    "description": "Path to the mimas language server executable. Empty means the one bundled with the extension, or mimas-lsp on PATH for platforms it isn't bundled for."
                 },
                 "mimas.apiPath": {
                     "type": "string",

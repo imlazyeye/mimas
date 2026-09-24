@@ -14,3 +14,6 @@ temp/
 profile.json*
 node_modules/
 tools/vscode/out/
+tools/vscode/server/
+tools/vscode/LICENSE
+tools/vscode/*.vsix

@@ -87,7 +87,8 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 
 ### The server
 
-Install the lsp via cargo:
+The VS Code extension bundles the server, so skip this step if that's your editor. Otherwise,
+install the lsp via cargo:
 
 ```sh
 cargo install mimas-lsp
@@ -97,9 +98,10 @@ That puts a `mimas-lsp` binary on your `PATH`, which is where editors will look 
 
 ### The extension
 
-An extension for Visual Studio Code is housed in `tools/vscode`. An up to date .vsix is vendored
-there. Inside of VSC you can install it by opening the command palette and selecting "Install from
-VSIX".
+Install [mimas](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas) from the Visual
+Studio Code marketplace. Each release also attaches the extension's `.vsix` files to its
+[GitHub release](https://github.com/imlazyeye/mimas/releases), which you can install by opening
+the command palette and selecting "Install from VSIX". Its source lives in `tools/vscode`.
 
 ### Other editors
 
