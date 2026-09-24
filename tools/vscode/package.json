@@ -1,7 +1,7 @@
 {
     "name": "mimas",
     "displayName": "mimas",
-    "description": "Syntax highlighting, snippets, diagnostics, and hover for the mimas language.",
+    "description": "Support for mimas, a flexible, statically typed scripting language for Rust.",
     "version": "0.2.0",
     "publisher": "imlazyeye",
     "author": {

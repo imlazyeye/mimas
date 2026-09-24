@@ -114,7 +114,7 @@ Runnable projects live in [`examples/`](examples):
 
 A language server, `mimas-lsp`, gives any LSP-capable editor diagnostics, hover, go to definition, references, rename, outlines, and inlay hints. Running a Rust host through cargo writes its API to `target/mimas/api.json`, which the server loads so scripts that use the host's types and functions are checked against them. See the [Language Server](https://mim.as/introduction/lsp.html) page for setup and limitations.
 
-A VS Code extension lives in [`tools/vscode`](tools/vscode) -- syntax highlighting, snippets, and language configuration for `.mim` files, plus the language server. Install it from the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas). The TextMate grammar it uses ([`tools/highlighter`](tools/highlighter)) is written in mimas, and is the same one that colors the docs.
+A VS Code extension lives in [`tools/vscode`](tools/vscode). You can install it from the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas).
 
 ## Status
 
