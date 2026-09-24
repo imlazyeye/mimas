@@ -400,7 +400,7 @@ impl Solve for Access {
                         if let ExprKind::Literal(Literal::Int(i)) = right.kind() {
                             let i = *i as usize;
                             let adt = &solver.adts[aid];
-                            let tup_info = match adt.variants.values().next() {
+                            let tup_info = match adt.as_singular() {
                                 Some(Variant::Tuple(t)) => Some((
                                     t.members.get(i).cloned(),
                                     t.members.len(),
@@ -427,7 +427,7 @@ impl Solve for Access {
                             let name = &right.as_ident().unwrap().lexeme;
 
                             // fields win over impls. method dispatch happens @ call
-                            let field = match solver.adts[aid].variants.values().next() {
+                            let field = match solver.adts[aid].as_singular() {
                                 Some(Variant::Struct(s)) => {
                                     s.fields.get(name).map(|f| (f.ty.clone(), f.dec))
                                 }
