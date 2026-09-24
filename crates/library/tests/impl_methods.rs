@@ -1,4 +1,5 @@
-use vm::{Ctx, mimas};
+use api::ApiEntry;
+use vm::{Ctx, Ty, mimas};
 
 #[mimas]
 struct Player {
@@ -10,6 +11,7 @@ struct Player {
 impl Player {
     const MAX_HEALTH: i64 = 100;
 
+    /// Makes a player at full health.
     fn new(name: String) -> Self {
         Player {
             name,
@@ -17,6 +19,7 @@ impl Player {
         }
     }
 
+    /// Says hi.
     fn greeting(&self) -> String {
         format!("hi, {}", self.name)
     }
@@ -34,6 +37,12 @@ impl Player {
         sink.push(vm::Val::Int(self.health));
         self.health = 0;
     }
+}
+
+/// Heals by `amount`.
+#[mimas(game)]
+fn heal(amount: i64) -> i64 {
+    amount
 }
 
 fn run(src: &str) -> String {
@@ -109,4 +118,31 @@ fn method_with_ctx_and_autoborrow() {
 #[test]
 fn assoc_const() {
     assert_eq!(run(r#"let TEST_VALUE = Player::MAX_HEALTH;"#), "100");
+}
+
+#[test]
+fn docs_come_from_the_registration() {
+    let library = vm::Vm::new().install_library(library::std);
+    let player = library
+        .adts()
+        .iter()
+        .find(|a| a.name == "Player")
+        .unwrap()
+        .adt_id;
+    let doc_of = |name: &str| {
+        library
+            .natives()
+            .find_map(|(_, entry)| match entry {
+                ApiEntry::Function(f) if f.name == name => Some(f.doc.clone()),
+                ApiEntry::Method(m) if m.name == name && m.recv_ty == Ty::Adt(player) => {
+                    Some(m.doc.clone())
+                }
+                _ => None,
+            })
+            .expect("native was registered")
+    };
+    assert_eq!(doc_of("new"), "Makes a player at full health.");
+    assert_eq!(doc_of("greeting"), "Says hi.");
+    assert_eq!(doc_of("heal"), "Heals by `amount`.");
+    assert_eq!(doc_of("damage"), "");
 }

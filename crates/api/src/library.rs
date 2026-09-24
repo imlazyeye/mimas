@@ -61,6 +61,15 @@ impl<C> Library<C> {
         self.natives.push(ApiEntry::Constant(c))
     }
 
+    pub fn set_doc(&mut self, id: NativeId, doc: impl Into<String>) {
+        let doc = doc.into();
+        match &mut self.natives[id] {
+            ApiEntry::Function(f) => f.doc = doc,
+            ApiEntry::Method(m) => m.doc = doc,
+            ApiEntry::Constant(c) => c.doc = doc,
+        }
+    }
+
     pub fn mark_instrinsic(&mut self, nid: NativeId, i: Intrinsic) {
         self.intrinsics.insert(nid, i);
     }
