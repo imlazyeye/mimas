@@ -55,17 +55,18 @@ jobs:
         working-directory: tools/vscode
         run: |
           npm ci
+          mkdir -p "$GITHUB_WORKSPACE/vsix"
           if [ -z "${{ matrix.vsce }}" ]; then
-            npx vsce package
+            npx vsce package --out "$GITHUB_WORKSPACE/vsix/"
           fi
           for target in ${{ matrix.vsce }}; do
-            npx vsce package --target "$target"
+            npx vsce package --target "$target" --out "$GITHUB_WORKSPACE/vsix/"
           done
 
       - uses: actions/upload-artifact@v4
         with:
           name: vsix-${{ matrix.rust || 'universal' }}
-          path: tools/vscode/*.vsix
+          path: vsix/*.vsix
 
   publish:
     needs: package
