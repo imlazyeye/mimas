@@ -48,10 +48,10 @@ print(f"area of {shapes.len()} shapes: {total}");
 
 | | |
 | --- | --- |
-| 🪶 **Flexible** | Inference writes your types, compiles stay fast, and errors point toward the fix instead of just turning you away. Garbage collected -- no borrow checker, no lifetimes. |
-| 🛡️ **Typed** | Static typing with inference, user-defined types, exhaustive [pattern matching](https://mim.as/reference/control-flow/match.html), and `T?` option safety so an unexpected `null` can't reach you. |
-| 🧩 **Extendable** | Share Rust types and functions with the `#[mimas]` macro -- they're type-checked just like native ones. |
-| ✅ **Robust** | Every panic is treated as a bug, top to bottom. Over **1,900 tests** (the tests are tested, via [cargo mutants](https://mutants.rs)), with clear diagnostics powered by [miette](https://github.com/zkat/miette). |
+| 🪶&nbsp;**Flexible** | Inference writes your types, compiles stay fast, and errors point toward the fix instead of just turning you away. Garbage collected -- no borrow checker, no lifetimes. |
+| 🛡️&nbsp;**Typed** | Static typing with inference, user-defined types, exhaustive [pattern matching](https://mim.as/reference/control-flow/match.html), and `T?` option safety so an unexpected `null` can't reach you. |
+| 🧩&nbsp;**Extendable** | Share Rust types and functions with the `#[mimas]` macro -- they're type-checked just like native ones. |
+| ✅&nbsp;**Robust** | Every panic is treated as a bug, top to bottom. Over **1,900 tests** (the tests are tested, via [cargo mutants](https://mutants.rs)), with clear diagnostics powered by [miette](https://github.com/zkat/miette). |
 
 Read the [full tour](https://mim.as/introduction/tour.html) for a quick pass over the whole language.
 
