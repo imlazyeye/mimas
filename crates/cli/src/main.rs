@@ -216,28 +216,16 @@ fn load<'a>(
     color: bool,
 ) -> Result<(Directory<'a>, usize), i32> {
     report_meta_errors(&unit.io_errors);
-    let directory = ice::catch("check", || {
-        Directory::load(&unit.files, &unit.root, library)
-    })
-    .map_err(|report| {
-        report.emit();
-        ICE_EXIT_CODE
-    })?;
+    let directory =
+        ice::catch("check", || Directory::load(&unit.files, library)).map_err(|report| {
+            report.emit();
+            ICE_EXIT_CODE
+        })?;
 
     for error in &directory.modules.errors {
         render::emit(error.as_ref(), color);
     }
-    for path in &directory.out_of_place_scripts {
-        println!(
-            "{}: {} has to sit at the top of its project ({})",
-            "error".bright_red().bold(),
-            path.display(),
-            unit.root.display()
-        );
-    }
-    let count = unit.io_errors.len()
-        + directory.modules.errors.len()
-        + directory.out_of_place_scripts.len();
+    let count = unit.io_errors.len() + directory.modules.errors.len();
     return Ok((directory, count));
 
     fn report_meta_errors(io_errors: &[std::io::Error]) {

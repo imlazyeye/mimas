@@ -1,28 +1,19 @@
-use crate::{host_api::HostApi, workspace::Workspace};
+use crate::{host_api::Source, workspace::Workspace};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::*;
 use serde::{Serialize, de::DeserializeOwned};
-use std::path::PathBuf;
 
 pub struct Server<'a> {
     connection: &'a Connection,
     workspace: Workspace,
-    host_api: HostApi,
 }
 
 impl<'a> Server<'a> {
-    pub fn new(
-        connection: &'a Connection,
-        api_path: Option<PathBuf>,
-        expect_api: bool,
-    ) -> anyhow::Result<Self> {
-        let mut server = Self {
+    pub fn new(connection: &'a Connection, source: Source) -> Self {
+        Self {
             connection,
-            workspace: Workspace::default(),
-            host_api: HostApi::new(api_path, expect_api),
-        };
-        server.refresh_library()?;
-        Ok(server)
+            workspace: Workspace::new(source),
+        }
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
@@ -132,9 +123,12 @@ impl<'a> Server<'a> {
         let Ok(path) = uri.to_file_path() else {
             return Ok(());
         };
-        self.refresh_library()?;
-        for (uri, diagnostics) in self.workspace.update(&path, text) {
+        let (diagnostics, messages) = self.workspace.update(&path, text);
+        for (uri, diagnostics) in diagnostics {
             self.publish_diagnostics(uri, diagnostics)?;
+        }
+        for (kind, message) in messages {
+            self.show_message(kind, message)?;
         }
         Ok(())
     }
@@ -142,9 +136,10 @@ impl<'a> Server<'a> {
     fn hover(&self, params: HoverParams) -> Option<Hover> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        self.workspace
+        let project = self.workspace.project(&path)?;
+        project
             .analysis(&path)?
-            .hover(&path, position.position, &self.workspace.library)
+            .hover(&path, position.position, &project.library)
     }
 
     fn definition(&self, params: DefinitionParams) -> Option<Location> {
@@ -174,12 +169,7 @@ impl<'a> Server<'a> {
             .workspace
             .project(&path)
             .ok_or("that file isn't part of a project")?;
-        project.rename(
-            &path,
-            position.position,
-            &params.new_name,
-            &self.workspace.library,
-        )
+        project.rename(&path, position.position, &params.new_name)
     }
 
     fn inlay_hints(&self, params: InlayHintParams) -> Option<Vec<InlayHint>> {
@@ -209,18 +199,6 @@ impl<'a> Server<'a> {
     fn symbols(&self, params: DocumentSymbolParams) -> Option<Vec<DocumentSymbol>> {
         let path = params.text_document.uri.to_file_path().ok()?;
         self.workspace.analysis(&path)?.symbols(&path)
-    }
-
-    /// Swaps in the host's API when its manifest has changed since the last look.
-    fn refresh_library(&mut self) -> anyhow::Result<()> {
-        let (library, message) = self.host_api.refresh();
-        if let Some(library) = library {
-            self.workspace.library = library;
-        }
-        if let Some((kind, message)) = message {
-            self.show_message(kind, message)?;
-        }
-        Ok(())
     }
 
     fn show_message(&self, kind: MessageType, message: String) -> anyhow::Result<()> {

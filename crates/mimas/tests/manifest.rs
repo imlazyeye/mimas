@@ -6,7 +6,7 @@ use std::{
 
 use api::{ApiConstant, ApiEntry, Library, Manifest, ManifestRef};
 use mimas::{Literal, Ty, Vm, mimas, write_api};
-use vm::export::target_dir;
+use vm::export::{manifest_path, target_dir};
 
 #[mimas]
 fn cheer(name: String) -> String {
@@ -204,6 +204,21 @@ fn target_dir_skips_test_binaries() {
 fn target_dir_needs_a_cargo_target() {
     let dir = scratch("no-target");
     assert_eq!(target_dir(&dir.join("debug").join("app")), None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn manifest_is_named_after_the_binary() {
+    let dir = scratch("named");
+    std::fs::write(dir.join("CACHEDIR.TAG"), "").unwrap();
+    assert_eq!(
+        manifest_path(&dir.join("debug").join("game-loop")),
+        Some(dir.join("mimas").join("game-loop.json"))
+    );
+    assert_eq!(
+        manifest_path(&dir.join("release").join("examples").join("ex")),
+        Some(dir.join("mimas").join("ex.json"))
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 

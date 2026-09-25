@@ -55,8 +55,8 @@ pub use macros::{MimasEnum, MimasStruct, mimas, native};
 pub use shared::{Literal, Ty};
 pub use vm::{Ctx, Val, Vm, api::Api};
 
-/// A host run from its cargo target dir already writes `target/mimas/api.json`. Call this to
-/// put the manifest somewhere else, like a copy committed for modders.
+/// A host run from its cargo target dir already writes `target/mimas/<binary>.json`. Call this
+/// to put the manifest somewhere else, like a copy committed for modders.
 ///
 /// ```no_run
 /// let library = mimas::Vm::new().install_library(mimas::library::std);

@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 /// The files of the project a path names: a directory, or a file with the directory it sits in.
 pub struct Unit {
-    pub root: PathBuf,
     pub file: Option<PathBuf>,
     pub files: Vec<(PathBuf, String)>,
     pub io_errors: Vec<std::io::Error>,
@@ -15,13 +14,12 @@ impl Unit {
         let root = match &file {
             Some(file) => solve::dir_of(file),
             None => path,
-        }
-        .to_path_buf();
-        let (mut paths, mut io_errors) = solve::mim_files(&root, true);
+        };
+        let (mut paths, mut io_errors) = solve::mim_files(root, true);
         // a file is taken as given, whatever its extension, in place of its walked twin
         if let Some(file) = &file {
             paths.retain(|walked| {
-                solve::dir_of(walked) != root.as_path() || walked.file_name() != file.file_name()
+                solve::dir_of(walked) != root || walked.file_name() != file.file_name()
             });
             paths.insert(0, file.clone());
         }
@@ -37,14 +35,13 @@ impl Unit {
             }
         }
         Self {
-            root,
             file,
             files,
             io_errors,
         }
     }
 
-    /// The scripts the path names: the file itself, or every one at the top of the directory.
+    /// The scripts the path names: the file itself, or every one in the directory.
     pub fn scripts<'a>(&self, directory: &Directory<'a>) -> Vec<&'a (PathBuf, String)> {
         directory
             .scripts

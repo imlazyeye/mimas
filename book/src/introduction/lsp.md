@@ -69,6 +69,14 @@ A `let` written without an annotation shows the type that was inferred for it.
 let count = items.len(); // your editor can render this as `let count: int = ...`
 ```
 
+### Projects
+
+Each file is checked as part of the project it sits in. Inside a cargo package, that's the highest
+folder in the package holding a script, so scripts in subfolders see the same modules as a host
+loading the whole folder would give them. Outside a package, it's the nearest folder holding a
+script, same as `mimas run`. A project never takes in another cargo package or a `target`
+directory.
+
 ## What it does not support
 
 - **The solver is not resilient.** This means that any error will cut off type information and
@@ -79,9 +87,9 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 - **Navigation stops at the language boundary.** Natives from the standard library or a host,
   builtin types like `int`, and module names have no mimas source to jump to, so nothing happens.
   We will support navigating to the Rust definition in the future.
-- **One host per workspace.** The server loads a single file, found from the first workspace
-  folder. A workspace whose crates embed mimas with different APIs, or several workspace folders,
-  all share it.
+- **A host's scripts have to sit in its cargo package.** Scripts outside every package, like ones
+  at the root of a virtual workspace, get the standard library alone unless `mimas.apiPath` points
+  the server at a manifest (which then covers every script).
 
 ## Setting it up
 
@@ -121,9 +129,11 @@ vim.lsp.enable("mimas")
 
 When a Rust host embeds mimas, its scripts use the functions, types, and constants it registers.
 The server learns about those from a file the host writes. Running the host from its cargo target
-dir writes its API to `target/mimas/api.json`, which the server finds by asking `cargo` where your
-target dir is. You'll be notified if it can't find that file. After you change the host's API, run
-it again, and diagnostics pick up the change on your next edit.
+dir writes its API to `target/mimas/<binary>.json`, named after the binary so hosts sharing a target
+dir (i.e.: a workspace) keep their own. A script is checked against the host of the cargo package it sits in, and the
+server asks `cargo` for that package's binaries and target dir. When several of them have written a
+file, the newest wins. You'll be notified if none have yet. After you change the host's API, run it
+again, and diagnostics pick up the change on your next edit.
 
 - The host and the server have to be the same version of mimas. On a mismatch, the server shows a
   warning and falls back to the standard library alone.
@@ -137,8 +147,8 @@ let library = mimas::Vm::new().install_library(mimas::library::std);
 mimas::write_api(&library, "scripts/api.json".as_ref())?;
 ```
 
-In VS Code, the `mimas.apiPath` setting points the server at a different file (relative to the
-workspace folder), or turns it off with `off`, which leaves the standard library alone. The
+In VS Code, the `mimas.apiPath` setting points the server at one file for every script (relative to
+the workspace folder), or turns it off with `off`, which leaves only the standard library. The
 **mimas: Select Host API Manifest** command sets it with a file dialog, and **mimas: Restart
 Language Server** restarts the server, which also happens on its own when the setting changes.
 Other editors pass the same value as `apiPath` in the server's initialization options. In Neovim,

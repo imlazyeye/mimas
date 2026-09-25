@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use api::Library;
 
-use crate::{Directory, Modules};
+use crate::{Directory, Modules, mim_files};
 
 fn file(path: &str, text: &str) -> (PathBuf, String) {
     (PathBuf::from(path), text.to_owned())
@@ -38,7 +38,7 @@ fn scripts_see_all_modules() {
         ",
         ),
     ];
-    let directory = Directory::load(&files, Path::new("p"), &Library::new());
+    let directory = Directory::load(&files, &Library::new());
     assert!(
         directory.modules.errors.is_empty(),
         "{:?}",
@@ -50,7 +50,6 @@ fn scripts_see_all_modules() {
     assert_eq!(script.0, Path::new("p/a.mim"));
     let loaded = solve(&directory, script);
     assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
-    assert!(directory.out_of_place_scripts.is_empty());
 }
 
 #[test]
@@ -60,7 +59,7 @@ fn scripts_isolated() {
         file("p/b.mim", "fn shared() -> int { 2 }"),
         file("p/c.mim", "let x: int = shared();"),
     ];
-    let directory = Directory::load(&files, Path::new("p"), &Library::new());
+    let directory = Directory::load(&files, &Library::new());
     let clean: Vec<bool> = directory
         .scripts
         .iter()
@@ -70,21 +69,29 @@ fn scripts_isolated() {
 }
 
 #[test]
-fn out_of_place_script() {
+fn nested_script_sees_all_modules() {
     let files = [
         file("p/a.mim", ""),
-        file("p/sub/b.mim", ""),
-        file("p/m.mim", "module @;"),
+        file(
+            "p/sub/b.mim",
+            "use m;
+             let x: int = m::one();",
+        ),
+        file(
+            "p/m.mim",
+            "module @;
+             pub fn one() -> int { 1 }",
+        ),
     ];
-    let directory = Directory::load(&files, Path::new("p"), &Library::new());
+    let directory = Directory::load(&files, &Library::new());
     let scripts: Vec<&Path> = directory
         .scripts
         .iter()
         .map(|file| file.0.as_path())
         .collect();
-    assert_eq!(scripts, [Path::new("p/a.mim")]);
-    assert_eq!(directory.out_of_place_scripts, [Path::new("p/sub/b.mim")]);
-    assert_eq!(directory.module_files.len(), 1);
+    assert_eq!(scripts, [Path::new("p/a.mim"), Path::new("p/sub/b.mim")]);
+    let loaded = solve(&directory, directory.scripts[1]);
+    assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
 }
 
 #[test]
@@ -99,7 +106,35 @@ fn broken_module_cuts_off_script() {
         ),
         file("p/a.mim", "let x: str = 1;"),
     ];
-    let directory = Directory::load(&files, Path::new("p"), &Library::new());
+    let directory = Directory::load(&files, &Library::new());
     assert_eq!(directory.modules.errors.len(), 1);
     assert!(solve(&directory, directory.scripts[0]).errors.is_empty());
+}
+
+#[test]
+fn walk_skips_packages_and_target_dirs() {
+    let root = std::env::temp_dir().join(format!("mimas-walk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for (path, text) in [
+        ("a.mim", ""),
+        ("sub/b.mim", ""),
+        ("workspace/Cargo.toml", "[workspace]"),
+        ("workspace/c.mim", ""),
+        ("pkg/Cargo.toml", "[package]"),
+        ("pkg/d.mim", ""),
+        ("target/CACHEDIR.TAG", ""),
+        ("target/e.mim", ""),
+    ] {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let walked = mim_files(&root, true).0;
+    let expected = ["a.mim", "sub/b.mim", "workspace/c.mim"].map(|path| root.join(path));
+    assert_eq!(walked, expected);
+    assert_eq!(
+        mim_files(&root.join("pkg"), true).0,
+        [root.join("pkg/d.mim")]
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }

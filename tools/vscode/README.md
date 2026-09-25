@@ -20,4 +20,4 @@ The server, `mimas-lsp`, comes bundled with the extension on Windows, macOS, and
 
 ## Getting host types
 
-A Rust host run from its cargo `target` directory writes its API to `target/mimas/api.json`, which the server loads to resolve host types. `mimas.apiPath` points it elsewhere, or `off` for std only. "mimas: Select Host API Manifest" sets it with a file dialog, and "mimas: Restart Language Server" restarts the server, which also happens on its own when either setting changes. `mimas.trace.server` logs the messages to the "mimas" output channel.
+A Rust host run from its cargo `target` directory writes its API to `target/mimas/<binary>.json`, which the server loads to resolve host types in the scripts of that host's cargo package. `mimas.apiPath` points every script at one file instead, or `off` for std only. "mimas: Select Host API Manifest" sets it with a file dialog, and "mimas: Restart Language Server" restarts the server, which also happens on its own when either setting changes. `mimas.trace.server` logs the messages to the "mimas" output channel.
