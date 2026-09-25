@@ -123,12 +123,8 @@ impl<'a> Server<'a> {
         let Ok(path) = uri.to_file_path() else {
             return Ok(());
         };
-        let (diagnostics, messages) = self.workspace.update(&path, text);
-        for (uri, diagnostics) in diagnostics {
+        for (uri, diagnostics) in self.workspace.update(&path, text) {
             self.publish_diagnostics(uri, diagnostics)?;
-        }
-        for (kind, message) in messages {
-            self.show_message(kind, message)?;
         }
         Ok(())
     }
@@ -199,15 +195,6 @@ impl<'a> Server<'a> {
     fn symbols(&self, params: DocumentSymbolParams) -> Option<Vec<DocumentSymbol>> {
         let path = params.text_document.uri.to_file_path().ok()?;
         self.workspace.analysis(&path)?.symbols(&path)
-    }
-
-    fn show_message(&self, kind: MessageType, message: String) -> anyhow::Result<()> {
-        let note = Notification::new(
-            LspNotificationMethod::WindowShowMessage.as_str().to_owned(),
-            ShowMessageParams { kind, message },
-        );
-        self.connection.sender.send(Message::Notification(note))?;
-        Ok(())
     }
 
     fn publish_diagnostics(

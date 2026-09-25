@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     path::{Path, PathBuf},
-    rc::Rc,
     time::{Duration, SystemTime},
 };
 
@@ -9,10 +8,7 @@ use api::{ApiConstant, ApiEntry, Library, ManifestRef};
 use shared::{Literal, Ty};
 
 use super::utils::{open, tree};
-use crate::{
-    host_api::{HostApis, Source},
-    workspace::Workspace,
-};
+use crate::{host_api::Source, workspace::Workspace};
 
 /// A cargo package with a binary and an example, and a script that uses `host::SPEED`.
 fn package(name: &str) -> PathBuf {
@@ -68,18 +64,17 @@ fn has(library: &Library<()>, constant: &str) -> bool {
 #[test]
 fn newest_binary_manifest_wins() {
     let root = package("newest");
-    let mut hosts = HostApis::new(Source::Packages);
-    assert!(!has(&hosts.library(Some(&root)), "SPEED"));
-    assert_eq!(hosts.messages.len(), 1, "{:?}", hosts.messages);
+    let (library, missing) = Source::Packages.library(Some(&root));
+    assert!(!has(&library, "SPEED"));
+    assert!(missing.is_some());
 
     write(&root, "game", "SPEED", Duration::from_secs(60));
-    let game = hosts.library(Some(&root));
-    assert!(has(&game, "SPEED"));
-    assert!(Rc::ptr_eq(&game, &hosts.library(Some(&root))));
+    assert!(has(&Source::Packages.library(Some(&root)).0, "SPEED"));
 
     write(&root, "editor", "ZOOM", Duration::ZERO);
-    assert!(has(&hosts.library(Some(&root)), "ZOOM"));
-    assert_eq!(hosts.messages.len(), 1, "{:?}", hosts.messages);
+    let (library, missing) = Source::Packages.library(Some(&root));
+    assert!(has(&library, "ZOOM"));
+    assert_eq!(missing, None);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -88,7 +83,8 @@ fn running_the_host_rechecks_its_scripts() {
     let root = package("rerun");
     let script = root.join("scripts/speed.mim");
     let mut workspace = Workspace::new(Source::Packages);
-    assert_eq!(open(&mut workspace, &script), [(script.clone(), 1)]);
+    // the unknown `host::SPEED`, and a note that the host hasn't run yet
+    assert_eq!(open(&mut workspace, &script), [(script.clone(), 2)]);
 
     write(&root, "game", "SPEED", Duration::ZERO);
     assert_eq!(open(&mut workspace, &script), [(script.clone(), 0)]);

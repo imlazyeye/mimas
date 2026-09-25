@@ -1,26 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
-    rc::Rc,
-    time::SystemTime,
-};
+use std::path::{Path, PathBuf};
 
 use api::Library;
-use lsp_types::MessageType;
-
-/// The libraries projects are checked against, each read from a manifest a host wrote.
-pub struct HostApis {
-    source: Source,
-    std: Rc<Library<()>>,
-    /// The manifests the binaries of each cargo package write.
-    binaries: HashMap<PathBuf, Vec<PathBuf>>,
-    /// Each manifest read so far, with when it was written.
-    loaded: HashMap<PathBuf, (SystemTime, Rc<Library<()>>)>,
-    /// Packages (or the configured manifest) the user already heard are missing one.
-    missing: HashSet<PathBuf>,
-    /// What the user should hear about.
-    pub messages: Vec<(MessageType, String)>,
-}
 
 /// Where projects get their host API from.
 pub enum Source {
@@ -33,47 +13,35 @@ pub enum Source {
     Off,
 }
 
-impl HostApis {
-    pub fn new(source: Source) -> Self {
-        Self {
-            source,
-            std: Rc::new(vm::Vm::new().install_library(library::std)),
-            binaries: HashMap::new(),
-            loaded: HashMap::new(),
-            missing: HashSet::new(),
-            messages: Vec::new(),
-        }
-    }
-
-    /// The library to check a project against, given the cargo package it sits in. It's the same
-    /// `Rc` until the manifest it comes from changes.
-    pub fn library(&mut self, package: Option<&Path>) -> Rc<Library<()>> {
-        let (key, manifests) = match (&self.source, package) {
-            (Source::Packages, Some(package)) => (
-                package,
-                self.binaries
-                    .entry(package.to_path_buf())
-                    .or_insert_with(|| binaries(package))
-                    .as_slice(),
-            ),
-            (Source::Manifest(path), _) => (path.as_path(), std::slice::from_ref(path)),
-            _ => return self.std.clone(),
+impl Source {
+    /// The library to check a project in `package` against, read fresh from its manifest. It's std
+    /// alone when there's no manifest to go by, along with why when one was expected.
+    pub fn library(&self, package: Option<&Path>) -> (Library<()>, Option<String>) {
+        let std_alone = || vm::Vm::new().install_library(library::std);
+        let (key, manifests) = match (self, package) {
+            (Source::Packages, Some(package)) => (package, binaries(package)),
+            (Source::Manifest(path), _) => (path.as_path(), vec![path.clone()]),
+            _ => return (std_alone(), None),
         };
+        // a package with no binaries hosts nothing, so it has no manifest to wait for
+        if manifests.is_empty() {
+            return (std_alone(), None);
+        }
         let newest = manifests
             .iter()
-            .filter_map(|path| Some((modified(path)?, path.clone())))
+            .filter_map(|path| Some((std::fs::metadata(path).ok()?.modified().ok()?, path)))
             .max();
-        let Some((modified, path)) = newest else {
-            if !manifests.is_empty() && self.missing.insert(key.to_path_buf()) {
-                let message = format!(
-                    "mimas: no host API for {} yet, run your Rust host once to write it",
-                    key.display()
-                );
-                self.messages.push((MessageType::Info, message));
-            }
-            return self.std.clone();
+        let problem = match newest {
+            Some((_, path)) => match read(path) {
+                Ok(library) => return (library, None),
+                Err(problem) => problem,
+            },
+            None => format!(
+                "no host API for {} yet, run your Rust host once to write it",
+                key.display()
+            ),
         };
-        return self.load(&path, modified);
+        return (std_alone(), Some(problem));
 
         // every bin and example target of the package, each writing its own manifest
         fn binaries(package: &Path) -> Vec<PathBuf> {
@@ -84,76 +52,45 @@ impl HostApis {
                 .current_dir(package)
                 .output()
                 .ok()
-                .filter(|out| out.status.success())
                 .and_then(|out| serde_json::from_slice::<serde_json::Value>(&out.stdout).ok())
             else {
                 return Vec::new();
             };
             let dir = PathBuf::from(meta["target_directory"].as_str().unwrap_or_default());
-            let manifest = std::fs::canonicalize(package.join("Cargo.toml")).ok();
+            let Ok(manifest) = std::fs::canonicalize(package.join("Cargo.toml")) else {
+                return Vec::new();
+            };
             meta["packages"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter(|package| package["manifest_path"].as_str().map(PathBuf::from) == manifest)
-                .flat_map(|package| package["targets"].as_array().into_iter().flatten())
-                .filter(|target| {
-                    target["kind"].as_array().is_some_and(|kinds| {
-                        kinds.iter().any(|kind| kind == "bin" || kind == "example")
-                    })
+                // canonical on both sides, since on Windows only ours carries the `\\?\` prefix
+                .filter(|package| {
+                    let path = package["manifest_path"].as_str().unwrap_or_default();
+                    std::fs::canonicalize(path).is_ok_and(|path| path == manifest)
                 })
+                .flat_map(|package| package["targets"].as_array().into_iter().flatten())
+                .filter(|target| matches!(target["kind"][0].as_str(), Some("bin" | "example")))
                 .filter_map(|target| Some(api::manifest_file(&dir, target["name"].as_str()?)))
                 .collect()
         }
-    }
 
-    /// The library in the manifest at `path`, last written at `modified`, read again only once
-    /// that changes. It's std alone when the manifest is unusable, and the user hears why.
-    fn load(&mut self, path: &Path, modified: SystemTime) -> Rc<Library<()>> {
-        if let Some((when, library)) = self.loaded.get(path)
-            && *when == modified
-        {
-            return library.clone();
-        }
-
-        // the host may be halfway through writing it, so leave it for the next look
-        let Some(json) = std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        else {
-            return match self.loaded.get(path) {
-                Some((_, library)) => library.clone(),
-                None => self.std.clone(),
-            };
-        };
-        let version = json["version"].as_str().unwrap_or("unknown").to_owned();
-        let manifest = if version != api::VERSION {
-            Err(format!(
-                "{} is from mimas {version}, rebuild the host against mimas {}",
-                path.display(),
-                api::VERSION
-            ))
-        } else {
-            serde_json::from_value::<api::Manifest>(json)
-                .map_err(|e| format!("couldn't read {}: {e}", path.display()))
-        };
-        let library = match manifest {
-            Ok(manifest) => Rc::new(manifest.library),
-            Err(problem) => {
-                eprintln!("mimas-lsp: {problem}");
-                self.messages
-                    .push((MessageType::Warning, format!("mimas: {problem}")));
-                self.std.clone()
+        fn read(path: &Path) -> Result<Library<()>, String> {
+            let json = std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .ok_or_else(|| format!("couldn't read {}", path.display()))?;
+            let version = json["version"].as_str().unwrap_or("unknown");
+            if version != api::VERSION {
+                return Err(format!(
+                    "{} is from mimas {version}, rebuild the host against mimas {}",
+                    path.display(),
+                    api::VERSION
+                ));
             }
-        };
-        self.loaded
-            .insert(path.to_path_buf(), (modified, library.clone()));
-        library
+            serde_json::from_value::<api::Manifest>(json)
+                .map(|manifest| manifest.library)
+                .map_err(|e| format!("couldn't read {}: {e}", path.display()))
+        }
     }
-}
-
-fn modified(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
 }

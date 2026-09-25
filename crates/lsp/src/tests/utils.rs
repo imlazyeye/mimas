@@ -24,7 +24,7 @@ pub(crate) fn open(workspace: &mut Workspace, path: &Path) -> Vec<(PathBuf, usiz
     )
 }
 
-/// Each file whose diagnostics changed with the update, and how many it has now.
+/// Each file the update published diagnostics for, and how many it has now.
 pub(crate) fn update(
     workspace: &mut Workspace,
     path: &Path,
@@ -32,7 +32,6 @@ pub(crate) fn update(
 ) -> Vec<(PathBuf, usize)> {
     let mut changes: Vec<_> = workspace
         .update(path, text)
-        .0
         .into_iter()
         .map(|(uri, diagnostics)| (uri.to_file_path().unwrap(), diagnostics.len()))
         .collect();

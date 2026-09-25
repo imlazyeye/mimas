@@ -6,20 +6,20 @@ use std::{
 
 use api::Library;
 use indexmap::{IndexMap, IndexSet};
-use lsp_types::{Diagnostic, Location, Position, TextEdit, Uri, WorkspaceEdit};
+use lsp_types::{Location, Position, TextEdit, Uri, WorkspaceEdit};
 
 use crate::{analysis::Analysis, source_file::SourceFile};
 
 /// A directory as a library. Modules are solved once and each script solved on top of them. A
 /// module's file is shared by every analysis that holds it.
 pub struct Project {
-    pub library: Rc<Library<()>>,
+    pub library: Library<()>,
     modules: Analysis,
     scripts: IndexMap<PathBuf, Analysis>,
 }
 
 impl Project {
-    pub fn load(files: Vec<(PathBuf, String)>, library: Rc<Library<()>>) -> Self {
+    pub fn load(files: Vec<(PathBuf, String)>, library: Library<()>) -> Self {
         let solve::Directory {
             module_files,
             modules,
@@ -75,20 +75,6 @@ impl Project {
                 .contains_key(path)
                 .then_some(&self.modules)
         })
-    }
-
-    /// Every file's diagnostics: the modules' once, and each script's own.
-    pub fn diagnostics(&self) -> Vec<(PathBuf, Vec<Diagnostic>)> {
-        let modules = self
-            .modules
-            .files
-            .keys()
-            .map(|path| (path.clone(), self.modules.diagnostics(path)));
-        let scripts = self
-            .scripts
-            .iter()
-            .map(|(path, script)| (path.clone(), script.diagnostics(path)));
-        modules.chain(scripts).collect()
     }
 
     /// Every use of the name at `position`: in the modules and every script when it's declared

@@ -35,21 +35,11 @@ fn main() -> anyhow::Result<()> {
     };
     let params = connection.initialize(serde_json::to_value(capabilities)?)?;
 
-    // `apiPath` swaps each project's own host API for one manifest (relative to the first
-    // workspace folder) or std alone
-    let file_path = |uri: &serde_json::Value| {
-        serde_json::from_value::<Uri>(uri.clone())
-            .ok()?
-            .to_file_path()
-            .ok()
-    };
-    let root = file_path(&params["workspaceFolders"][0]["uri"])
-        .or_else(|| file_path(&params["rootUri"]))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_default();
+    // `apiPath` swaps each project's own host API for one manifest or std alone. A relative path
+    // starts where the editor started the server (in VS Code, the first workspace folder).
     let source = match params["initializationOptions"]["apiPath"].as_str() {
         Some("off") => Source::Off,
-        Some(path) if !path.is_empty() => Source::Manifest(root.join(path)),
+        Some(path) if !path.is_empty() => Source::Manifest(path.into()),
         _ => Source::Packages,
     };
 

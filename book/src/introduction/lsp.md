@@ -71,11 +71,11 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 
 ### Projects
 
-Each file is checked as part of the project it sits in. Inside a cargo package, that's the highest
-folder in the package holding a script, so scripts in subfolders see the same modules as a host
-loading the whole folder would give them. Outside a package, it's the nearest folder holding a
-script, same as `mimas run`. A project never takes in another cargo package or a `target`
-directory.
+Each file is checked as part of the project it sits in: the highest folder holding a `.mim` file in
+the cargo package or repository around it, along with every folder below. That's what a host
+loading its whole scripts folder sees, so scripts in subfolders can use every module in the project.
+A project never takes in another cargo package or a `target` directory. A file outside any package
+or repository is checked with the `.mim` files next to it.
 
 ## What it does not support
 
@@ -132,8 +132,9 @@ The server learns about those from a file the host writes. Running the host from
 dir writes its API to `target/mimas/<binary>.json`, named after the binary so hosts sharing a target
 dir (i.e.: a workspace) keep their own. A script is checked against the host of the cargo package it sits in, and the
 server asks `cargo` for that package's binaries and target dir. When several of them have written a
-file, the newest wins. You'll be notified if none have yet. After you change the host's API, run it
-again, and diagnostics pick up the change on your next edit.
+file, the newest wins. Until one has, a warning at the top of every file in the project says so.
+After you change the host's API, run it again, and diagnostics pick up the change on your next edit
+in that project.
 
 - The host and the server have to be the same version of mimas. On a mismatch, the server shows a
   warning and falls back to the standard library alone.
@@ -151,8 +152,9 @@ In VS Code, the `mimas.apiPath` setting points the server at one file for every 
 the workspace folder), or turns it off with `off`, which leaves only the standard library. The
 **mimas: Select Host API Manifest** command sets it with a file dialog, and **mimas: Restart
 Language Server** restarts the server, which also happens on its own when the setting changes.
-Other editors pass the same value as `apiPath` in the server's initialization options. In Neovim,
-add it to the config above:
+Other editors pass the same value as `apiPath` in the server's initialization options, where a
+relative path starts from the folder the editor starts the server in. In Neovim, add it to the
+config above:
 
 ```lua
 init_options = { apiPath = "path/to/api.json" },

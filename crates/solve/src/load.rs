@@ -112,8 +112,8 @@ impl<'a> Directory<'a> {
 }
 
 /// Every `.mim` file under `root` (or only directly in it, unless `recursive`), sorted by path,
-/// with whatever the walk couldn't read. The walk leaves out any directory below `root` that
-/// [`is_boundary`].
+/// with whatever the walk couldn't read. The walk leaves out any directory below `root` holding
+/// another cargo package, and any cargo target dir.
 pub fn mim_files(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<std::io::Error>) {
     let mut files = Vec::new();
     let mut errors = Vec::new();
@@ -122,7 +122,10 @@ pub fn mim_files(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<std::io::Er
         .max_depth(depth)
         .into_iter()
         .filter_entry(|entry| {
-            entry.depth() == 0 || !entry.file_type().is_dir() || !is_boundary(entry.path())
+            let dir = entry.path();
+            entry.depth() == 0
+                || !entry.file_type().is_dir()
+                || !(is_package(dir) || dir.join("CACHEDIR.TAG").is_file())
         });
     for entry in walk {
         match entry {
@@ -138,11 +141,6 @@ pub fn mim_files(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<std::io::Er
     }
     files.sort();
     (files, errors)
-}
-
-/// Whether a project stops short of `dir`, which is another cargo package or a cargo target dir.
-pub fn is_boundary(dir: &Path) -> bool {
-    is_package(dir) || dir.join("CACHEDIR.TAG").is_file()
 }
 
 /// Whether `dir` holds a cargo package, not just a workspace.
