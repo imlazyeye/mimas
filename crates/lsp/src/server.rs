@@ -1,4 +1,4 @@
-use crate::{host_api::Source, workspace::Workspace};
+use crate::{host_api::HostApi, workspace::Workspace};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::*;
 use serde::{Serialize, de::DeserializeOwned};
@@ -9,10 +9,10 @@ pub struct Server<'a> {
 }
 
 impl<'a> Server<'a> {
-    pub fn new(connection: &'a Connection, source: Source) -> Self {
+    pub fn new(connection: &'a Connection, host_api: HostApi) -> Self {
         Self {
             connection,
-            workspace: Workspace::new(source),
+            workspace: Workspace::new(host_api),
         }
     }
 

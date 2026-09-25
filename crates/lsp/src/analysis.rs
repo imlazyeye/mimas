@@ -352,11 +352,11 @@ impl Analysis {
             return Err("that name is built in, so there is no mimas source to rename".to_owned());
         }
 
-        let root = resolutions.decs[target].implements.unwrap_or(target);
+        let head = resolutions.decs[target].implements.unwrap_or(target);
         let family: Vec<DecId> = resolutions
             .decs
             .iter()
-            .filter(|(dec_id, dec)| *dec_id == root || dec.implements == Some(root))
+            .filter(|(dec_id, dec)| *dec_id == head || dec.implements == Some(head))
             .map(|(dec_id, _)| dec_id)
             .collect();
         if !family.iter().all(declared) {

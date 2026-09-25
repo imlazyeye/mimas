@@ -1,6 +1,6 @@
 use super::utils::{open, tree, update};
 use crate::{
-    host_api::Source,
+    host_api::HostApi,
     workspace::{Workspace, root_of},
 };
 
@@ -25,7 +25,7 @@ fn nested_script_in_package_sees_modules_above() {
         ],
     );
     let script = root.join("pkg/scripts/enemies/b.mim");
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     let changed = open(&mut workspace, &script);
     assert!(changed.contains(&(script.clone(), 0)), "{changed:?}");
     assert!(changed.iter().all(|(_, count)| *count == 0), "{changed:?}");
@@ -84,7 +84,7 @@ fn loose_scripts_share_the_highest_folder() {
         )
     );
 
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     let changed = open(&mut workspace, &loose);
     assert_eq!(changed.len(), 3, "{changed:?}");
     assert!(changed.iter().all(|(_, count)| *count == 0), "{changed:?}");
@@ -112,7 +112,7 @@ fn a_file_outside_any_repository_takes_its_folder_alone() {
     std::fs::remove_dir(root.join(".git")).unwrap();
     let x = root.join("x.mim");
     assert_eq!(root_of(&x), (root.as_path(), false, None));
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     assert_eq!(open(&mut workspace, &x), [(x.clone(), 0)]);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -122,7 +122,7 @@ fn a_new_file_joins_its_project() {
     let root = tree("new", &[("scripts/a.mim", "let x = 1;")]);
     let a = root.join("scripts/a.mim");
     let b = root.join("scripts/b.mim");
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     open(&mut workspace, &a);
     std::fs::write(&b, r#"let y: int = "no";"#).unwrap();
     assert_eq!(open(&mut workspace, &b), [(a.clone(), 0), (b.clone(), 1)]);
@@ -134,7 +134,7 @@ fn a_new_file_joins_its_project() {
 fn closing_the_last_file_clears_its_diagnostics() {
     let root = tree("close", &[("scripts/bad.mim", r#"let x: int = "no";"#)]);
     let bad = root.join("scripts/bad.mim");
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     assert_eq!(open(&mut workspace, &bad), [(bad.clone(), 1)]);
     assert_eq!(update(&mut workspace, &bad, None), [(bad.clone(), 0)]);
     assert!(workspace.project(&bad).is_none());

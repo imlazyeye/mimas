@@ -5,19 +5,19 @@ use std::{
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Uri};
 
-use crate::{analysis::Analysis, host_api::Source, project::Project};
+use crate::{analysis::Analysis, host_api::HostApi, project::Project};
 
 /// The text of every open file, and the projects they belong to, by root. Projects never overlap.
 pub struct Workspace {
-    source: Source,
+    host_api: HostApi,
     open: HashMap<PathBuf, String>,
     projects: HashMap<PathBuf, Project>,
 }
 
 impl Workspace {
-    pub fn new(source: Source) -> Self {
+    pub fn new(host_api: HostApi) -> Self {
         Self {
-            source,
+            host_api,
             open: HashMap::new(),
             projects: HashMap::new(),
         }
@@ -57,7 +57,7 @@ impl Workspace {
                     Some((path, text))
                 })
                 .collect();
-            let (library, trouble) = self.source.library(package);
+            let (library, trouble) = self.host_api.library(package);
             problem = trouble;
             self.projects
                 .insert(root.to_path_buf(), Project::load(files, library));

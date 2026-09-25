@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use api::Library;
 
 /// Where projects get their host API from.
-pub enum Source {
+pub enum HostApi {
     /// The newest manifest written by the binaries of the cargo package a project sits in. A
     /// project outside a package gets std alone.
     Packages,
@@ -13,14 +13,14 @@ pub enum Source {
     Off,
 }
 
-impl Source {
+impl HostApi {
     /// The library to check a project in `package` against, read fresh from its manifest. It's std
     /// alone when there's no manifest to go by, along with why when one was expected.
     pub fn library(&self, package: Option<&Path>) -> (Library<()>, Option<String>) {
         let std_alone = || vm::Vm::new().install_library(library::std);
         let (key, manifests) = match (self, package) {
-            (Source::Packages, Some(package)) => (package, binaries(package)),
-            (Source::Manifest(path), _) => (path.as_path(), vec![path.clone()]),
+            (HostApi::Packages, Some(package)) => (package, manifests(package)),
+            (HostApi::Manifest(path), _) => (path.as_path(), vec![path.clone()]),
             _ => return (std_alone(), None),
         };
         // a package with no binaries hosts nothing, so it has no manifest to wait for
@@ -44,7 +44,7 @@ impl Source {
         return (std_alone(), Some(problem));
 
         // every bin and example target of the package, each writing its own manifest
-        fn binaries(package: &Path) -> Vec<PathBuf> {
+        fn manifests(package: &Path) -> Vec<PathBuf> {
             // cargo knows the real target dir: a parent workspace, CARGO_TARGET_DIR, or a
             // configured target-dir
             let Some(meta) = std::process::Command::new("cargo")

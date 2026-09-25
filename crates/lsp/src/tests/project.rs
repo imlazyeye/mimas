@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use lsp_types::{Contents, Position};
 
 use super::utils::{open, tree};
-use crate::{host_api::Source, workspace::Workspace};
+use crate::{host_api::HostApi, workspace::Workspace};
 
 /// A module with a documented `one`, and two scripts that call it.
 fn scripts(name: &str, b: &str) -> PathBuf {
@@ -45,7 +45,7 @@ fn references_and_rename_reach_every_script() {
          let y: int = m::one() + m::one();",
     );
     let (a, m) = (root.join("a.mim"), root.join("m.mim"));
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     open(&mut workspace, &a);
     let project = workspace.project(&a).unwrap();
     let references = project.references(&m, at(&m, "one"), true).unwrap();
@@ -65,7 +65,7 @@ fn a_script_that_does_not_check_has_no_references_to_add() {
            let z: int = "no";"#,
     );
     let (a, m) = (root.join("a.mim"), root.join("m.mim"));
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     open(&mut workspace, &a);
     let project = workspace.project(&a).unwrap();
     let references = project.references(&m, at(&m, "one"), true).unwrap();
@@ -79,7 +79,7 @@ fn a_script_that_does_not_check_has_no_references_to_add() {
 fn hover_shows_a_module_function_and_its_doc() {
     let root = scripts("hover", "let y = 2;");
     let a = root.join("a.mim");
-    let mut workspace = Workspace::new(Source::Off);
+    let mut workspace = Workspace::new(HostApi::Off);
     open(&mut workspace, &a);
     let hover = workspace
         .analysis(&a)

@@ -5,15 +5,7 @@ mod server;
 mod source_file;
 mod workspace;
 
-#[cfg(test)]
-mod tests {
-    mod host_api;
-    mod project;
-    mod utils;
-    mod workspace;
-}
-
-use host_api::Source;
+use host_api::HostApi;
 use lsp_server::Connection;
 use lsp_types::*;
 use server::Server;
@@ -38,15 +30,23 @@ fn main() -> anyhow::Result<()> {
 
     // `apiPath` swaps each project's own host API for one manifest or std alone. A relative path
     // starts where the editor started the server (in VS Code, the first workspace folder).
-    let source = match params["initializationOptions"]["apiPath"].as_str() {
-        Some("off") => Source::Off,
-        Some(path) if !path.is_empty() => Source::Manifest(path.into()),
-        _ => Source::Packages,
+    let host_api = match params["initializationOptions"]["apiPath"].as_str() {
+        Some("off") => HostApi::Off,
+        Some(path) if !path.is_empty() => HostApi::Manifest(path.into()),
+        _ => HostApi::Packages,
     };
 
-    Server::new(&connection, source).run()?;
+    Server::new(&connection, host_api).run()?;
     // the writer thread only stops once its sender is gone
     drop(connection);
     io_threads.join()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    mod host_api;
+    mod project;
+    mod utils;
+    mod workspace;
 }
