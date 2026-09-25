@@ -690,8 +690,8 @@ impl<'s> Parser<'s> {
     fn closure(&mut self) -> Expr {
         let start = self.next_start();
         if self.eat(TokKind::DoublePipe) {
-            let body = self.expr();
             let return_type = self.eat(TokKind::Arrow).then(|| self.annotation());
+            let body = self.expr();
             return self.new_expr(
                 Closure {
                     parameters: vec![],
