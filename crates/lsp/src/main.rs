@@ -8,6 +8,7 @@ mod workspace;
 #[cfg(test)]
 mod tests {
     mod host_api;
+    mod project;
     mod utils;
     mod workspace;
 }

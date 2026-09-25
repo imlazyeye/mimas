@@ -13,49 +13,46 @@ use parse::{
     walk_stmts,
 };
 use shared::{AdtId, FileId, Span, Ty};
-use solve::{Resolutions, ResolvedDeclKind, Solver, components::DecId};
+use solve::{Resolutions, ResolvedDeclKind, components::DecId};
 
 use crate::source_file::SourceFile;
 
-/// One solved unit and the language features over it: the modules of a project alone, or a
-/// script with them.
+/// Files solved together as one program, and the language features over them: the modules of a
+/// project alone, or a script with every module.
 pub struct Analysis {
     /// In file id order.
-    pub files: IndexMap<PathBuf, Rc<SourceFile>>,
+    pub files: IndexMap<PathBuf, SourceFile>,
     /// The errors when any file failed to parse or the solve failed.
-    pub resolutions: Result<Resolutions, Vec<shared::Error>>,
+    resolutions: Result<Resolutions, Vec<shared::Error>>,
+    /// The host API the files were solved against.
+    library: Rc<Library<()>>,
 }
 
 impl Analysis {
     /// Solves `files` together, as one program.
-    pub fn load(files: Vec<(PathBuf, String)>, library: &Library<()>) -> Self {
+    pub fn load(files: Vec<(PathBuf, String)>, library: Rc<Library<()>>) -> Self {
         let loaded = solve::Modules::from_files(
             files.iter().map(|(path, text)| (path, text.as_str())),
-            library,
+            &library,
         );
         let files = files
             .into_iter()
             .zip(loaded.asts)
-            .map(|((path, text), ast)| (path, Rc::new(SourceFile::new(text, ast))))
+            .map(|((path, text), ast)| (path, SourceFile::new(text, ast)))
             .collect();
-        Self::new(files, loaded.errors, loaded.solver)
-    }
-
-    /// `files` in file id order, as `solver` solved them, unless there were errors.
-    pub fn new(
-        files: IndexMap<PathBuf, Rc<SourceFile>>,
-        errors: Vec<shared::Error>,
-        solver: Solver,
-    ) -> Self {
-        let resolutions = if errors.is_empty() {
-            Ok(Resolutions::from(solver))
-        } else {
-            Err(errors)
+        let resolutions = match loaded.errors.is_empty() {
+            true => Ok(Resolutions::from(loaded.solver)),
+            false => Err(loaded.errors),
         };
-        Self { files, resolutions }
+        Self {
+            files,
+            resolutions,
+            library,
+        }
     }
 
-    pub fn hover(&self, path: &Path, position: Position, library: &Library<()>) -> Option<Hover> {
+    pub fn hover(&self, path: &Path, position: Position) -> Option<Hover> {
+        let library = &self.library;
         let resolutions = self.resolutions.as_ref().ok()?;
         let file = self.files.get(path)?;
         let offset = file.offset(position)?;
@@ -96,10 +93,7 @@ impl Analysis {
                 }
             }
         };
-        let adt_doc = |aid: AdtId| {
-            let adt = library.adts().iter().find(|adt| adt.adt_id == aid)?;
-            Some(adt.doc.as_str())
-        };
+        let adt = |aid: AdtId| library.adts().iter().find(|adt| adt.adt_id == aid);
         let native_doc = |native: NativeId| {
             let (_, entry) = library.natives().find(|(id, _)| *id == native)?;
             Some(match entry {
@@ -121,15 +115,12 @@ impl Analysis {
                 .native_constants
                 .get(&dec)
                 .and_then(|native| native_doc(*native)),
-            Some((_, ResolvedDeclKind::Adt(aid))) => adt_doc(*aid),
-            Some((_, ResolvedDeclKind::Variant { parent, layout })) => library
-                .adts()
-                .iter()
-                .find(|adt| adt.adt_id == *parent)
+            Some((_, ResolvedDeclKind::Adt(aid))) => adt(*aid).map(|adt| adt.doc.as_str()),
+            Some((_, ResolvedDeclKind::Variant { parent, layout })) => adt(*parent)
                 .and_then(|adt| adt.variants.iter().find(|v| v.layout_id == *layout))
                 .map(|variant| variant.doc.as_str()),
             None => match ty {
-                Ty::Adt(aid) => adt_doc(*aid),
+                Ty::Adt(aid) => adt(*aid).map(|adt| adt.doc.as_str()),
                 _ => None,
             },
             _ => None,
@@ -239,10 +230,12 @@ impl Analysis {
         path: &Path,
         position: Position,
         new_name: &str,
-        library: &Library<()>,
     ) -> Result<WorkspaceEdit, String> {
         if !is_identifier(new_name) {
             return Err(format!("`{new_name}` isn't a valid mimas name"));
+        }
+        if self.resolutions.is_err() {
+            return Err("renaming needs the project to check cleanly first".to_owned());
         }
         let (resolutions, target) = self
             .dec_at(path, position)
@@ -271,7 +264,7 @@ impl Analysis {
             .zip(&spans)
             .map(|((path, file), spans)| (path.clone(), renamed(&file.text, spans, new_name)))
             .collect();
-        let probe = Analysis::load(probe, library);
+        let probe = Analysis::load(probe, self.library.clone());
         let Ok(probed) = probe.resolutions.as_ref() else {
             return Err(format!("renaming to `{new_name}` would not compile"));
         };
@@ -318,7 +311,7 @@ impl Analysis {
         /// How a project's idents group by what they resolve to, in walk order. Two of these
         /// differ when an edit quietly rebinds a name it didn't touch.
         fn shape(
-            files: &IndexMap<PathBuf, Rc<SourceFile>>,
+            files: &IndexMap<PathBuf, SourceFile>,
             resolutions: &Resolutions,
         ) -> Vec<Vec<usize>> {
             files
@@ -436,7 +429,7 @@ impl Analysis {
         Some(self.files.get(path)?.symbols())
     }
 
-    /// The errors that point into `path`, and any that point nowhere when it's the first file.
+    /// The errors that point into `path`.
     pub fn diagnostics(&self, path: &Path) -> Vec<Diagnostic> {
         let (Err(errors), Some(file_id)) = (&self.resolutions, self.files.get_index_of(path))
         else {
@@ -444,7 +437,7 @@ impl Analysis {
         };
         errors
             .iter()
-            .filter(|error| self.file_of(error).unwrap_or(0) == file_id)
+            .filter(|error| self.file_of(error) == Some(file_id))
             .map(|error| self.files[file_id].diagnostic(error))
             .collect()
     }

@@ -85,7 +85,6 @@ impl Modules {
 /// `my_project` is one library of `module_a` and `module_b`. `script_a` and `script_b` each see
 /// all of it and nothing of each other.
 pub struct Directory<'a> {
-    pub module_files: Vec<&'a (PathBuf, String)>,
     pub modules: Modules,
     pub scripts: Vec<&'a (PathBuf, String)>,
 }
@@ -94,20 +93,14 @@ impl<'a> Directory<'a> {
     /// Sorts a project's files (each a path and its text) into modules and scripts, and solves the
     /// modules against `library`.
     pub fn load(files: &'a [(PathBuf, String)], library: &Library<()>) -> Self {
-        let (module_files, scripts): (Vec<_>, Vec<_>) = files
+        let (modules, scripts): (Vec<_>, Vec<_>) = files
             .iter()
             .partition(|file| parse::lex::is_module(&file.1));
         let modules = Modules::from_files(
-            module_files
-                .iter()
-                .map(|(path, text)| (path, text.as_str())),
+            modules.iter().map(|(path, text)| (path, text.as_str())),
             library,
         );
-        Self {
-            module_files,
-            modules,
-            scripts,
-        }
+        Self { modules, scripts }
     }
 }
 

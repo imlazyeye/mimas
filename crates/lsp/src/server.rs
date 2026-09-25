@@ -132,10 +132,9 @@ impl<'a> Server<'a> {
     fn hover(&self, params: HoverParams) -> Option<Hover> {
         let position = params.text_document_position_params;
         let path = position.text_document.uri.to_file_path().ok()?;
-        let project = self.workspace.project(&path)?;
-        project
+        self.workspace
             .analysis(&path)?
-            .hover(&path, position.position, &project.library)
+            .hover(&path, position.position)
     }
 
     fn definition(&self, params: DefinitionParams) -> Option<Location> {
