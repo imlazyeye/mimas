@@ -17,7 +17,7 @@ pub struct Ast {
     /// from post-parse checks (e.g. [`Self::module_name`]) so they render with snippets.
     src: NamedSource<Arc<str>>,
     stmts: Vec<Stmt>,
-    /// Doc comments without their slashes, keyed by where the token after each starts.
+    /// Doc comments without their slashes, keyed by where the name each is for starts.
     docs: HashMap<usize, String>,
 }
 impl Ast {
@@ -95,8 +95,8 @@ impl Ast {
         innermost.found
     }
 
-    /// The doc comment above the token starting at `position` (a byte offset into the source),
-    /// without its slashes. An item's doc is at the start of its span.
+    /// The doc comment on the declaration whose name starts at `position` (a byte offset into the
+    /// source), without its slashes.
     pub fn docs_for(&self, position: usize) -> Option<&str> {
         self.docs.get(&position).map(String::as_str)
     }

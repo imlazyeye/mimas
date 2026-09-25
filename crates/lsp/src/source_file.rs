@@ -1,8 +1,7 @@
 use line_index::{LineCol, LineIndex, TextSize, WideEncoding, WideLineCol};
 use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Position, Range, SymbolKind};
 use parse::{
-    Ast, FieldKey, Ident, Item, ItemKind, Member, NodeId, PactItem, Stmt, StmtKind, StructField,
-    Visitor, walk_stmts,
+    Ast, FieldKey, Ident, Item, ItemKind, NodeId, PactItem, StmtKind, Visitor, walk_stmts,
 };
 use shared::{Located, Span};
 
@@ -144,75 +143,6 @@ impl SourceFile {
                 _ => None,
             })
             .collect()
-    }
-
-    /// The doc comment on the declaration whose name is written at `name`.
-    pub fn docs(&self, name: Span) -> Option<&str> {
-        /// Where the declaration named at `name` starts (its doc is keyed there).
-        struct Declaration {
-            name: Span,
-            start: Option<usize>,
-        }
-
-        impl Declaration {
-            fn check(&mut self, name: &Ident, start: usize) {
-                if name.location.span == self.name {
-                    self.start = Some(start);
-                }
-            }
-
-            fn fields(&mut self, fields: &[StructField]) {
-                for field in fields {
-                    if let FieldKey::Ident(name) = &field.name {
-                        self.check(name, field.location.span.start);
-                    }
-                }
-            }
-        }
-
-        impl Visitor for Declaration {
-            fn stmt(&mut self, stmt: &Stmt) {
-                if let StmtKind::Let(binding) = stmt.kind()
-                    && let Some(name) = binding.left.as_ident()
-                {
-                    self.check(name, stmt.span().start);
-                }
-            }
-
-            fn item(&mut self, item: &Item) {
-                let start = item.span().start;
-                match item.kind() {
-                    ItemKind::Function(function) => self.check(&function.name, start),
-                    ItemKind::Const(con) => self.check(&con.left, start),
-                    ItemKind::Struct(struc) => {
-                        self.check(&struc.name, start);
-                        self.fields(&struc.fields);
-                    }
-                    ItemKind::Enum(en) => {
-                        self.check(&en.head, start);
-                        for (name, member) in &en.members {
-                            self.check(name, name.location.span.start);
-                            if let Member::Struct(fields) = member {
-                                self.fields(fields);
-                            }
-                        }
-                    }
-                    ItemKind::Pact(pact) => {
-                        self.check(&pact.name, start);
-                        for member in &pact.items {
-                            let (PactItem::Const { name, .. } | PactItem::Fn { name, .. }) = member;
-                            self.check(name, member.span().start);
-                        }
-                    }
-                    // the walk visits impl methods as items of their own
-                    ItemKind::Impl(_) | ItemKind::Use(_) | ItemKind::Poison(_) => {}
-                }
-            }
-        }
-
-        let mut declaration = Declaration { name, start: None };
-        walk_stmts(self.ast.stmts(), &mut declaration);
-        self.ast.docs_for(declaration.start?)
     }
 
     pub fn diagnostic(&self, error: &shared::Error) -> Diagnostic {

@@ -5,7 +5,7 @@ use lsp_types::{Contents, Position};
 use super::utils::{open, tree};
 use crate::{host_api::Source, workspace::Workspace};
 
-/// A module with `one`, and two scripts that call it.
+/// A module with a documented `one`, and two scripts that call it.
 fn scripts(name: &str, b: &str) -> PathBuf {
     tree(
         name,
@@ -13,6 +13,7 @@ fn scripts(name: &str, b: &str) -> PathBuf {
             (
                 "m.mim",
                 "module @;
+                 /// The first number.
                  pub fn one() -> int { 1 }",
             ),
             (
@@ -75,7 +76,7 @@ fn a_script_that_does_not_check_has_no_references_to_add() {
 }
 
 #[test]
-fn hover_follows_a_call_into_a_module() {
+fn hover_shows_a_module_function_and_its_doc() {
     let root = scripts("hover", "let y = 2;");
     let a = root.join("a.mim");
     let mut workspace = Workspace::new(Source::Off);
@@ -90,6 +91,11 @@ fn hover_follows_a_call_into_a_module() {
     };
     assert!(
         content.value.contains("fn one() -> int"),
+        "{}",
+        content.value
+    );
+    assert!(
+        content.value.contains("The first number."),
         "{}",
         content.value
     );

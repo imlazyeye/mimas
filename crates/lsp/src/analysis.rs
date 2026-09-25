@@ -129,7 +129,7 @@ impl Analysis {
             .and_then(|dec| {
                 let declared = resolutions.decs[dec].location;
                 let (_, declaring) = self.files.get_index(declared.file_id)?;
-                declaring.docs(declared.span)
+                declaring.ast.docs_for(declared.span.start)
             })
             .or(host_docs.filter(|doc| !doc.is_empty()));
         let value = match docs {
