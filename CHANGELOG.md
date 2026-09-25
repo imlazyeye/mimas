@@ -11,6 +11,10 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - With the `bevy` feature, hover shows the `///` docs of reflected components, resources, and enum variants, Bevy's own types included.
 - `std::sys::file()`: Returns the absolute path to the file this function is written within, similar to Rust's `file!()` and Python's `__file__`.
 - `std::process::run_attached(cmd, args)`: Runs a command without capturing its output and returns its exit code. Unlike `std::process::run`, a non-zero exit isn't raised.
+- The book has a [Library Reference](https://mim.as/std.html) for the standard library. It's generated from the doc comments in `crates/library` every time the book builds using a script written in mimas ([std.mim](./tools/book/scripts/std.mim)). This tool will be linked into the `mimas` cli in a future update so that users can use it on their own projects. It can export all items from both your Rust host and your scripts.
+- Arrays gained `insert`, `deduped`, `reversed` and `to_dict`.
+- Dictionaries gained `get` and `get_or_insert`.
+- `mimas export-api <path>` writes the standard library's API to a JSON manifest.
 
 ### Changed
 
@@ -19,6 +23,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
   - Scripts can see and use any module within its directory (including sub-direrctories)
   - `mimas run <directory>` can still be used as long as your project as a singular script
   - Projects with multiple scripts can still use `mimas run <script_file>`
+- **Breaking**: The array method `flatten` is now `flat`.
+- **Breaking**: `Api::add_described` and `Api::add_assoc_described` take each parameter as a `(name, type)` pair.
 - The parser now recovers from syntax errors, so the `mimas` CLI reports every syntax error in a file instead of stopping at the first. Embedding through the `mimas` crate still returns only the first.
 - Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint.
 
