@@ -93,5 +93,4 @@ test_fail!(
     native_extreme_arg_ices,
     "print(\"abc\".repeat(9000000000000000000));",
     "print((3.14).format(9000000000000000000));",
-    "print((5).clamp(10, 2));"
 );

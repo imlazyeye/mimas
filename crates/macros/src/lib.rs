@@ -20,7 +20,7 @@ use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{DeriveInput, Ident, parse_macro_input};
+use syn::{DeriveInput, FnArg, Ident, Pat, ext::IdentExt, parse_macro_input, parse_quote};
 
 mod convert;
 mod derive;
@@ -33,11 +33,17 @@ mod register;
 #[proc_macro_attribute]
 pub fn native(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as syn::ItemFn);
-    let submission = doc_submission(&input.sig.ident, &collect_doc(&input.attrs));
     if let Err(e) = convert::expand_conversion(&mut input) {
         return e.to_compile_error().into();
     }
-    TokenStream::from(quote!(#input #submission))
+    if let Some(submission) = meta_submission(
+        &input.sig.ident,
+        &param_names(&input.sig),
+        &collect_doc(&input.attrs),
+    ) {
+        input.block.stmts.insert(0, submission);
+    }
+    TokenStream::from(quote!(#input))
 }
 
 /// Conversion **and** automatic registration -- no manual `api.add*` call.
@@ -99,10 +105,15 @@ fn expand_mimas(attr: TokenStream, item: TokenStream) -> Result<TokenStream2, sy
 
     match syn::parse::<syn::Item>(item)? {
         syn::Item::Fn(mut function) => {
-            let doc = collect_doc(&function.attrs);
             convert::expand_conversion(&mut function)?;
-            let registration =
-                register::fn_registration(&function.sig.ident, module.as_deref(), &doc);
+            if let Some(submission) = meta_submission(
+                &function.sig.ident,
+                &param_names(&function.sig),
+                &collect_doc(&function.attrs),
+            ) {
+                function.block.stmts.insert(0, submission);
+            }
+            let registration = register::fn_registration(&function.sig.ident, module.as_deref());
             Ok(quote!(#function #registration))
         }
         // struct / enum: emit the same impls the derives would (so don't *also* `#[derive]`
@@ -189,21 +200,41 @@ fn collect_doc(attrs: &[syn::Attribute]) -> String {
     lines.join("\n")
 }
 
-/// Ships a doc-comment to install time keyed by the item's full Rust path, so `vm::api::doc_for`
-/// can join it onto the registered `ApiFunction`/`ApiMethod` (whose receiver/module are known
-/// only at the `api.add_*` call site, not here).
-fn doc_submission(fn_ident: &Ident, doc: &str) -> TokenStream2 {
-    if doc.is_empty() {
-        return TokenStream2::new();
+/// Ships a fn's parameter names and doc-comment to install time keyed by its full Rust path, so
+/// `vm::api::native_meta` can join them onto the registered `ApiFunction`/`ApiMethod` (whose
+/// receiver/module are known only at the `api.add_*` call site, not here). Callers insert it into
+/// the fn's body, since an `impl` block can't hold the unnamed const `inventory::submit!` expands
+/// to.
+fn meta_submission(fn_ident: &Ident, params: &[String], doc: &str) -> Option<syn::Stmt> {
+    if doc.is_empty() && params.is_empty() {
+        return None;
     }
     let vm = vm_path();
     let name = fn_ident.to_string();
-    quote! {
+    Some(parse_quote! {
         #vm::inventory::submit! {
-            #vm::api::NativeDoc {
+            #vm::api::NativeMeta {
                 path: ::std::concat!(::std::module_path!(), "::", #name),
+                parameters: &[#(#params),*],
                 doc: #doc,
             }
         }
-    }
+    })
+}
+
+/// Collects the names of the identifiers used in a function signature's parameters.
+fn param_names(sig: &syn::Signature) -> Vec<String> {
+    sig.inputs
+        .iter()
+        .skip(1)
+        .enumerate()
+        .map(|(i, arg)| {
+            if let FnArg::Typed(pt) = arg
+                && let Pat::Ident(pi) = &*pt.pat
+            {
+                return pi.ident.unraw().to_string();
+            }
+            format!("arg{i}")
+        })
+        .collect()
 }

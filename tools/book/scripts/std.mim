@@ -1,0 +1,299 @@
+use std::parse::Value;
+use mdbook::{ MdBook, BookItem, Chapter };
+
+/// Formats a type for display, keeping context with local anon types.
+fn ty(value: Value, anons: ~{str}) -> str {
+    let input = docs::display_ty(value)!;
+    while let matches = input.find("\\?[av](\\d*)") {
+        let key = matches[1];
+        if key !in anons {
+            anons[key] = match anons.len() {
+                0 => "T",
+                1 => "U",
+                2 => "V",
+                3 => "W",
+                _ => panic("too many anons!")
+            };
+        }
+        input = input.replace(matches[0], anons[key]!);
+    }
+    input
+}
+
+/// Extracts the module an item belongs to.
+fn module_of(item: ~{Value}) -> [str] {
+    for x in item.get("module")!.as_array()! collect x.as_str()!
+}
+
+/// Formats a function signature.
+fn signature(value: ~{Value}, params: [str], anons: ~{str}) -> str {
+    for param in value["parameters"]!.as_array()! {
+        let param = param.as_array()!;
+        let name = param[0].as_str()!;
+        params.push(match param[1] {
+            Value::Null => name,
+            t => f"{name}: {ty(t, anons)}",
+        });
+    }
+
+    let out = f"fn {value["name"]!.as_str()!}({params.join(", ")})";
+    let ret = ty(value["return_ty"]!, anons);
+    if ret != "()" {
+        out += f" -> {ret}";
+    }
+    out
+}
+
+/// The adt as it would be declared, with each variant's doc above it
+fn declaration(adt: ~{Value}) -> str {
+    let name = adt["name"]!.as_str()!;
+    let variants = adt["variants"]!.as_array()!;
+    if adt["kind"]!.as_str()! == "Struct" {
+        return f"struct {name}{fields(variants[0].as_dict()!["fields"]!)}";
+    }
+
+    let lines = [f"enum {name} {{"];
+    for variant in variants {
+        let variant = variant.as_dict()!;
+        for line in variant["doc"]!.as_str()!.lines() {
+            lines.push(f"    /// {line}");
+        }
+        lines.push(f"    {variant["name"]!.as_str()!}{fields(variant["fields"]!)},");
+    }
+    lines.push("}");
+    lines.join("\n")
+}
+
+fn fields(value: Value) -> str {
+    let anons = ~{};
+    if let tuple? = value.as_dict()?["Tuple"] {
+        let tys = for t in tuple.as_array()! collect ty(t, anons);
+        f"({tys.join(", ")})"
+    } else if let named? = value.as_dict()?["Named"] {
+        let fields = for field in named.as_array()! {
+            let field = field.as_array()!;
+            collect f"{field[0].as_str()!}: {ty(field[1], anons)}";
+        };
+        f" {{ {fields.join(", ")} }}"
+    } else {
+        ""
+    }
+}
+
+fn render(title: str, page: Page) -> str {
+    let rows = [];
+    let body = [];
+    let anchors = ~{};
+    for (heading, entries) in page.sections.pairs() {
+        body.push(f"## {heading}");
+        for (name, entry) in entries.pairs() {
+            // mdbook's ids for the headings, which count up when a name repeats
+            let anchor = name.to_lower();
+            let repeats = anchors.get_or_insert(anchor, 0);
+            anchors[anchor] = repeats + 1;
+            if repeats > 0 {
+                anchor = f"{anchor}-{repeats}";
+            }
+
+            let summary = (entry.doc.replace("\n", " ") + " ").split(". ")[0];
+            rows.push(f"| [`{name}`](#{anchor}) | {summary} |");
+            body.push(f"### `{name}`");
+            body.push(f"```mimas\n{entry.signatures.join("\n")}\n```");
+            body.push(entry.doc);
+        }
+    }
+    if !page.types.is_empty() {
+        body.push("## Types");
+        body.extend(page.types);
+    }
+
+    // an adt's page leads with its docs, the rest with a table of their items
+    let table = f"| Item | Summary |\n| :-- | :-- |\n{rows.join("\n")}";
+    let blocks = [f"# {title}", if page.intro.is_empty() table else page.intro];
+    blocks.extend(body);
+    let blocks = for block in blocks {
+        if !block.is_empty() {
+            collect block;
+        }
+    };
+    blocks.join("\n\n") + "\n"
+}
+
+// fetch the api, start building
+let api = std::parse::from_json(docs::std_api())!.as_dict()!;
+let adts = for x in api.get("adts")!.as_array()! collect x.as_dict()!;
+let natives = for x in api.get("natives")!.as_array()! collect x.as_dict()!;
+let adt_modules = (for adt in adts collect (adt["name"]!.as_str()!, module_of(adt).join("::"))).to_dict();
+
+// page title -> page, where an adt's page is titled with its bare name
+let pages = ~{};
+for native in natives {
+    let item = Item::from_value(native, adt_modules);
+    let entry = pages
+        .get_or_insert(item.page, Page::new())
+        .sections
+        .get_or_insert(item.section, ~{})
+        .get_or_insert(item.heading, Entry { signatures = [], doc = item.doc });
+    entry.signatures.push(item.signature);
+}
+
+for adt in adts {
+    let name = adt["name"]!.as_str()!;
+    let home = module_of(adt).join("::");
+    let doc = adt["doc"]!.as_str()!;
+    let page = pages.get_or_insert(name, Page::new());
+    page.intro = f"```mimas\n{declaration(adt)}\n```\n\n{doc}";
+
+    let link = f"./{home.replace("std::", "").to_lower()}/{name.to_lower()}.md";
+    pages
+        .get_or_insert(home, Page::new())
+        .types
+        .push(f"### [`{name}`]({link})\n\n{doc.split("\n\n")[0]}");
+}
+
+// mdbook passes `[context, book]` through stdin and takes the book back through stdout. the pages
+// go under std.md's chapter, which SUMMARY.md leaves empty
+let book = MdBook::from_value(std::parse::from_json(std::sys::stdin()!)!.as_array()![1])!;
+let found = for item in book.sections {
+    if let BookItem::Chapter(chapter) = item {
+        if chapter.path == "std.md" {
+            break chapter;
+        }
+    }
+};
+let std_chapter? = found else { panic("SUMMARY.md has no std.md") };
+let number = std_chapter.number!;
+
+let rows = [];
+let items = [];
+for (title, page) in pages.pairs() {
+    if title in adt_modules {
+        continue;
+    }
+
+    let file = f"std/{title.replace("std::", "").to_lower()}";
+    let at = [number, [(items.len() + 1).to_float()]].flat();
+    let children = [];
+    for (name, home) in adt_modules.pairs() {
+        if home == title {
+            children.push(BookItem::Chapter(Chapter {
+                name = name,
+                content = render(name, pages[name]!),
+                number = [at, [(children.len() + 1).to_float()]].flat(),
+                path = f"{file}/{name.to_lower()}.md",
+                source_path = null,
+                parent_names = [std_chapter.name, title],
+                sub_items = [],
+            }));
+        }
+    }
+    items.push(BookItem::Chapter(Chapter {
+        name = title,
+        content = render(title, page),
+        number = at,
+        path = f"{file}.md",
+        source_path = null,
+        parent_names = [std_chapter.name],
+        sub_items = children,
+    }));
+
+    let label = if title.starts_with("std::") f"`{title}`" else title;
+    rows.push(f"| [{label}](./{file}.md) |");
+}
+
+std_chapter.content += rows.join("\n") + "\n";
+std_chapter.sub_items = items;
+print(std::parse::to_json(book.serialize())!);
+
+/// Everything about one native that its page needs.
+struct Item {
+    page: str,
+    section: str,
+    heading: str,
+    signature: str,
+    doc: str,
+}
+
+impl Item {
+    fn from_value(native: ~{Value}, adt_modules: ~{str}) -> Self {
+        let (kind, value) = native.pairs()[0];
+        let value = value.as_dict()!;
+        let name = value["name"]!.as_str()!;
+        let doc = value["doc"]!.as_str()!;
+        let anons = ~{};
+
+        if kind == "Method" {
+            let recv_ty = ty(value["recv_ty"]!, anons);
+            let (page, owner) = match recv_ty {
+                "str" => ("Strings", "str"),
+                "int" => ("Integers", "int"),
+                "float" => ("Floats", "float"),
+                "bool" => ("Booleans", "bool"),
+                t if t.starts_with("[") => ("Arrays", "array"),
+                t if t.starts_with("~{") => ("Dictionaries", "dict"),
+                t => (t, t),
+            };
+            let takes_self = value["takes_self"]! == Value::Bool(true);
+
+            // if the recv_ty is a primitive (or its internal ty is a pure generic) then we
+            // can just show "self". otherwise, we'll show the type bound on it
+            let params = if !takes_self {
+                []
+            } else if recv_ty == owner || recv_ty in ["[T]", "~{T}"] {
+                ["self"]
+            } else {
+                [f"self: {recv_ty}"]
+            };
+
+            let section = if owner in adt_modules {
+                "Implementations"
+            } else if takes_self {
+                "Methods"
+            } else {
+                "Associated Functions"
+            };
+
+            return Item {
+                page = page,
+                section = section,
+                heading = name,
+                signature = signature(value, params, anons),
+                doc = doc,
+            };
+        }
+
+        let path = module_of(value);
+        let (section, sig) = if kind == "Function" {
+            ("Functions", signature(value, [], anons))
+        } else {
+            ("Constants", f"const {name}: {ty(value["ty"]!, anons)}")
+        };
+        Item {
+            page = if path.is_empty() { "Prelude" } else { path.join("::") },
+            section = section,
+            heading = name,
+            signature = sig,
+            doc = doc,
+        }
+    }
+}
+
+struct Page {
+    /// An adt's declaration and docs, which replace the table of items.
+    intro: str,
+    /// Section heading -> entry heading -> entry.
+    sections: ~{~{Entry}},
+    types: [str],
+}
+
+impl Page {
+    fn new() -> Self {
+        Page { intro = "", sections = ~{}, types = [] }
+    }
+}
+
+/// What goes under one heading (overloads share one).
+struct Entry {
+    signatures: [str],
+    doc: str,
+}

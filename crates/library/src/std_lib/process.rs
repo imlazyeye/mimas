@@ -8,6 +8,21 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     m.add(run_attached);
 }
 
+/// Runs the program `cmd` with `args`, waits for it to finish, and returns what it wrote to
+/// standard output. When `stdin` is given, it's written to the program's standard input.
+///
+/// `cmd` is looked up on the `PATH`, but there's no shell in between. Each argument is passed to
+/// the program exactly as written. The output keeps its trailing newline, which `trim` removes.
+///
+/// Raises if the program can't be started or its output isn't valid UTF-8. A non-zero exit status
+/// raises as well, with the program's standard error in the message.
+///
+/// ```mimas
+/// use std::process;
+///
+/// let greeting = process::run("echo", ["hello"])!.trim(); // "hello"
+/// let sorted = process::run("sort", [], "b\na\n")!;       // "a\nb\n"
+/// ```
 #[native]
 fn run<'gc>(cmd: &str, args: Vec<&str>, stdin: Option<&str>) -> Raisable<String> {
     let inner = || -> Result<String, String> {
@@ -49,9 +64,21 @@ fn run<'gc>(cmd: &str, args: Vec<&str>, stdin: Option<&str>) -> Raisable<String>
     inner().into()
 }
 
-/// Runs `cmd` with `args` and returns its exit code. Unlike `run`, the command's output isn't
-/// captured (it goes straight to wherever the script's output goes, usually the terminal) and a
-/// non-zero exit isn't raised. Raises if the command can't be started or gets killed by a signal.
+/// Runs the program `cmd` with `args`, waits for it to finish, and returns its exit code.
+///
+/// Unlike [`run`](#run), the program uses the script's own standard input and output. Anything it
+/// prints appears directly (usually in the terminal) instead of coming back as a string, and a
+/// non-zero exit code is returned like any other. Raises if the program can't be started or is
+/// stopped by a signal.
+///
+/// ```mimas
+/// use std::process;
+///
+/// let code = process::run_attached("cargo", ["test"])!;
+/// if code != 0 {
+///     print("tests failed");
+/// }
+/// ```
 #[native]
 fn run_attached<'gc>(cmd: &str, args: Vec<&str>) -> Raisable<i64> {
     let inner = || -> Result<i64, String> {

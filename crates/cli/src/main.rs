@@ -34,6 +34,7 @@ fn main() {
             input.dump_ir,
             input.time,
         ),
+        Some(Commands::ExportApi { path }) => export(path),
         None => 0,
     };
     std::process::exit(status_code);
@@ -208,6 +209,12 @@ fn run(
     }
 }
 
+fn export(path: PathBuf) -> i32 {
+    let library = vm::Vm::new().install_library(library::std);
+    vm::export::write_api(&library, &path).expect("Failed to write the manifest!");
+    0
+}
+
 /// Loads the unit's project and prints the errors outside its scripts, counting them, or says
 /// with which exit code that crashed.
 fn load<'a>(
@@ -298,7 +305,7 @@ fn compile(
 // bare `mimas foo.mim` means `mimas run foo.mim`; inject `run` when the first
 // positional isn't already a subcommand. `mimas` alone still falls through to help.
 fn massage_args(mut args: Vec<String>) -> Vec<String> {
-    const SUBCOMMANDS: [&str; 4] = ["check", "build", "run", "help"];
+    const SUBCOMMANDS: [&str; 5] = ["check", "build", "run", "help", "export-api"];
     if let Some(idx) = args.iter().skip(1).position(|a| !a.starts_with('-')) {
         let idx = idx + 1;
         if !SUBCOMMANDS.contains(&args[idx].as_str()) {

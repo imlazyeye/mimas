@@ -196,34 +196,34 @@ test_run!(
 );
 
 test_run!(
-    flatten_nested_ints,
+    flat_nested_ints,
     "let a = [[1, 2], [3], [4, 5]];
-     let f = a.flatten();",
+     let f = a.flat();",
     "f.len()" => "5",
     "f[0]" => "1",
     "f[4]" => "5",
 );
 
 test_run!(
-    flatten_nested_strs,
+    flat_nested_strs,
     r#"let a = [["x"], ["y", "z"]];"#,
-    "a.flatten().len()" => "3",
-    r#"a.flatten().contains("z")"# => "true",
+    "a.flat().len()" => "3",
+    r#"a.flat().contains("z")"# => "true",
 );
 
 test_run!(
-    flatten_empty_outer,
+    flat_empty_outer,
     "let a: [[int]] = [];",
-    "a.flatten().len()" => "0",
+    "a.flat().len()" => "0",
 );
 
 test_run!(
-    flatten_empty_inners,
+    flat_empty_inners,
     "let a: [[int]] = [[], []];",
-    "a.flatten().len()" => "0",
+    "a.flat().len()" => "0",
 );
 
-test_fail!(flatten_rejects_flat_array, "let _ = [1, 2, 3].flatten();");
+test_fail!(flat_rejects_flat_array, "let _ = [1, 2, 3].flat();");
 
 // choose: nondeterministic -- assert membership/null
 test_run!(
@@ -566,9 +566,83 @@ test_run!(
 );
 
 test_run!(
-    chain_flatten_then_max,
+    chain_flat_then_max,
     "let a = [[3, 1], [4, 1, 5]];",
-    "a.flatten().max()!" => "5",
+    "a.flat().max()!" => "5",
 );
 
 test_fail!(no_sort_by_method, "let a = [1, 2]; a.sort_by([1]);");
+
+test_run!(
+    deduped_keeps_first_occurrences,
+    "let a = [3, 1, 3, 2, 1];",
+    "a.deduped()" => "[3, 1, 2]",
+    "a" => "[3, 1, 3, 2, 1]",
+);
+
+test_run!(
+    deduped_compares_by_value,
+    "[[1], [2], [1]].deduped()" => "[[1], [2]]",
+);
+
+test_run!(
+    deduped_strings,
+    r#"["std", "std::fs", "std"].deduped()"# => r#"["std", "std::fs"]"#,
+);
+
+test_fail!(
+    deduped_keeps_element_type,
+    "let a: [str] = [1, 2].deduped();"
+);
+
+test_run!(
+    reversed_returns_new_array,
+    "let a = [1, 2, 3];",
+    "a.reversed()" => "[3, 2, 1]",
+    "a" => "[1, 2, 3]",
+);
+
+test_run!(
+    reversed_empty,
+    "let a: [int] = [];",
+    "a.reversed()" => "[]",
+);
+
+test_fail!(
+    reversed_keeps_element_type,
+    "let a: [str] = [1, 2].reversed();"
+);
+
+test_run!(
+    to_dict_builds_from_pairs,
+    r#"let d = [("ada", 3), ("bob", 5)].to_dict();"#,
+    r#"d["bob"]"# => "5",
+    "d.len()" => "2",
+);
+
+test_run!(
+    to_dict_repeated_key_takes_last_value,
+    r#"let d = [("a", 1), ("b", 2), ("a", 3)].to_dict();"#,
+    r#"d["a"]"# => "3",
+    r#"(for (k, _) in d collect k).join(",")"# => r#""a,b""#,
+);
+
+test_run!(
+    to_dict_round_trips_pairs,
+    "let d = ~{ x = 1, y = 2 };",
+    "d.pairs().to_dict() == d" => "true",
+);
+
+test_run!(
+    to_dict_runtime_built_keys,
+    r#"let k = "a" + "b";
+       let d = [(k, 1)].to_dict();"#,
+    r#"d["ab"]"# => "1",
+);
+
+test_fail!(to_dict_needs_str_keys, "let d = [(1, 2)].to_dict();");
+
+test_fail!(
+    to_dict_keeps_value_type,
+    r#"let d: ~{str} = [("a", 1)].to_dict();"#
+);

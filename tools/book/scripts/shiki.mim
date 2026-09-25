@@ -22,7 +22,7 @@ impl Shiki {
     const RADIUS = 6.0;
     const BG = "#151b23";
     const MIN_WIDTH = 400.0;
-    const GRAMMAR = "tools/highlighter/mimas.tmLanguage.json";
+    const GRAMMAR = "tools/book/utils/mimas.tmLanguage.json";
     const THEME = "github-dark-default";
 
     /// Loads the data from the shiki library in JS
@@ -36,7 +36,7 @@ impl Shiki {
         )!;
         let stdout = std::process::run(
             "deno",
-            ["run", "-A", "tools/highlighter/tokenize.mjs", "--grammar", Self::GRAMMAR, "--theme", Self::THEME],
+            ["run", "-A", "tools/book/utils/tokenize.mjs", "--grammar", Self::GRAMMAR, "--theme", Self::THEME],
             input,
         )!;
         for entry in std::parse::from_json(stdout)!.as_array()! collect Self::from_json(entry)!
