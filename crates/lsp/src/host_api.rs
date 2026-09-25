@@ -23,7 +23,8 @@ impl HostApi {
             (HostApi::Packages, Some(package)) => (
                 package,
                 manifests(package),
-                "Run the binary with `cargo run` to write it.",
+                "Run the binary with `cargo run` to write it, or write it manually with \
+                 `mimas::write_api` and point `mimas.apiPath` at it.",
             ),
             (HostApi::Manifest(path), _) => (
                 path.as_path(),
