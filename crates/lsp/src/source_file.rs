@@ -1,4 +1,4 @@
-use line_index::{LineCol, LineIndex, TextSize, WideEncoding, WideLineCol};
+use line_index::{LineIndex, TextSize, WideEncoding, WideLineCol};
 use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Position, Range, SymbolKind};
 use parse::{
     Ast, FieldKey, Ident, Item, ItemKind, NodeId, PactItem, StmtKind, Visitor, walk_stmts,
@@ -185,7 +185,7 @@ impl SourceFile {
     }
 
     fn position(&self, offset: usize) -> Option<Position> {
-        let line_col: LineCol = self.lines.try_line_col(TextSize::new(offset as u32))?;
+        let line_col = self.lines.try_line_col(TextSize::new(offset as u32))?;
         let wide = self.lines.to_wide(WideEncoding::Utf16, line_col)?;
         Some(Position {
             line: wide.line,

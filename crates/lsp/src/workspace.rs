@@ -43,8 +43,7 @@ impl Workspace {
         };
         let (root, recursive, package) = root_of(path);
         let old = self.projects.remove(root);
-        let mut problem = None;
-        if self.open.keys().any(|file| root_of(file).0 == root) {
+        let problem = if self.open.keys().any(|file| root_of(file).0 == root) {
             // every `.mim` in the project, with the editor's text winning
             let files = solve::mim_files(root, recursive)
                 .0
@@ -57,11 +56,13 @@ impl Workspace {
                     Some((path, text))
                 })
                 .collect();
-            let (library, trouble) = self.host_api.library(package);
-            problem = trouble;
+            let (library, problem) = self.host_api.library(package);
             self.projects
                 .insert(root.to_path_buf(), Project::load(files, library));
-        }
+            problem
+        } else {
+            None
+        };
 
         // a host API problem shows at the top of every file it leaves checked against std alone
         let note = problem.map(|message| Diagnostic {

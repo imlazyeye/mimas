@@ -162,8 +162,8 @@ impl Analysis {
         })
     }
 
-    /// Every ident in the project that resolves to the same declaration as the one at
-    /// `position`, the declaration itself included when `with_declaration`.
+    /// Every ident in these files that resolves to the same declaration as the one at `position`,
+    /// the declaration itself included when `with_declaration`.
     pub fn references(
         &self,
         path: &Path,

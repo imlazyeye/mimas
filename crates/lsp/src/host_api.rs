@@ -18,7 +18,7 @@ impl HostApi {
     /// alone when there's no manifest to go by, along with why when one was expected.
     pub fn library(&self, package: Option<&Path>) -> (Library<()>, Option<String>) {
         let std_alone = || vm::Vm::new().install_library(library::std);
-        let (key, manifests) = match (self, package) {
+        let (owner, manifests) = match (self, package) {
             (HostApi::Packages, Some(package)) => (package, manifests(package)),
             (HostApi::Manifest(path), _) => (path.as_path(), vec![path.clone()]),
             _ => return (std_alone(), None),
@@ -38,7 +38,7 @@ impl HostApi {
             },
             None => format!(
                 "no host API for {} yet, run your Rust host once to write it",
-                key.display()
+                owner.display()
             ),
         };
         return (std_alone(), Some(problem));
