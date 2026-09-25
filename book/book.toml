@@ -59,7 +59,12 @@ color = "#8E9BFF"
 icon = "./assets/puzzle.svg"
 color = "#5BD6B0"
 
+[preprocessor.std]
+command = "cargo run -q -p book -- std"
+renderers = ["html"]
+before = ["mimas"]
+
 [preprocessor.mimas]
-command = "mimas run tools/highlighter --"
+command = "cargo run -q -p book -- highlight"
 renderers = ["html"]
 before = ["admonish"]

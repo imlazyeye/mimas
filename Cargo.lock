@@ -1099,6 +1099,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "book"
+version = "0.2.0"
+dependencies = [
+ "clap 3.2.25",
+ "mimas",
+ "mimas-parse",
+ "serde_json",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1584,14 +1594,6 @@ name = "disqualified"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e90a5dd66beeca277ae954f8055b02a712792b6b6b43f2bc2f92b0b7d8291614"
-
-[[package]]
-name = "docs"
-version = "0.2.0"
-dependencies = [
- "mimas",
- "serde_json",
-]
 
 [[package]]
 name = "document-features"

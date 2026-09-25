@@ -48,9 +48,6 @@ jobs:
       - name: Install mdbook-admonish
         run: cargo install mdbook-admonish --version 1.20.0 --locked
 
-      - name: Install mimas
-        run: cargo install --path crates/cli --locked
-
       - name: Install wasm tooling
         run: |
           rustup target add wasm32-unknown-unknown

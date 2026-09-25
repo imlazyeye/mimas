@@ -8,7 +8,7 @@ pub const BLOCK_PATTERN = "```mimas[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
 /// A deserialized mdBook Book -- the second element of the `[context, book]` payload mdBook hands
 /// a preprocessor through stdin.
 pub struct MdBook {
-    sections: [BookItem],
+    pub sections: [BookItem],
 }
 
 impl MdBook {
@@ -50,7 +50,7 @@ impl MdBook {
 }
 
 /// Different items that appear in the book.
-enum BookItem {
+pub enum BookItem {
     Chapter(Chapter),
     Separator,
     PartTitle(str),
@@ -96,14 +96,14 @@ impl BookItem {
 }
 
 /// A single chapter.
-struct Chapter {
-    name: str,
-    content: str,
-    number: [float]?,
-    path: str?,
-    source_path: str?,
-    parent_names: [str],
-    sub_items: [BookItem],
+pub struct Chapter {
+    pub name: str,
+    pub content: str,
+    pub number: [float]?,
+    pub path: str?,
+    pub source_path: str?,
+    pub parent_names: [str],
+    pub sub_items: [BookItem],
 }
 
 impl Chapter {

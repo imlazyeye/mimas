@@ -1,6 +1,5 @@
-// todo: deny in CI if this generates diffs to the book
-
 use std::parse::Value;
+use mdbook::{ MdBook, BookItem, Chapter };
 
 /// Formats a type for display, keeping context with local anon types.
 fn ty(value: Value, anons: ~{str}) -> str {
@@ -120,18 +119,6 @@ fn render(title: str, page: Page) -> str {
     blocks.join("\n\n") + "\n"
 }
 
-// really need a Path type
-let std_path = std::sys::file().split("/");
-std_path.pop(); // .mim
-std_path.pop(); // scripts
-std_path.pop(); // docs
-std_path.pop(); // tools
-let std_path = f"{std_path.join("/")}/book/src/std";
-
-// remove the old folder
-let _ = std::fs::remove_dir(std_path);
-std::fs::make_dir(std_path)!;
-
 // fetch the api, start building
 let api = std::parse::from_json(docs::std_api())!.as_dict()!;
 let adts = for x in api.get("adts")!.as_array()! collect x.as_dict()!;
@@ -157,20 +144,66 @@ for adt in adts {
     let page = pages.get_or_insert(name, Page::new());
     page.intro = f"```mimas\n{declaration(adt)}\n```\n\n{doc}";
 
-    let dir = home.replace("std::", "").to_lower();
-    std::fs::make_dir(f"{std_path}/{dir}")!;
-    let link = f"./{dir}/{name.to_lower()}.md";
+    let link = f"./{home.replace("std::", "").to_lower()}/{name.to_lower()}.md";
     pages
         .get_or_insert(home, Page::new())
         .types
         .push(f"### [`{name}`]({link})\n\n{doc.split("\n\n")[0]}");
 }
 
+// mdbook passes `[context, book]` through stdin and takes the book back through stdout. the pages
+// go under std.md's chapter, which SUMMARY.md leaves empty
+let book = MdBook::from_value(std::parse::from_json(std::sys::stdin()!)!.as_array()![1])!;
+let found = for item in book.sections {
+    if let BookItem::Chapter(chapter) = item {
+        if chapter.path == "std.md" {
+            break chapter;
+        }
+    }
+};
+let std_chapter? = found else { panic("SUMMARY.md has no std.md") };
+let number = std_chapter.number!;
+
+let rows = [];
+let items = [];
 for (title, page) in pages.pairs() {
-    let path = if let home? = adt_modules[title] { f"{home}/{title}" } else { title };
-    let file = path.replace("std::", "").to_lower();
-    std::fs::write(f"{std_path}/{file}.md", render(title, page))!;
+    if title in adt_modules {
+        continue;
+    }
+
+    let file = f"std/{title.replace("std::", "").to_lower()}";
+    let at = [number, [(items.len() + 1).to_float()]].flat();
+    let children = [];
+    for (name, home) in adt_modules.pairs() {
+        if home == title {
+            children.push(BookItem::Chapter(Chapter {
+                name = name,
+                content = render(name, pages[name]!),
+                number = [at, [(children.len() + 1).to_float()]].flat(),
+                path = f"{file}/{name.to_lower()}.md",
+                source_path = null,
+                parent_names = [std_chapter.name, title],
+                sub_items = [],
+            }));
+        }
+    }
+    items.push(BookItem::Chapter(Chapter {
+        name = title,
+        content = render(title, page),
+        number = at,
+        path = f"{file}.md",
+        source_path = null,
+        parent_names = [std_chapter.name],
+        sub_items = children,
+    }));
+
+    let label = if title.starts_with("std::") f"`{title}`" else title;
+    rows.push(f"| [{label}](./{file}.md) |");
 }
+
+std_chapter.content += rows.join("\n") + "\n";
+std_chapter.sub_items = items;
+print(std::parse::to_json(book.serialize())!);
 
 /// Everything about one native that its page needs.
 struct Item {
