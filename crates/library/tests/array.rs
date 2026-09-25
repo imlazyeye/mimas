@@ -196,34 +196,34 @@ test_run!(
 );
 
 test_run!(
-    flatten_nested_ints,
+    flat_nested_ints,
     "let a = [[1, 2], [3], [4, 5]];
-     let f = a.flatten();",
+     let f = a.flat();",
     "f.len()" => "5",
     "f[0]" => "1",
     "f[4]" => "5",
 );
 
 test_run!(
-    flatten_nested_strs,
+    flat_nested_strs,
     r#"let a = [["x"], ["y", "z"]];"#,
-    "a.flatten().len()" => "3",
-    r#"a.flatten().contains("z")"# => "true",
+    "a.flat().len()" => "3",
+    r#"a.flat().contains("z")"# => "true",
 );
 
 test_run!(
-    flatten_empty_outer,
+    flat_empty_outer,
     "let a: [[int]] = [];",
-    "a.flatten().len()" => "0",
+    "a.flat().len()" => "0",
 );
 
 test_run!(
-    flatten_empty_inners,
+    flat_empty_inners,
     "let a: [[int]] = [[], []];",
-    "a.flatten().len()" => "0",
+    "a.flat().len()" => "0",
 );
 
-test_fail!(flatten_rejects_flat_array, "let _ = [1, 2, 3].flatten();");
+test_fail!(flat_rejects_flat_array, "let _ = [1, 2, 3].flat();");
 
 // choose: nondeterministic -- assert membership/null
 test_run!(
@@ -566,9 +566,9 @@ test_run!(
 );
 
 test_run!(
-    chain_flatten_then_max,
+    chain_flat_then_max,
     "let a = [[3, 1], [4, 1, 5]];",
-    "a.flatten().max()!" => "5",
+    "a.flat().max()!" => "5",
 );
 
 test_fail!(no_sort_by_method, "let a = [1, 2]; a.sort_by([1]);");
