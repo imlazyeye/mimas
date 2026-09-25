@@ -2,7 +2,9 @@
 
 use std::parse::Value;
 
-fn ty(input: str, anons: ~{str}) -> str {
+/// Formats a type for display, keeping context with local anon types.
+fn ty(value: Value, anons: ~{str}) -> str {
+    let input = docs::display_ty(value)!;
     while let matches = input.find("\\?[av](\\d*)") {
         let key = matches[1];
         if key !in anons {
@@ -19,89 +21,246 @@ fn ty(input: str, anons: ~{str}) -> str {
     input
 }
 
-fn adt_names() -> [str] {
-    for x in api().get("adts")!.as_array()! { 
-        collect x.as_dict()!.get("name")!.as_str()!;
+/// Extracts the module an item belongs to.
+fn module_of(item: ~{Value}) -> [str] {
+    for x in item.get("module")!.as_array()! collect x.as_str()!
+}
+
+/// Formats a function signature.
+fn signature(value: ~{Value}, params: [str], anons: ~{str}) -> str {
+    for param in value["parameters"]!.as_array()! {
+        let param = param.as_array()!;
+        let name = param[0].as_str()!;
+        params.push(match param[1] {
+            Value::Null => name,
+            t => f"{name}: {ty(t, anons)}",
+        });
     }
 
+    let out = f"fn {value["name"]!.as_str()!}({params.join(", ")})";
+    let ret = ty(value["return_ty"]!, anons);
+    if ret != "()" {
+        out += f" -> {ret}";
+    }
+    out
 }
 
-fn api() -> ~{Value} {
-    std::parse::from_json(docs::std_api())!.as_dict()!
+/// The adt as it would be declared, with each variant's doc above it
+fn declaration(adt: ~{Value}) -> str {
+    let name = adt["name"]!.as_str()!;
+    let variants = adt["variants"]!.as_array()!;
+    if adt["kind"]!.as_str()! == "Struct" {
+        return f"struct {name}{fields(variants[0].as_dict()!["fields"]!)}";
+    }
+
+    let lines = [f"enum {name} {{"];
+    for variant in variants {
+        let variant = variant.as_dict()!;
+        for line in variant["doc"]!.as_str()!.lines() {
+            lines.push(f"    /// {line}");
+        }
+        lines.push(f"    {variant["name"]!.as_str()!}{fields(variant["fields"]!)},");
+    }
+    lines.push("}");
+    lines.join("\n")
 }
 
-let api = api();
-let natives = api.get("natives")!.as_array()!;
-let adts = api.get("adts")!.as_array()!;
-
-let api = for x in natives collect x.as_dict()!;
-let adts = for x in adts collect x.as_dict()!;
-
-for item in api {
-    let item = if let method? = item["Method"]?.as_dict() {
-        let item = Item::method(method);
-        // item.render();
-        print(item.render());
+fn fields(value: Value) -> str {
+    let anons = ~{};
+    if let tuple? = value.as_dict()?["Tuple"] {
+        let tys = for t in tuple.as_array()! collect ty(t, anons);
+        f"({tys.join(", ")})"
+    } else if let named? = value.as_dict()?["Named"] {
+        let fields = for field in named.as_array()! {
+            let field = field.as_array()!;
+            collect f"{field[0].as_str()!}: {ty(field[1], anons)}";
+        };
+        f" {{ {fields.join(", ")} }}"
     } else {
+        ""
+    }
+}
 
+fn render(title: str, page: Page) -> str {
+    let rows = [];
+    let body = [];
+    let anchors = ~{};
+    for (heading, entries) in page.sections.pairs() {
+        body.push(f"## {heading}");
+        for (name, entry) in entries.pairs() {
+            // mdbook's ids for the headings, which count up when a name repeats
+            let anchor = name.to_lower();
+            let repeats = anchors.get_or_insert(anchor, 0);
+            anchors[anchor] = repeats + 1;
+            if repeats > 0 {
+                anchor = f"{anchor}-{repeats}";
+            }
+
+            let summary = (entry.doc.replace("\n", " ") + " ").split(". ")[0];
+            rows.push(f"| [`{name}`](#{anchor}) | {summary} |");
+            body.push(f"### `{name}`");
+            body.push(f"```mimas\n{entry.signatures.join("\n")}\n```");
+            body.push(entry.doc);
+        }
+    }
+    if !page.types.is_empty() {
+        body.push("## Types");
+        body.extend(page.types);
+    }
+
+    // an adt's page leads with its docs, the rest with a table of their items
+    let table = f"| Item | Summary |\n| :-- | :-- |\n{rows.join("\n")}";
+    let blocks = [f"# {title}", if page.intro.is_empty() table else page.intro];
+    blocks.extend(body);
+    let blocks = for block in blocks {
+        if !block.is_empty() {
+            collect block;
+        }
     };
-
+    blocks.join("\n\n") + "\n"
 }
 
-/// A representation of a module, ready for export.
-struct Module {
-    name: str,
-    items: [Item],
+// really need a Path type
+let std_path = std::sys::file().split("/");
+std_path.pop(); // .mim
+std_path.pop(); // scripts
+std_path.pop(); // docs
+std_path.pop(); // tools
+let std_path = f"{std_path.join("/")}/book/src/std";
+
+// remove the old folder
+let _ = std::fs::remove_dir(std_path);
+std::fs::make_dir(std_path)!;
+
+// fetch the api, start building
+let api = std::parse::from_json(docs::std_api())!.as_dict()!;
+let adts = for x in api.get("adts")!.as_array()! collect x.as_dict()!;
+let natives = for x in api.get("natives")!.as_array()! collect x.as_dict()!;
+let adt_modules = (for adt in adts collect (adt["name"]!.as_str()!, module_of(adt).join("::"))).to_dict();
+
+// page title -> page, where an adt's page is titled with its bare name
+let pages = ~{};
+for native in natives {
+    let item = Item::from_value(native, adt_modules);
+    let entry = pages
+        .get_or_insert(item.page, Page::new())
+        .sections
+        .get_or_insert(item.section, ~{})
+        .get_or_insert(item.heading, Entry { signatures = [], doc = item.doc });
+    entry.signatures.push(item.signature);
 }
 
-enum Item {
-    Method {
-        name: str,
-        recv_ty: str,
-        args: [(str, str)],
-        doc: str,
-    },
+for adt in adts {
+    let name = adt["name"]!.as_str()!;
+    let home = module_of(adt).join("::");
+    let doc = adt["doc"]!.as_str()!;
+    let page = pages.get_or_insert(name, Page::new());
+    page.intro = f"```mimas\n{declaration(adt)}\n```\n\n{doc}";
+
+    let dir = home.replace("std::", "").to_lower();
+    std::fs::make_dir(f"{std_path}/{dir}")!;
+    let link = f"./{dir}/{name.to_lower()}.md";
+    pages
+        .get_or_insert(home, Page::new())
+        .types
+        .push(f"### [`{name}`]({link})\n\n{doc.split("\n\n")[0]}");
+}
+
+for (title, page) in pages.pairs() {
+    let path = if let home? = adt_modules[title] { f"{home}/{title}" } else { title };
+    let file = path.replace("std::", "").to_lower();
+    std::fs::write(f"{std_path}/{file}.md", render(title, page))!;
+}
+
+/// Everything about one native that its page needs.
+struct Item {
+    page: str,
+    section: str,
+    heading: str,
+    signature: str,
+    doc: str,
 }
 
 impl Item {
-    fn method(value: ~{Value}) -> Self {
-        Self::Method {
-            name = value["name"]!.as_str()!,
-            recv_ty = docs::display_ty(value["recv_ty"]!)!,
-            args = [],
-            doc = value["doc"]!.as_str()!,
+    fn from_value(native: ~{Value}, adt_modules: ~{str}) -> Self {
+        let (kind, value) = native.pairs()[0];
+        let value = value.as_dict()!;
+        let name = value["name"]!.as_str()!;
+        let doc = value["doc"]!.as_str()!;
+        let anons = ~{};
+
+        if kind == "Method" {
+            let recv_ty = ty(value["recv_ty"]!, anons);
+            let (page, owner) = match recv_ty {
+                "str" => ("Strings", "str"),
+                "int" => ("Integers", "int"),
+                "float" => ("Floats", "float"),
+                "bool" => ("Booleans", "bool"),
+                t if t.starts_with("[") => ("Arrays", "array"),
+                t if t.starts_with("~{") => ("Dictionaries", "dict"),
+                t => (t, t),
+            };
+            let takes_self = value["takes_self"]! == Value::Bool(true);
+
+            // if the recv_ty is a primitive (or its internal ty is a pure generic) then we
+            // can just show "self". otherwise, we'll show the type bound on it
+            let params = if !takes_self {
+                []
+            } else if recv_ty == owner || recv_ty in ["[T]", "~{T}"] {
+                ["self"]
+            } else {
+                [f"self: {recv_ty}"]
+            };
+
+            let section = if owner in adt_modules {
+                "Implementations"
+            } else if takes_self {
+                "Methods"
+            } else {
+                "Associated Functions"
+            };
+
+            return Item {
+                page = page,
+                section = section,
+                heading = name,
+                signature = signature(value, params, anons),
+                doc = doc,
+            };
         }
-    }
 
-    fn render(self) -> str {
-        match self {
-            Item::Method { name, recv_ty, args, doc } => {
-                let anons = ~{};
-                let out = f"### `{name}`";
-                let args = for (name, t) in args collect f"name: {ty(t, anons)}";
-
-                // if the recv_ty is a primitive (or its internal ty is a pure generic) then we
-                // can just show "self". otherwise, we'll show the type bound on it
-                recv_ty = ty(recv_ty, anons);
-                let is_basic_shape = match recv_ty {
-                    "int" | "float" | "str" | "T?" | "[T]" | "~{T}" => true,
-                    n if n in adt_names() => true,
-                    _ => false
-                };
-
-                let self_insert = if is_basic_shape {
-                    "self"
-                } else {
-                    f"self: {recv_ty}"
-                };
-
-                args.insert(0, self_insert);
-
-                out += f"\n\n```mimas\nfn {name}({args.join(",")})\n```";
-                out += f"\n\n{doc}\n";
-                out
-            }
+        let path = module_of(value);
+        let (section, sig) = if kind == "Function" {
+            ("Functions", signature(value, [], anons))
+        } else {
+            ("Constants", f"const {name}: {ty(value["ty"]!, anons)}")
+        };
+        Item {
+            page = if path.is_empty() { "Prelude" } else { path.join("::") },
+            section = section,
+            heading = name,
+            signature = sig,
+            doc = doc,
         }
     }
 }
 
+struct Page {
+    /// An adt's declaration and docs, which replace the table of items.
+    intro: str,
+    /// Section heading -> entry heading -> entry.
+    sections: ~{~{Entry}},
+    types: [str],
+}
+
+impl Page {
+    fn new() -> Self {
+        Page { intro = "", sections = ~{}, types = [] }
+    }
+}
+
+/// What goes under one heading (overloads share one).
+struct Entry {
+    signatures: [str],
+    doc: str,
+}

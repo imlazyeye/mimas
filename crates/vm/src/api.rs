@@ -67,10 +67,10 @@ pub struct Api<'a, 'gc> {
     pub library: &'a mut Library<()>,
 }
 
-/// Looks up what `#[native]` or `#[mimas]` submitted for the fn at `path` (`type_name_of_val(&f)`) and pairs
-/// `tys` with their names. `skip` drops leading names `tys` doesn't cover, like a method's
-/// receiver. Names fall back to `arg{i}` and the doc to an empty string when the submission is
-/// missing or doesn't line up (see [`NativeMeta`]).
+/// Looks up what `#[native]` or `#[mimas]` submitted for the fn at `path` (`type_name_of_val(&f)`)
+/// and pairs `tys` with their names. `skip` drops leading names `tys` doesn't cover, like a
+/// method's receiver. Names fall back to `arg{i}` and the doc to an empty string when the
+/// submission is missing or doesn't line up (see [`NativeMeta`]).
 fn native_meta(
     path: &str,
     skip: usize,

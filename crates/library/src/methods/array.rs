@@ -2,7 +2,7 @@ use api::Intrinsic;
 use macros::native;
 use rand::{prelude::IndexedRandom, seq::SliceRandom};
 use shared::Ty;
-use vm::{Array, Ctx, RtErr, Val, anon, api::Api};
+use vm::{Array, Ctx, DictMap, RtErr, Str, Val, anon, api::Api};
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_assoc(Ty::Array(Box::new(Ty::Anon(0))), new);
@@ -18,7 +18,7 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method(shuffle);
     api.add_method(extend);
     api.add_method(enumerate);
-    api.add_method(flatten);
+    api.add_method(flat);
     api.add_method(choose);
     api.add_method(join);
     api.add_method(is_empty);
@@ -33,6 +33,9 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method_named("argsort", argsort_int);
     api.add_method_named("argsort", argsort_float);
     api.add_method(reorder);
+    api.add_method(deduped);
+    api.add_method(reversed);
+    api.add_method(to_dict);
 }
 
 /// Creates an empty array. This is the same as writing `[]`, and like `[]` it needs a type
@@ -173,11 +176,10 @@ fn enumerate(arr: &[anon::T<'gc>]) -> Vec<(usize, anon::T<'gc>)> {
 /// removed: a `[[[int]]]` flattens to a `[[int]]`.
 ///
 /// ```mimas
-/// let xs = [[1, 2], [], [3]].flatten(); // [1, 2, 3]
+/// let xs = [[1, 2], [], [3]].flat(); // [1, 2, 3]
 /// ```
-// todo, should be "flat" or "flattened"
 #[native]
-fn flatten(arr: Vec<Vec<anon::T<'gc>>>) -> Vec<anon::T<'gc>> {
+fn flat(arr: Vec<Vec<anon::T<'gc>>>) -> Vec<anon::T<'gc>> {
     arr.into_iter().flatten().collect()
 }
 
@@ -358,4 +360,59 @@ fn reorder<'gc>(ctx: Ctx<'gc>, arr: &mut Vec<Val<'gc>>, indices: Vec<i64>) -> Re
         .collect::<Result<Vec<_>, _>>()?;
     *arr = out;
     Ok(())
+}
+
+/// Returns a new array without repeated elements, keeping the first occurrence of each value in its
+/// original order. Elements are compared with `==`, the same check as [`contains`](#contains).
+/// Unlike Rust's `dedup`, the repeats don't have to be next to each other. The array itself is
+/// unchanged.
+///
+/// ```mimas
+/// let xs = [3, 1, 3, 2, 1];
+/// let ys = xs.deduped(); // [3, 1, 2]
+/// ```
+#[native]
+fn deduped(arr: &[anon::T<'gc>]) -> Vec<anon::T<'gc>> {
+    let mut kept: Vec<anon::T<'gc>> = Vec::new();
+    for value in arr {
+        if !kept.iter().any(|k| k.0 == value.0) {
+            kept.push(*value);
+        }
+    }
+    kept
+}
+
+/// Returns a new array with the elements in reverse order. The array itself is unchanged.
+///
+/// ```mimas
+/// let xs = [1, 2, 3];
+/// let ys = xs.reversed(); // [3, 2, 1]
+///
+/// for x in xs.reversed() {
+///     print(x); // 3, then 2, then 1
+/// }
+/// ```
+#[native]
+fn reversed(arr: &[anon::T<'gc>]) -> Vec<anon::T<'gc>> {
+    arr.iter().rev().copied().collect()
+}
+
+/// Returns a dictionary built from `(key, value)` pairs, the reverse of a dictionary's `pairs`.
+/// When a key appears more than once, the dictionary holds its last value, in the position where
+/// the key first appeared.
+///
+/// ```mimas
+/// let scores = [("ada", 3), ("bob", 5)].to_dict(); // ~{ ada = 3, bob = 5 }
+///
+/// let names = ["ada", "grace"];
+/// let lengths = (for name in names collect (name, name.len())).to_dict();
+/// // lengths is ~{ ada = 3, grace = 5 }
+/// ```
+#[native]
+fn to_dict<'gc>(ctx: Ctx<'gc>, arr: Vec<(Str<'gc>, anon::T<'gc>)>) -> anon::DictOf<'gc, 0> {
+    let mut dict = DictMap::new();
+    for (key, value) in arr {
+        dict.insert(key, value.0);
+    }
+    anon::DictOf(ctx.new_dict(dict))
 }

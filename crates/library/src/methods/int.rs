@@ -2,7 +2,7 @@ use api::Intrinsic;
 use macros::native;
 use rand::RngExt;
 use shared::Ty;
-use vm::{RtErr, api::Api};
+use vm::api::Api;
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method(abs);

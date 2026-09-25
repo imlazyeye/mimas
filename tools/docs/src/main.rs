@@ -16,7 +16,7 @@ fn main() {
     for entry in std::fs::read_dir(&dir).expect("couldn't read the scripts directory") {
         let path = entry.expect("couldn't read a script").path();
         if path.extension().is_some_and(|ext| ext == "mim") {
-            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let name = path.to_string_lossy().into_owned();
             let source = std::fs::read_to_string(&path).expect("couldn't read a script");
             files.push((name, source));
         }

@@ -1,6 +1,6 @@
 # Standard Library
 
-This is the reference for everything mimas ships with, in version `0.1.0`. It lists each function, method, and constant, what it takes and returns, and how it behaves. For the language itself, see the [Language Reference](./reference.md).
+This is the reference for everything mimas ships with. It lists each function, method, and constant, what it takes and returns, and how it behaves. For the language itself, see the [Language Reference](./reference.md).
 
 The standard library comes in three parts:
 
@@ -10,15 +10,3 @@ The standard library comes in three parts:
 
 | Page | Covers |
 | :-- | :-- |
-| Prelude | `print`, `panic`, `todo`, and `dbg` |
-| [Arrays](./std/arrays.md) | Growing, searching, and sorting `[T]` |
-| Dictionaries | Inserting, removing, and iterating `~{V}` |
-| Strings | Searching, splitting, and converting `str` |
-| Integers | Math and conversions on `int` |
-| Floats | Rounding, trigonometry, and conversions on `float` |
-| Booleans | Methods on `bool` |
-| `std::fs` | Reading, writing, and walking files and directories |
-| `std::math` | Constants and vector types |
-| `std::parse` | JSON in and out |
-| `std::process` | Running other programs |
-| `std::sys` | Arguments, stdin, and exiting |

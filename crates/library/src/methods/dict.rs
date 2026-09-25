@@ -3,6 +3,7 @@ use vm::{Ctx, DictMap, Str, anon, api::Api};
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method(get);
+    api.add_method(get_or_insert);
     api.add_method(len);
     api.add_method(contains_key);
     api.add_method(insert);
@@ -21,6 +22,28 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
 #[native]
 fn get(d: &DictMap<'gc, anon::T<'gc>>, key: Str<'gc>) -> Option<anon::T<'gc>> {
     d.get(&key).copied()
+}
+
+/// Returns the entry under the `key`. If none is found, `default` is inserted at `key` and is
+/// returned instead.
+///
+/// ```mimas
+/// let ages = ~{ ada = 36 };
+/// let a = ages.get("ada"); // 36
+/// let b = ages.get_or_insert("bob", 28); // 28
+/// ```
+#[native]
+fn get_or_insert(
+    d: &mut DictMap<'gc, anon::T<'gc>>,
+    key: Str<'gc>,
+    default: anon::T<'gc>,
+) -> anon::T<'gc> {
+    if let Some(val) = d.get(&key).copied() {
+        val
+    } else {
+        d.insert(key, default);
+        default
+    }
 }
 
 /// Returns the number of entries.
