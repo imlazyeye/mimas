@@ -905,8 +905,12 @@ impl Solve for Closure {
         solver.fn_stack.push(FnRun {
             expected_ty: expected_ty.clone(),
         });
+        // `break`, `continue` and `collect` can't target a loop outside the closure (the body
+        // compiles on its own)
+        let outer_loops = std::mem::take(&mut solver.loop_stack);
         solver.control_flow.enter();
         let body_ty = self.body.query(solver)?;
+        solver.loop_stack = outer_loops;
         solver.fn_stack.pop().unwrap();
         let flow = solver.control_flow.exit();
 

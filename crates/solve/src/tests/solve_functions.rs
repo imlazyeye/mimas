@@ -239,6 +239,18 @@ test_ty!(
        }"# => func!((Int) -> result!(Int)),
 );
 test_ty!(
+    closure_in_loop_keeps_outer_break,
+    "let a = loop {
+         let f = || {
+             loop {
+                 break 1;
+             }
+         };
+         break f();
+     };",
+    "a" => Int,
+);
+test_ty!(
     named_args_all_by_name,
     "fn foo(a: int, b: int, c: int = 0) -> int { a + b + c }",
     "foo(b=2, a=1)" => Int
@@ -285,6 +297,33 @@ test_fail!(
         }
         0
     }"
+);
+test_fail!(
+    closure_break_does_not_break_outer_loop,
+    "for x in [1, 2] {
+         let f = || {
+             break;
+         };
+         f();
+     }",
+);
+test_fail!(
+    closure_continue_does_not_continue_outer_loop,
+    "for x in [1, 2] {
+         let f = || {
+             continue;
+         };
+         f();
+     }",
+);
+test_fail!(
+    closure_collect_does_not_collect_outer_loop,
+    "let xs = for x in [1, 2] {
+         let f = || {
+             collect x;
+         };
+         f();
+     };",
 );
 test_fail!(extra_argument, "fn foo() {}; foo(0);");
 test_fail!(missing_argument, "fn foo(a: int) {}; foo();");
