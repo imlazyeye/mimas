@@ -27,8 +27,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Checks a script with the modules below its directory, or every script at the top of a
-    /// directory.
+    /// Checks a script with the modules below its directory, or every script in a directory.
     Check {
         /// The path to the project directory to run on. Uses the current directory if not
         /// provided.

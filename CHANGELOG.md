@@ -6,8 +6,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Added
 
-- mimas now has a language server, `mimas-lsp`, installed with `cargo install mimas-lsp`. It offers diagnostics, hover (with `///` doc comments), go to definition, find references, rename, outlines, and inlay hints. It comes bundled with the VS Code extension, which is available on the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas). A Rust host run from its cargo target dir writes its API to `target/mimas/api.json`. The server finds that file through `cargo metadata` and loads it, so scripts are checked against the host's functions, types and constants. The VS Code extension can point it at another file with `mimas.apiPath` or the "mimas: Select Host API Manifest" command, and restart it with "mimas: Restart Language Server". See [Language Server](https://mim.as/introduction/lsp.html). ([#37](https://github.com/imlazyeye/mimas/pull/37))
-- The `export-api` feature of `mimas`, on by default, writes the host's API to `target/mimas/api.json` when the host runs from its cargo target dir. `mimas::write_api` writes it anywhere else. Turn the automatic write off with `default-features = false`.
+- mimas now has a language server, `mimas-lsp`, installed with `cargo install mimas-lsp`. It offers diagnostics, hover (with `///` doc comments), go to definition, find references, rename, outlines, and inlay hints. It comes bundled with the VS Code extension, which is available on the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas). A Rust host run from its cargo target dir writes its API to `target/mimas/<binary>.json`. The server finds the manifests of the cargo package a script sits in through `cargo metadata` and loads the newest, so scripts are checked against their own host's functions, types and constants. The VS Code extension can point it at another file with `mimas.apiPath` or the "mimas: Select Host API Manifest" command, and restart it with "mimas: Restart Language Server". See [Language Server](https://mim.as/introduction/lsp.html). ([#37](https://github.com/imlazyeye/mimas/pull/37))
+- The `export-api` feature of `mimas`, on by default, writes the host's API to `target/mimas/<binary>.json` when the host runs from its cargo target dir. `mimas::write_api` writes it anywhere else. Turn the automatic write off with `default-features = false`.
 - With the `bevy` feature, hover shows the `///` docs of reflected components, resources, and enum variants, Bevy's own types included.
 - `std::sys::file()`: Returns the absolute path to the file this function is written within, similar to Rust's `file!()` and Python's `__file__`.
 - `std::process::run_attached(cmd, args)`: Runs a command without capturing its output and returns its exit code. Unlike `std::process::run`, a non-zero exit isn't raised.
@@ -19,7 +19,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
   - Scripts can see and use any module within its directory (including sub-direrctories)
   - `mimas run <directory>` can still be used as long as your project as a singular script
   - Projects with multiple scripts can still use `mimas run <script_file>`
-  - Scripts must be in the base folder to avoid complexity with module structure. This may be refined in the future based on feedback.
+  - Scripts can sit in sub-directories too
+  - Cargo `target` directories and other cargo packages inside a project aren't part of it
 - The parser now recovers from syntax errors, so the `mimas` CLI reports every syntax error in a file instead of stopping at the first. Embedding through the `mimas` crate still returns only the first.
 - Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint.
 

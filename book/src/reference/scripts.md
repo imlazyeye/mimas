@@ -27,7 +27,7 @@ A file that opens with a [`module`](./modules.md) declaration is a library, not 
 
 ## Projects
 
-A project is a directory. Its scripts sit at the top of it, and its modules can sit anywhere below, without any setup. `mimas run game.mim` checks `game.mim` together with every module in its directory and the directories under it, and `mimas check my_project` does the same for each script at the top of `my_project`, one at a time. Scripts never see each other, so two scripts can both declare `fn update` without clashing. A script inside a subdirectory is an error -- it would be a project of its own.
+A project is a directory. Its scripts and modules can sit anywhere in it, subdirectories included, without any setup. Another cargo package or a cargo `target` directory inside it isn't part of it. `mimas run game.mim` checks `game.mim` together with every module in its directory and the directories under it, and `mimas check my_project` does the same for each script in `my_project`, one at a time. Scripts never see each other, so two scripts can both declare `fn update` without clashing.
 
 `mimas run` on a directory runs its only script. When the directory holds more than one, name the one you mean.
 

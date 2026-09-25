@@ -1,5 +1,5 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -41,6 +41,13 @@ pub fn write_api(library: &Library<()>, path: &Path) -> std::io::Result<()> {
     std::fs::write(path, output)
 }
 
+/// Where a host built as `exe` writes its manifest ([`api::manifest_file`] in its target dir).
+/// `None` wherever [`target_dir`] is.
+pub fn manifest_path(exe: &Path) -> Option<PathBuf> {
+    let name = exe.file_stem()?.to_string_lossy();
+    Some(api::manifest_file(target_dir(exe)?, &name))
+}
+
 /// The cargo target dir `exe` was built into, found by the `CACHEDIR.TAG` cargo writes at its
 /// root. `None` for test and bench binaries and for anything outside a target dir.
 pub fn target_dir(exe: &Path) -> Option<&Path> {
@@ -61,10 +68,9 @@ pub(crate) fn auto_export(library: &Library<()>) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    let Some(target) = target_dir(&exe) else {
+    let Some(path) = manifest_path(&exe) else {
         return;
     };
-    let path = target.join("mimas").join("api.json");
     if let Err(e) = write_api(library, &path) {
         eprintln!(
             "mimas: couldn't write the API manifest to {}: {e}",

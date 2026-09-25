@@ -114,7 +114,20 @@ impl<'s> Parser<'s> {
         let docs = self
             .docs
             .iter()
-            .map(|(&at, doc)| {
+            .filter_map(|(&at, doc)| {
+                // a doc is for the first name after it, unless its item ends or opens first
+                let name = self.tokens[at..]
+                    .iter()
+                    .take_while(|tok| {
+                        !matches!(
+                            tok.kind(),
+                            TokKind::SemiColon
+                                | TokKind::LeftBrace
+                                | TokKind::RightBrace
+                                | TokKind::Eof
+                        )
+                    })
+                    .find(|tok| tok.kind().is_ident())?;
                 let lines: Vec<_> = doc
                     .lines()
                     .map(|line| {
@@ -122,7 +135,7 @@ impl<'s> Parser<'s> {
                         line.strip_prefix(' ').unwrap_or(line)
                     })
                     .collect();
-                (self.tokens[at].span().start(), lines.join("\n"))
+                Some((name.span().start(), lines.join("\n")))
             })
             .collect();
         (

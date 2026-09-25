@@ -135,7 +135,7 @@
                 "mimas.apiPath": {
                     "type": "string",
                     "default": "",
-                    "description": "The host API manifest a Rust host writes when run from its cargo target dir. Relative paths start from the workspace folder, empty means mimas/api.json in the cargo target dir, and off means std only. \"mimas: Select Host API Manifest\" picks one with a file dialog."
+                    "description": "The host API manifest a Rust host writes when run from its cargo target dir. Relative paths start from the workspace folder, empty means each script's own host (the newest mimas/<binary>.json its cargo package wrote), and off means std only. \"mimas: Select Host API Manifest\" picks one with a file dialog."
                 },
                 "mimas.trace.server": {
                     "type": "string",

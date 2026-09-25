@@ -51,7 +51,7 @@ Replaces blocks of mimas code in the book with rendered, colorized SVGs. This is
 All of the tokens get tests automatically generated for them, so if you ever add/remove/change one, be sure to run this after.
 
 ```sh
-mimas tools/autogen.mim
+mimas tools/autogen/main.mim
 ```
 
 ### Language benchmarking
@@ -61,7 +61,7 @@ Our suite for creating the [benchmarks in the book](./book/src/introduction/benc
 ```sh
 ./benchmarks/compile-bench.sh                    # benchmarks compile times
 ./benchmarks/compare.sh [languages_to_run]       # benchmarks runtimes. they must be installed locally
-mimas tools/inscribe_benchmarks.mim              # updates the graphs in the book
+mimas tools/inscribe_benchmarks/main.mim         # updates the graphs in the book
 ```
 
 That said, the benchmarks are always ran on the same machine, so you shouldn't need to do this yourself beyond your own curiosity.

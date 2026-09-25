@@ -1,21 +1,45 @@
 use crate::tests::utils::parse;
-use shared::Located;
 
-fn docs_at(source: &str, token: &str) -> Option<String> {
+fn docs_at(source: &str, name: &str) -> Option<String> {
     let (ast, errors) = parse(source);
     assert!(errors.is_empty(), "{errors:?}");
-    ast.docs_for(source.find(token).unwrap())
-        .map(str::to_string)
+    ast.docs_for(source.find(name).unwrap()).map(str::to_string)
 }
 
 #[test]
-fn doc_is_at_the_start_of_its_item() {
-    let source = "/// Adds.
-                  pub fn add() {}";
-    let (ast, errors) = parse(source);
-    assert!(errors.is_empty(), "{errors:?}");
-    let start = ast.stmts()[0].span().start;
-    assert_eq!(ast.docs_for(start), Some("Adds."));
+fn doc_is_at_the_name_it_is_for() {
+    let source = "
+    /// A point.
+    struct Point {
+        /// Across.
+        pub x: int,
+    }
+    /// A shape.
+    enum Shape {
+        /// Round.
+        Circle,
+    }
+    /// Things with names.
+    pact Named {
+        /// The name.
+        fn name(self) -> str;
+    }
+    /// Adds.
+    pub fn add() {}
+    /// The start.
+    let origin = 0;";
+    for (name, doc) in [
+        ("Point", "A point."),
+        ("x:", "Across."),
+        ("Shape", "A shape."),
+        ("Circle", "Round."),
+        ("Named", "Things with names."),
+        ("name(", "The name."),
+        ("add(", "Adds."),
+        ("origin", "The start."),
+    ] {
+        assert_eq!(docs_at(source, name).as_deref(), Some(doc), "{name}");
+    }
 }
 
 #[test]
@@ -24,7 +48,7 @@ fn doc_lines_lose_their_slashes() {
                   ///
                   /// Returns the sum.
                   fn add() {}";
-    let docs = docs_at(source, "fn").unwrap();
+    let docs = docs_at(source, "add(").unwrap();
     assert_eq!(
         docs.lines().collect::<Vec<_>>(),
         ["Adds two numbers.", "", "Returns the sum."]
@@ -37,7 +61,7 @@ fn only_the_closest_doc_counts() {
 
                   /// b
                   fn foo() {}";
-    assert_eq!(docs_at(source, "fn").as_deref(), Some("b"));
+    assert_eq!(docs_at(source, "foo").as_deref(), Some("b"));
 }
 
 #[test]
@@ -45,12 +69,12 @@ fn plain_comment_between_doc_and_item() {
     let source = "/// Docs.
                   // todo
                   fn foo() {}";
-    assert_eq!(docs_at(source, "fn").as_deref(), Some("Docs."));
+    assert_eq!(docs_at(source, "foo").as_deref(), Some("Docs."));
 }
 
 #[test]
 fn plain_comment_is_not_a_doc() {
     let source = "// not docs
                   fn foo() {}";
-    assert_eq!(docs_at(source, "fn"), None);
+    assert_eq!(docs_at(source, "foo"), None);
 }

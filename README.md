@@ -112,7 +112,7 @@ Runnable projects live in [`examples/`](examples):
 
 ## Editor support
 
-A language server, `mimas-lsp`, gives any LSP-capable editor diagnostics, hover, go to definition, references, rename, outlines, and inlay hints. Running a Rust host through cargo writes its API to `target/mimas/api.json`, which the server loads so scripts that use the host's types and functions are checked against them. See the [Language Server](https://mim.as/introduction/lsp.html) page for setup and limitations.
+A language server, `mimas-lsp`, gives any LSP-capable editor diagnostics, hover, go to definition, references, rename, outlines, and inlay hints. Running a Rust host through cargo writes its API to `target/mimas/<binary>.json`, which the server loads for the scripts in that host's cargo package so the host's types and functions are checked too. See the [Language Server](https://mim.as/introduction/lsp.html) page for setup and limitations.
 
 A VS Code extension lives in [`tools/vscode`](tools/vscode). You can install it from the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas).
 

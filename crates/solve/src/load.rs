@@ -72,63 +72,55 @@ impl Modules {
     }
 }
 
-/// A directory as a library: its modules, solved together once, and the scripts at its top, each
-/// solved on top of them with [`Modules::load`] like every script is solved on top of the std
-/// library.
+/// A directory as a library: its modules, solved together once, and its scripts, each solved on
+/// top of them with [`Modules::load`] like every script is solved on top of the std library.
 ///
 /// - my_project
 ///   - module_a.mim
-///   - module_b.mim
 ///   - script_a.mim
-///   - script_b.mim
+///   - enemies
+///     - module_b.mim
+///     - script_b.mim
 ///
 /// `my_project` is one library of `module_a` and `module_b`. `script_a` and `script_b` each see
-/// all of it and nothing of each other. A script lower down is out of place.
+/// all of it and nothing of each other.
 pub struct Directory<'a> {
-    pub module_files: Vec<&'a (PathBuf, String)>,
     pub modules: Modules,
     pub scripts: Vec<&'a (PathBuf, String)>,
-    pub out_of_place_scripts: Vec<&'a Path>,
 }
 
 impl<'a> Directory<'a> {
-    /// Sorts the project at `root` (each file a path and its text) into modules and scripts, and
-    /// solves the modules against `library`.
-    pub fn load(files: &'a [(PathBuf, String)], root: &Path, library: &Library<()>) -> Self {
-        let mut module_files = Vec::new();
-        let mut scripts = Vec::new();
-        let mut out_of_place_scripts = Vec::new();
-        for file in files {
-            if parse::lex::is_module(&file.1) {
-                module_files.push(file);
-            } else if dir_of(&file.0) == root {
-                scripts.push(file);
-            } else {
-                out_of_place_scripts.push(file.0.as_path());
-            }
-        }
+    /// Sorts a project's files (each a path and its text) into modules and scripts, and solves the
+    /// modules against `library`.
+    pub fn load(files: &'a [(PathBuf, String)], library: &Library<()>) -> Self {
+        let (modules, scripts): (Vec<_>, Vec<_>) = files
+            .iter()
+            .partition(|file| parse::lex::is_module(&file.1));
         let modules = Modules::from_files(
-            module_files
-                .iter()
-                .map(|(path, text)| (path, text.as_str())),
+            modules.iter().map(|(path, text)| (path, text.as_str())),
             library,
         );
-        Self {
-            module_files,
-            modules,
-            scripts,
-            out_of_place_scripts,
-        }
+        Self { modules, scripts }
     }
 }
 
 /// Every `.mim` file under `root` (or only directly in it, unless `recursive`), sorted by path,
-/// with whatever the walk couldn't read.
+/// with whatever the walk couldn't read. The walk leaves out any directory below `root` holding
+/// another cargo package, and any cargo target dir.
 pub fn mim_files(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<std::io::Error>) {
     let mut files = Vec::new();
     let mut errors = Vec::new();
     let depth = if recursive { usize::MAX } else { 1 };
-    for entry in WalkDir::new(root).max_depth(depth) {
+    let walk = WalkDir::new(root)
+        .max_depth(depth)
+        .into_iter()
+        .filter_entry(|entry| {
+            let dir = entry.path();
+            entry.depth() == 0
+                || !entry.file_type().is_dir()
+                || !(is_package(dir) || dir.join("CACHEDIR.TAG").is_file())
+        });
+    for entry in walk {
         match entry {
             Ok(entry) => {
                 let is_mim = entry.file_type().is_file()
@@ -142,6 +134,12 @@ pub fn mim_files(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<std::io::Er
     }
     files.sort();
     (files, errors)
+}
+
+/// Whether `dir` holds a cargo package, not just a workspace.
+pub fn is_package(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join("Cargo.toml"))
+        .is_ok_and(|toml| toml.lines().any(|line| line.trim() == "[package]"))
 }
 
 /// A file's directory, `.` for a bare name, so a path typed and a path walked compare alike.

@@ -1,133 +1,111 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
-use api::Library;
-use indexmap::{IndexMap, IndexSet};
-use lsp_types::{Diagnostic, Uri};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Uri};
 
-use crate::{analysis::Analysis, host_api::std_library, project::Project};
+use crate::{analysis::Analysis, host_api::HostApi, project::Project};
 
-/// Every project the editor has touched, by root directory, and the text of every open file.
+/// The text of every open file, and the projects they belong to, by root. Projects never overlap.
 pub struct Workspace {
-    pub library: Library<()>,
+    host_api: HostApi,
     open: HashMap<PathBuf, String>,
     projects: HashMap<PathBuf, Project>,
 }
 
-impl Default for Workspace {
-    fn default() -> Self {
+impl Workspace {
+    pub fn new(host_api: HostApi) -> Self {
         Self {
-            library: std_library(),
+            host_api,
             open: HashMap::new(),
             projects: HashMap::new(),
         }
     }
-}
 
-impl Workspace {
-    /// Fetches the Project housed at a given path, if any.
+    /// The project a file belongs to, while any of its files is open.
     pub fn project(&self, path: &Path) -> Option<&Project> {
-        self.projects
-            .values()
-            .find(|project| project.analysis(path).is_some())
+        self.projects.get(root_of(path).0)
     }
 
-    /// Fetches the analysis for a project at the given path, if any
+    /// The analysis that answers for an open file.
     pub fn analysis(&self, path: &Path) -> Option<&Analysis> {
         self.project(path)?.analysis(path)
     }
 
-    /// Takes an open file's text (none once closed) and rebuilds the project it belongs to, whole,
-    /// along with any other that held it. Gives back the diagnostics to publish, an empty list
-    /// clearing a file that left.
+    /// Takes an open file's text (none once closed) and rebuilds its project from scratch, or
+    /// drops it once none of its files are open. Gives back the diagnostics of every file the
+    /// project held or holds, an empty list clearing one it lost.
     pub fn update(&mut self, path: &Path, text: Option<String>) -> Vec<(Uri, Vec<Diagnostic>)> {
         match text {
             Some(text) => self.open.insert(path.to_path_buf(), text),
             None => self.open.remove(path),
         };
-        let mut roots: IndexSet<PathBuf> = self
-            .projects
-            .iter()
-            .filter(|(_, project)| project.files().any(|file| file == path))
-            .map(|(root, _)| root.clone())
-            .collect();
-        roots.insert(self.root_of(path));
-
-        let mut cleared: Vec<Uri> = Vec::new();
-        let mut published: IndexMap<Uri, Vec<Diagnostic>> = IndexMap::new();
-        for root in roots {
-            // the root's old project goes, and any that sat below it: their files are its now
-            self.projects.retain(|key, project| {
-                let stale = key.starts_with(&root);
-                if stale {
-                    cleared.extend(
-                        project
-                            .files()
-                            .filter_map(|file| Uri::from_file_path(file).ok()),
-                    );
-                }
-                !stale
-            });
-            let files = self.read(&root, true).collect();
-            let project = Project::load(&root, files, &self.library);
-            published.extend(project.diagnostics());
-            if project.files().next().is_some() {
-                self.projects.insert(root, project);
-            }
-        }
-        for uri in cleared {
-            published.entry(uri).or_default();
-        }
-        published.into_iter().collect()
-    }
-
-    /// Every `.mim` in `root` (or below it too), open or on disk, with the editor's text winning.
-    fn read(&self, root: &Path, recursive: bool) -> impl Iterator<Item = (PathBuf, String)> {
-        let mut paths = solve::mim_files(root, recursive).0;
-        paths.extend(
-            self.open
-                .keys()
-                .filter(|open| match recursive {
-                    true => open.starts_with(root),
-                    false => solve::dir_of(open) == root,
+        let (root, recursive, package) = root_of(path);
+        let old = self.projects.remove(root);
+        let problem = if self.open.keys().any(|file| root_of(file).0 == root) {
+            // every `.mim` in the project, with the editor's text winning
+            let files = solve::mim_files(root, recursive)
+                .0
+                .into_iter()
+                .filter_map(|path| {
+                    let text = match self.open.get(&path) {
+                        Some(text) => text.clone(),
+                        None => std::fs::read_to_string(&path).ok()?,
+                    };
+                    Some((path, text))
                 })
-                .cloned(),
-        );
-        paths.sort();
-        paths.dedup();
-        paths.into_iter().filter_map(|path| {
-            let text = match self.open.get(&path) {
-                Some(text) => text.clone(),
-                None => std::fs::read_to_string(&path).ok()?,
-            };
-            Some((path, text))
-        })
-    }
+                .collect();
+            let (library, problem) = self.host_api.library(package);
+            self.projects
+                .insert(root.to_path_buf(), Project::load(files, library));
+            problem
+        } else {
+            None
+        };
 
-    /// The project a file belongs to the nearest directory at or above it that holds a script,
-    /// or its own when none does. The walk stops at a repository root.
-    fn root_of(&self, path: &Path) -> PathBuf {
-        let dir = solve::dir_of(path);
-        if self
-            .open
-            .get(path)
-            .is_some_and(|text| !parse::lex::is_module(text))
-        {
-            return dir.to_path_buf();
-        }
-        for ancestor in dir.ancestors() {
-            let has_script = self
-                .read(ancestor, false)
-                .any(|(_, text)| !parse::lex::is_module(&text));
-            if has_script {
-                return ancestor.to_path_buf();
-            }
-            if ancestor.join(".git").exists() {
-                break;
-            }
-        }
-        dir.to_path_buf()
+        // a host API problem shows at the top of every file it leaves checked against std alone
+        let note = problem.map(|message| Diagnostic {
+            severity: Some(DiagnosticSeverity::Warning),
+            source: Some("mimas".to_owned()),
+            message: message.into(),
+            ..Default::default()
+        });
+        let new = self.projects.get(root);
+        let files: HashSet<&PathBuf> = old.iter().chain(new).flat_map(Project::files).collect();
+        files
+            .into_iter()
+            .filter_map(|file| {
+                let diagnostics = match new.and_then(|new| new.analysis(file)) {
+                    Some(analysis) => {
+                        let errors = analysis.diagnostics(file).into_iter();
+                        errors.chain(note.clone()).collect()
+                    }
+                    None => Vec::new(),
+                };
+                Some((Uri::from_file_path(file).ok()?, diagnostics))
+            })
+            .collect()
     }
+}
+
+/// Where a file's project sits: the highest folder holding a `.mim` in the cargo package or
+/// repository the file is in, with everything below it, the way a host loads its whole scripts
+/// folder. Outside both, it's the file's own folder alone. Gives back that folder, whether the
+/// project takes in the folders below it, and the package.
+pub(crate) fn root_of(file: &Path) -> (&Path, bool, Option<&Path>) {
+    let dir = solve::dir_of(file);
+    let mut highest = dir;
+    for ancestor in dir.ancestors() {
+        if !solve::mim_files(ancestor, false).0.is_empty() {
+            highest = ancestor;
+        }
+        if solve::is_package(ancestor) {
+            return (highest, true, Some(ancestor));
+        }
+        if ancestor.join(".git").exists() {
+            return (highest, true, None);
+        }
+    }
+    (dir, false, None)
 }
