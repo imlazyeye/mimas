@@ -23,7 +23,7 @@ impl HostApi {
             (HostApi::Packages, Some(package)) => (
                 package,
                 manifests(package),
-                "Run one of the package's binaries with `cargo run` to write it.",
+                "Run the binary with `cargo run` to write it.",
             ),
             (HostApi::Manifest(path), _) => (
                 path.as_path(),
