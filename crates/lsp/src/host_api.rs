@@ -18,9 +18,18 @@ impl HostApi {
     /// alone when there's no manifest to go by, along with why when one was expected.
     pub fn library(&self, package: Option<&Path>) -> (Library<()>, Option<String>) {
         let std_alone = || vm::Vm::new().install_library(library::std);
-        let (owner, manifests) = match (self, package) {
-            (HostApi::Packages, Some(package)) => (package, manifests(package)),
-            (HostApi::Manifest(path), _) => (path.as_path(), vec![path.clone()]),
+        // a problem ends with how to write a manifest this server can read
+        let (owner, manifests, fix) = match (self, package) {
+            (HostApi::Packages, Some(package)) => (
+                package,
+                manifests(package),
+                "Run one of the package's binaries with `cargo run` to write it.",
+            ),
+            (HostApi::Manifest(path), _) => (
+                path.as_path(),
+                vec![path.clone()],
+                "Write it with `mimas::write_api`, or clear `mimas.apiPath`.",
+            ),
             _ => return (std_alone(), None),
         };
         // a package with no binaries hosts nothing, so it has no manifest to wait for
@@ -36,12 +45,10 @@ impl HostApi {
                 Ok(library) => return (library, None),
                 Err(problem) => problem,
             },
-            None => format!(
-                "no host API for {} yet, run your Rust host once to write it",
-                owner.display()
-            ),
+            None => format!("no host API for {} yet", owner.display()),
         };
-        return (std_alone(), Some(problem));
+        let message = format!("{problem}, so scripts get the standard library alone. {fix}");
+        return (std_alone(), Some(message));
 
         // every bin and example target of the package, each writing its own manifest
         fn manifests(package: &Path) -> Vec<PathBuf> {
@@ -76,21 +83,26 @@ impl HostApi {
         }
 
         fn read(path: &Path) -> Result<Library<()>, String> {
+            let unreadable = || format!("{} isn't a host API this server can read", path.display());
             let json = std::fs::read(path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-                .ok_or_else(|| format!("couldn't read {}", path.display()))?;
+                .ok_or_else(unreadable)?;
             let version = json["version"].as_str().unwrap_or("unknown");
             if version != api::VERSION {
                 return Err(format!(
-                    "{} is from mimas {version}, rebuild the host against mimas {}",
+                    "{} is from mimas {version} and this server needs mimas {}",
                     path.display(),
                     api::VERSION
                 ));
             }
+            // which field didn't match only helps whoever changed the format, so it goes to the log
             serde_json::from_value::<api::Manifest>(json)
                 .map(|manifest| manifest.library)
-                .map_err(|e| format!("couldn't read {}: {e}", path.display()))
+                .map_err(|e| {
+                    eprintln!("mimas-lsp: {}: {e}", path.display());
+                    unreadable()
+                })
         }
     }
 }

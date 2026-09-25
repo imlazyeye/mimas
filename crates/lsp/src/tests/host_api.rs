@@ -90,3 +90,17 @@ fn running_the_host_rechecks_its_scripts() {
     assert_eq!(open(&mut workspace, &script), [(script.clone(), 0)]);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn an_unreadable_manifest_says_how_to_write_it() {
+    let json = format!(r#"{{"version": "{}", "library": []}}"#, api::VERSION);
+    let root = tree("unreadable", &[("api.json", &json)]);
+    let (_, problem) = HostApi::Manifest(root.join("api.json")).library(None);
+    let problem = problem.unwrap();
+    assert!(
+        problem.contains("isn't a host API this server can read"),
+        "{problem}"
+    );
+    assert!(problem.contains("`mimas::write_api`"), "{problem}");
+    std::fs::remove_dir_all(root).unwrap();
+}
