@@ -219,11 +219,11 @@ fn is_empty(arr: &[Val<'gc>]) -> bool {
 }
 
 /// Returns the maximum value present in the array.
-/// 
+///
 /// ```mimas
 /// let a: [int] = [0, 1, 2];
 /// let int_max = a.max(); // 2
-/// 
+///
 /// let b: [float] = [0.0, 1.0, 2.0];
 /// let float_max = b.max(); // 2.0
 /// ```
@@ -233,11 +233,11 @@ fn max_int(arr: &[i64]) -> Option<i64> {
 }
 
 /// Returns the minimum value present in the array.
-/// 
+///
 /// ```mimas
 /// let a: [int] = [0, 1, 2];
 /// let int_min = a.min(); // 0
-/// 
+///
 /// let b: [float] = [0.0, 1.0, 2.0];
 /// let float_min = b.min(); // 0.0
 /// ```
@@ -257,11 +257,11 @@ fn min_float(arr: &[f64]) -> Option<f64> {
 }
 
 /// Returns the sum of all values in the array.
-/// 
+///
 /// ```mimas
 /// let a: [int] = [0, 1, 2];
 /// let int_sum = a.sum(); // 3
-/// 
+///
 /// let b: [float] = [0.0, 1.0, 2.0];
 /// let float_sum = b.sum(); // 3.0
 /// ```
@@ -314,11 +314,11 @@ fn sort_by_float(arr: &mut Vec<anon::T<'gc>>, keys: Vec<f64>) {
 /// Compares all elements in the array and returns a new array with the indicies sorted. For
 /// example, if the maximum value in this array is at index 3, the first element of the returned
 /// array will be `3`.
-/// 
+///
 /// ```mimas
 /// let a = [5, 0, 2, 4];
 /// let a_sorted = [0, 3, 2, 1];
-/// 
+///
 /// let b = [5.0, 0.0, 2.0, 4.0];
 /// let b_sorted = [0, 3, 2, 1];
 /// ```
