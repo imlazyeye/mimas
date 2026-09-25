@@ -9,14 +9,14 @@ use crate::{
 };
 
 macro_rules! glam_struct {
-    ($ty:ident, $new:path, $($field:ident),+) => {
+    ($ty:ident, $doc:literal, $new:path, $($field:ident),+) => {
         impl MimasAdt for $ty {
             fn descriptor(_: &Registry) -> ApiAdtDescriptor {
                 ApiAdtDescriptor {
                     name: stringify!($ty),
                     module: &[],
                     kind: ApiAdtKind::Struct,
-                    doc: "",
+                    doc: $doc,
                     variants: vec![ApiVariantShape {
                         name: "@".to_string(),
                         doc: "",
@@ -72,6 +72,34 @@ macro_rules! glam_struct {
     };
 }
 
-glam_struct!(Vec2, Vec2::new, x, y);
-glam_struct!(Vec3, Vec3::new, x, y, z);
-glam_struct!(Quat, Quat::from_xyzw, x, y, z, w);
+glam_struct!(
+    Vec2,
+    "A 2D vector with `float` components `x` and `y`. Create one with `Vec2::new(x, y)` or a \
+     struct literal such as `Vec2 { x = 1.0, y = 2.0 }`.\n\n\
+     The components are stored as 32-bit floats, and can read back slightly different from the \
+     value that was set (`0.1` reads back as `0.10000000149011612`).",
+    Vec2::new,
+    x,
+    y
+);
+glam_struct!(
+    Vec3,
+    "A 3D vector with `float` components `x`, `y`, and `z`. Create one with a struct literal \
+     such as `Vec3 { x = 0.0, y = 1.0, z = 0.0 }`.\n\n\
+     Like `Vec2`, the components are stored as 32-bit floats.",
+    Vec3::new,
+    x,
+    y,
+    z
+);
+glam_struct!(
+    Quat,
+    "A rotation in 3D space, stored as a quaternion with `float` components `x`, `y`, `z`, and \
+     `w`. Scripts usually create one with `Quat::from_rotation_z` and pass it to the host, such \
+     as for the rotation of a Bevy transform.",
+    Quat::from_xyzw,
+    x,
+    y,
+    z,
+    w
+);

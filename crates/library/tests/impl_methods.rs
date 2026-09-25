@@ -199,6 +199,6 @@ fn native_parameter_names_come_from_the_signature() {
             _ => None,
         })
         .expect("float.clamp was registered");
-    assert_eq!(write, ["path", "output"]);
+    assert_eq!(write, ["path", "contents"]);
     assert_eq!(clamp, ["low", "high"]);
 }
