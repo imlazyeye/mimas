@@ -87,9 +87,6 @@ or repository is checked with the `.mim` files next to it.
 - **Navigation stops at the language boundary.** Natives from the standard library or a host,
   builtin types like `int`, and module names have no mimas source to jump to, so nothing happens.
   We will support navigating to the Rust definition in the future.
-- **A host's scripts have to sit in its cargo package.** Scripts outside every package, like ones
-  at the root of a virtual workspace, get the standard library alone unless `mimas.apiPath` points
-  the server at a manifest (which then covers every script).
 
 ## Setting it up
 

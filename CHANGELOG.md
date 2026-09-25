@@ -19,8 +19,6 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
   - Scripts can see and use any module within its directory (including sub-direrctories)
   - `mimas run <directory>` can still be used as long as your project as a singular script
   - Projects with multiple scripts can still use `mimas run <script_file>`
-  - Scripts can sit in sub-directories too
-  - Cargo `target` directories and other cargo packages inside a project aren't part of it
 - The parser now recovers from syntax errors, so the `mimas` CLI reports every syntax error in a file instead of stopping at the first. Embedding through the `mimas` crate still returns only the first.
 - Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint.
 
