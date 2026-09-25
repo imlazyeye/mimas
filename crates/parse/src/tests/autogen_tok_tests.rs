@@ -63,6 +63,7 @@ tok_test!(lex_if: "if" => If);
 tok_test!(lex_else: "else" => Else);
 tok_test!(lex_for: "for" => For);
 tok_test!(lex_in: "in" => In);
+tok_test!(lex_not_in: "!in" => NotIn);
 tok_test!(lex_loop: "loop" => Loop);
 tok_test!(lex_while: "while" => While);
 tok_test!(lex_let: "let" => Let);
