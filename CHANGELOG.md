@@ -4,30 +4,41 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+This update focuses on usability for mimas, introducing a language server, [a full reference](https://mim.as/std.html) to the standard library, and the ability for users to generate their own documentation for their mimas projects, Rust types included. As always, please feel free to submit an issue if you have any issues or requests.
+
 ### Added
 
-- mimas now has a language server, `mimas-lsp`. It offers diagnostics, hover (with `///` doc comments), go to definition, find references, rename, outlines, and inlay hints. The server correctly supports both your mimas types and your exported Rust types. It comes bundled with the VS Code extension, which is available on the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas). See [Language Server](https://mim.as/introduction/lsp.html). ([#37](https://github.com/imlazyeye/mimas/pull/37), [#45](https://github.com/imlazyeye/mimas/pull/45)).
-- `mimas docs <folder> [manifest]` writes a markdown page for every module and type in a host's API manifest. `mimas docs --mdbook <chapter>` runs as an mdBook preprocessor instead, adding the pages under that chapter. Without a manifest, it uses the newest one written by a binary of the cargo package you're in. The standard library is left out unless you pass `--include-std` (which, without a manifest, documents the standard library alone).
-- The `export-api` feature of `mimas`, on by default, writes the host's API to `target/mimas/<binary>.json` when the host runs from its cargo target dir. `mimas::write_api` writes it anywhere else. Turn the automatic write off with `default-features = false`.
-- With the `bevy` feature, hover shows the `///` docs of reflected components, resources, and enum variants, Bevy's own types included.
-- `std::sys::file()`: Returns the absolute path to the file this function is written within, similar to Rust's `file!()` and Python's `__file__`.
+- mimas now has a language server, `mimas-lsp`. It offers diagnostics, hover (with `///` doc comments), go to definition, find references, rename, outlines, and inlay hints. The server correctly supports both your mimas types and your exported Rust types (including Bevy types if you're using its plugin). It comes bundled with the VS Code extension, which is available on the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas). See [Language Server](https://mim.as/introduction/lsp.html). ([#37](https://github.com/imlazyeye/mimas/pull/37), [#39](https://github.com/imlazyeye/mimas/pull/39), [#41](https://github.com/imlazyeye/mimas/pull/41), [#42](https://github.com/imlazyeye/mimas/pull/42), [#45](https://github.com/imlazyeye/mimas/pull/45))
+- The book has a [Library Reference](https://mim.as/std.html) for the standard library. ([#49](https://github.com/imlazyeye/mimas/pull/49), [#57](https://github.com/imlazyeye/mimas/pull/57))
+- `mimas docs <folder> [manifest]` writes a markdown page for every module and type in a host's API manifest. This is largely [written in mimas](./crates/cli/scripts/docs.mim)! ([#57](https://github.com/imlazyeye/mimas/pull/57))
+- The `export-api` feature of `mimas`, on by default, writes the host's API to `target/mimas/<binary>.json` when the host runs from its cargo target dir. `mimas::write_api` writes it anywhere else. Turn the automatic write off with `default-features = false`. ([#41](https://github.com/imlazyeye/mimas/pull/41), [#45](https://github.com/imlazyeye/mimas/pull/45))
+- `std::sys::file()`: Returns the absolute path to the file this function is written within, similar to Rust's `file!()` and Python's `__file__`. ([#32](https://github.com/imlazyeye/mimas/pull/32))
 - `std::process::run_attached(cmd, args)`: Runs a command without capturing its output and returns its exit code. Unlike `std::process::run`, a non-zero exit isn't raised.
-- The book has a [Library Reference](https://mim.as/std.html) for the standard library. It's generated from the doc comments in `crates/library` every time the book builds, using `mimas docs` and a script written in mimas ([docs.mim](./crates/cli/scripts/docs.mim)).
-- Arrays gained `insert`, `deduped`, `reversed` and `to_dict`.
-- Dictionaries gained `get` and `get_or_insert`.
+- Arrays gained `insert`, `deduped`, `reversed` and `to_dict`. ([#49](https://github.com/imlazyeye/mimas/pull/49))
+- Dictionaries gained `get` and `get_or_insert`. ([#49](https://github.com/imlazyeye/mimas/pull/49))
 
 ### Changed
 
-- **Breaking**: The project structure no longer utilizes a `main.mim` file.
+- **Breaking**: The project structure no longer utilizes a `main.mim` file. ([#40](https://github.com/imlazyeye/mimas/pull/40), [#45](https://github.com/imlazyeye/mimas/pull/45), [#56](https://github.com/imlazyeye/mimas/pull/56))
   - Scripts (files that don't declare a module) are individual executables and cannot see one another
   - Scripts can see and use any module in their project: the highest folder holding a `.mim` file in the cargo package or repository around them, including its sub-directories. The CLI and the language server agree on this. See [Projects](https://mim.as/reference/scripts.html#projects).
-  - `mimas run <directory>` can still be used as long as your project as a singular script
+  - `mimas run <directory>` can still be used as long as your project has a single script
   - Projects with multiple scripts can still use `mimas run <script_file>`
-- **Breaking**: The array method `flatten` is now `flat`.
-- **Breaking**: `Api::add_described` and `Api::add_assoc_described` take each parameter as a `(name, type)` pair.
-- The parser now recovers from syntax errors, so the `mimas` CLI reports every syntax error in a file instead of stopping at the first. Embedding through the `mimas` crate still returns only the first.
-- Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint.
-- `mimas check` and `mimas build` check the scripts of a cargo package against the API manifest its host writes, the same way the language server does. See [Cargo Projects](https://mim.as/reference/scripts.html#cargo-projects).
+- **Breaking**: The array method `flatten` is now `flat`. ([#49](https://github.com/imlazyeye/mimas/pull/49))
+- **Breaking**: `Api::add_assoc_described` and `ModuleApi::add_described` take each parameter as a `(name, type)` pair. ([#49](https://github.com/imlazyeye/mimas/pull/49))
+- The parser has been rewritten to be resilient, so each file can receive all of its syntax errors at once instead of one at a time. Embedding through the `mimas` crate still returns only the first. mimas also now uses `cargo fuzz` to guarantee the compiler's stability, and the crashes it found on malformed source are fixed. ([#33](https://github.com/imlazyeye/mimas/pull/33), [#34](https://github.com/imlazyeye/mimas/pull/34))
+- Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint, rather than an internal compiler error. ([#34](https://github.com/imlazyeye/mimas/pull/34))
+- `mimas check` and `mimas build` check the scripts of a cargo package against the API manifest its host writes, the same way the language server does. See [Cargo Projects](https://mim.as/reference/scripts.html#cargo-projects). ([#56](https://github.com/imlazyeye/mimas/pull/56))
+
+### Fixed
+
+- A `return` or `break` without a value or a semicolon failed to parse at the end of a block (i.e.: `if x > 0 { return }`), and a `break` like that misread the statement after it. ([#34](https://github.com/imlazyeye/mimas/pull/34))
+- A struct literal inside the parentheses, call, or index of an `if`, `while` or `for` header (i.e.: `if foo(Bar { a = 1 }) {}`) was rejected. ([#34](https://github.com/imlazyeye/mimas/pull/34))
+- Calling through an unknown path (i.e.: `missing::f()`) reported "not a struct" with an internal type, rather than an undefined name. ([#38](https://github.com/imlazyeye/mimas/pull/38))
+- Tuple indexing and field access on an enum (i.e.: `self.0` inside an enum's `impl`) passed type checking and then crashed at runtime. ([#44](https://github.com/imlazyeye/mimas/pull/44))
+- A closure without parameters couldn't take a return type (`|| -> int { 1 }` failed to parse). ([#51](https://github.com/imlazyeye/mimas/pull/51))
+- A closure's return type annotation wasn't checked against its body, and a `return` inside a closure was checked against the enclosing function's return type. ([#52](https://github.com/imlazyeye/mimas/pull/52))
+- `break`, `continue` or `collect` inside a closure passed type checking when the closure sat in a loop, and then crashed the compiler. ([#53](https://github.com/imlazyeye/mimas/pull/53))
 
 ## [0.2.0] - 2026-09-17
 
