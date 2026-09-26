@@ -63,7 +63,7 @@ let _scratch = compute();
 ```
 
 ```admonish note title="No warnings yet"
-`0.1.0` only reports errors, not warnings, so the `_` prefix is a no-op for now -- it documents intent for when unused-variable warnings land.
+We currently only have errors, no warnings, so the `_` prefix is a no-op for now -- it documents intent for when unused-variable warnings land.
 ```
 
 ## Constants
@@ -86,5 +86,5 @@ const NOPE = some_call();      // compile error: constants must be known at comp
 ```
 
 ```admonish todo
-Our constant folding could likely handle evaluating whether a function is fully knowable at compile time, but that will come after `0.1.0`.
+Our constant folding could likely handle evaluating whether a function is fully knowable at compile time, but that will come in a future update.
 ```

@@ -226,7 +226,7 @@ let q: int = parse_port(input) absolve |e| {
 `panic`, `todo`, `return`, `raise`, and an endless `loop {}` are all **never** (`!`) typed, so they slot into any branch without disturbing its type.
 
 ```admonish todo title="*typed errors are coming"
-In `0.1.0` the error carried by a result is always a `str`. The plan is to move to an `Error` [pact](../reference/pacts.md) you can implement for your own types, so failures can carry structured data. For now, a descriptive message is the tool.
+The error carried by a result is always a `str`. The plan is to move to an `Error` [pact](../reference/pacts.md) you can implement for your own types, so failures can carry structured data. For now, a descriptive message is the tool.
 ```
 
 ## Functions & closures

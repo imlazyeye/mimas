@@ -3,7 +3,7 @@
     "displayName": "mimas",
     "description": "Support for mimas, a flexible, statically typed scripting language for Rust.",
     "version": "0.2.0",
-    "publisher": "imlazyeye",
+    "publisher": "mimas",
     "author": {
         "name": "Gabe Weiner"
     },

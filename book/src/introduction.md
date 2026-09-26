@@ -9,7 +9,7 @@ mimas is a statically typed, embeddable scripting language for Rust. It carries 
 
 <p class="badges">
   <a href="https://github.com/imlazyeye/mimas"><img src="https://img.shields.io/badge/github-imlazyeye%2Fmimas-3d8ef7?style=flat-square&logo=github" alt="github" /></a>
-  <a href="https://crates.io/crates/mimas"><img src="https://img.shields.io/badge/version-0.1.0-66e8ff?style=flat-square" alt="version" /></a>
+  <a href="https://crates.io/crates/mimas"><img src="https://img.shields.io/badge/version-0.3.0-66e8ff?style=flat-square" alt="version" /></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="built with Rust" /></a>
   <a href="https://github.com/imlazyeye/mimas#license"><img src="https://img.shields.io/badge/license-MIT_OR_Apache--2.0-8e9bff?style=flat-square" alt="license" /></a>
   <a href="https://github.com/imlazyeye/mimas/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/imlazyeye/mimas/test.yml?branch=main&style=flat-square&label=ci" alt="ci" /></a>
@@ -51,7 +51,7 @@ print(f"found {big.len()}: {big}"); // -> found 2: [5, 8]
 <tr><th scope="row">rhai</th><td style="--size:0.9012004380228912"><span class="data">13.83s</span></td></tr>
 <tr><th scope="row" class="long">rustpython</th><td style="--size:1"><span class="data">15.34s</span></td></tr>
 </tbody></table></div>
-<p class="bench-legend">Pure-Rust runtimes, measured on an AMD Ryzen 7 9800X3D running Linux. <a href="https://github.com/imlazyeye/mimas">mimas</a> v0.2.0 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/koto-lang/koto">Koto</a> v0.16.1 · <a href="https://github.com/PistonDevelopers/dyon">Dyon</a> v0.51.2 · <a href="https://github.com/mattwparas/steel">Steel</a> v0.8.3 · <a href="https://github.com/boa-dev/boa">Boa</a> v0.22.0 · <a href="https://github.com/RustPython/RustPython">RustPython</a> v0.5.0 · <a href="https://github.com/kyren/fabricator">Fabricator</a> git cef73ca</p>
+<p class="bench-legend">Pure-Rust runtimes, measured on an AMD Ryzen 7 9800X3D running Linux. <a href="https://github.com/imlazyeye/mimas">mimas</a> v0.3.0 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/koto-lang/koto">Koto</a> v0.16.1 · <a href="https://github.com/PistonDevelopers/dyon">Dyon</a> v0.51.2 · <a href="https://github.com/mattwparas/steel">Steel</a> v0.8.3 · <a href="https://github.com/boa-dev/boa">Boa</a> v0.22.0 · <a href="https://github.com/RustPython/RustPython">RustPython</a> v0.5.0 · <a href="https://github.com/kyren/fabricator">Fabricator</a> git cef73ca</p>
 <!-- homepage benchmark end -->
 ````
 

@@ -7,7 +7,7 @@
 **A flexible, statically typed scripting language for Rust.**
 
 [![docs](https://img.shields.io/badge/docs-mim.as-3d8ef7?style=flat-square)](https://mim.as)
-[![version](https://img.shields.io/badge/version-0.2.0-66E8FF?style=flat-square)](https://crates.io/crates/mimas)
+[![version](https://img.shields.io/badge/version-0.3.0-66E8FF?style=flat-square)](https://crates.io/crates/mimas)
 [![built with Rust](https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![license](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-8E9BFF?style=flat-square)](#license)
 [![ci](https://img.shields.io/github/actions/workflow/status/imlazyeye/mimas/test.yml?branch=main&style=flat-square&label=ci)](https://github.com/imlazyeye/mimas/actions/workflows/test.yml)
@@ -114,7 +114,7 @@ Runnable projects live in [`examples/`](examples):
 
 A language server, `mimas-lsp`, gives any LSP-capable editor diagnostics, hover, go to definition, references, rename, outlines, and inlay hints. Running a Rust host through cargo writes its API to `target/mimas/<binary>.json`, which the server loads for the scripts in that host's cargo package so the host's types and functions are checked too. See the [Language Server](https://mim.as/introduction/lsp.html) page for setup and limitations.
 
-A VS Code extension lives in [`tools/vscode`](tools/vscode). You can install it from the [marketplace](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas).
+A VS Code extension lives in [`tools/vscode`](tools/vscode). You can install it from the [marketplace](https://marketplace.visualstudio.com/items?itemName=mimas.mimas).
 
 ## Status
 

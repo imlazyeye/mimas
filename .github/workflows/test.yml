@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [api, bevy, cli, compile, library, macros, mimas, parse, shared, solve, vm]
+        crate: [api, bevy, cli, compile, library, lsp, macros, mimas, parse, shared, solve, vm]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

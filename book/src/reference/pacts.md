@@ -134,7 +134,7 @@ struct Widget {
 
 ## Limitations
 
-Pacts are the youngest part of the language, and 0.1.0 ships a deliberately small slice of them. Each of the following is rejected with a clear error rather than silently misbehaving.
+Pacts are the youngest part of the language. Each of the following is rejected with a clear error rather than silently misbehaving.
 
 **Constants don't dispatch.** A pact constant can only be read off a concrete type. Reaching one through a pact-typed value has no answer at runtime -- every impl declares its own value, and the receiver's concrete type isn't known:
 
@@ -164,4 +164,4 @@ Call it on a concrete type instead (`fn combine(a: V, b: V) -> V`). The rule is 
 
 **`Self::` doesn't resolve inside a default body.** A default body is compiled once and shared by every implementer, so `Self` there is a type that hasn't been decided yet, and there's no single constant or associated function for `Self::` to reach. `Self::CONST` and `Self::assoc_fn()` are both rejected inside one. Lowercase `self` -- fields, methods, parameters -- works normally, and `Self::` resolves as expected inside an ordinary `impl` block.
 
-**No generics.** A pact bound is the only form of abstraction over types; there are no type parameters, associated types, or blanket impls, and none are planned for 0.1.0.
+**No generics.** A pact bound is the only form of abstraction over types. There are no type parameters, associated types, or blanket impls.

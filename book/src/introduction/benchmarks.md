@@ -56,7 +56,7 @@ The [home page](../introduction.md) measures mimas against the other pure-Rust s
 <tr><th scope="row">rune</th><td class="overflow" style="--size:1"><span class="data">2.87s</span></td></tr>
 <tr><th scope="row">rhai</th><td class="overflow" style="--size:1"><span class="data">3.37s</span></td></tr>
 </tbody></table></div>
-<p class="bench-legend"><a href="https://github.com/imlazyeye/mimas">mimas</a> v0.2.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/luau-lang/luau">Luau (mlua)</a> v0.11.4 -- measured on an AMD Ryzen 7 9800X3D running Linux. Bars are scaled within each test. Results slower than 5x of the fastest result are faded and not factored into the scaling.</p>
+<p class="bench-legend"><a href="https://github.com/imlazyeye/mimas">mimas</a> v0.3.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/luau-lang/luau">Luau (mlua)</a> v0.11.4 -- measured on an AMD Ryzen 7 9800X3D running Linux. Bars are scaled within each test. Results slower than 5x of the fastest result are faded and not factored into the scaling.</p>
 <!-- benchmark end -->
 
 ````admonish info title="What these actually reflect"

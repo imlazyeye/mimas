@@ -92,7 +92,7 @@ jobs:
         working-directory: tools/vscode
         run: |
           npm ci
-          npx vsce publish --packagePath ../../vsix/*.vsix
+          npx vsce publish --skip-duplicate --packagePath ../../vsix/*.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 

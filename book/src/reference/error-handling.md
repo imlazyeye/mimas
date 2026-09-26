@@ -36,12 +36,12 @@ fn parse_port(text: str) -> int! { // the `!` lets this function `raise`
 
 A few rules govern results:
 
-- `raise` is only legal inside a function whose return type is a result (`T!`). The value you raise must be a `str` -- the only error type in `0.1.0`.
+- `raise` is only legal inside a function whose return type is a result (`T!`). The value you raise must be a `str`, until a later version.
 - A function returning `T!` can hand back a bare `T`; it's automatically wrapped as the success case. (That's why `n!` above -- an `int` -- is a valid `int!` return.)
 - `raise` itself has the [never type](./special-types.md), so it composes inside `if` and `match` arms without disturbing their result type.
 
 ```admonish todo title="`str` errors today, typed errors later"
-In `0.1.0`, the error carried by a result is always a `str`. The plan is to move to an `Error` [pact](./pacts.md) you can implement for your own types, so failures can carry structured data. For now, a descriptive message is the tool.
+Te error carried by a result is always a `str`. The plan is to move to an `Error` [pact](./pacts.md) you can implement for your own types, so failures can carry structured data. For now, a descriptive message is the tool.
 ```
 
 ## Handling a result

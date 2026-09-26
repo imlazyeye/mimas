@@ -1,6 +1,6 @@
 # Language Reference
 
-This is the complete reference for the mimas language in version `0.1.0`. It describes the syntax and mechanics of the language itself -- the parts you write in a `.mim` file. Extending mimas from Rust is covered separately in [Extension with Rust](./extension-with-rust.md).
+This is the complete reference for the mimas language in version `0.3.0`. It describes the syntax and mechanics of the language itself -- the parts you write in a `.mim` file. Extending mimas from Rust is covered separately in [Extension with Rust](./extension-with-rust.md).
 
 Each page introduces one concept with short examples. Most are complete programs you can drop into a file and run; a few are fragments or deliberate errors, noted where they appear:
 

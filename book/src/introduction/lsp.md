@@ -100,7 +100,7 @@ That puts a `mimas-lsp` binary on your `PATH`, which is where editors will look 
 
 ### The extension
 
-Install [mimas](https://marketplace.visualstudio.com/items?itemName=imlazyeye.mimas) from the Visual
+Install [mimas](https://marketplace.visualstudio.com/items?itemName=mimas.mimas) from the Visual
 Studio Code marketplace. Each release also attaches the extension's `.vsix` files to its
 [GitHub release](https://github.com/imlazyeye/mimas/releases), which you can install by opening
 the command palette and selecting "Install from VSIX". Its source lives in `tools/vscode`.

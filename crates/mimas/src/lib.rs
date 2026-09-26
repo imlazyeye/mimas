@@ -38,11 +38,6 @@
 //! # Bevy
 //!
 //! The `bevy` feature adds [`bevy`], a plugin for running mimas scripts in a Bevy app.
-//!
-//! # Stability
-//!
-//! mimas is `0.1.0`. The language design is committed, but the Rust-facing API is not stable yet --
-//! expect it to move between releases.
 
 pub use library;
 pub use vm;
