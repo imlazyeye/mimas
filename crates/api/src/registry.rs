@@ -9,7 +9,7 @@ pub struct AdtBinding {
 
 #[derive(Clone)]
 pub struct Registry {
-    next_id: u32,
+    pub next_id: u32,
     bindings: HashMap<TypeId, AdtBinding>,
 }
 

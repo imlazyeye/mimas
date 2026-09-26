@@ -33,6 +33,8 @@ use vm::api::Api;
 /// Single entry point passed to `Vm::install_library`. Each `install` call registers its module's
 /// natives explicitly (into both the solver metadata and the arena callable table).
 pub fn std<'gc>(api: &mut Api<'_, 'gc>) {
+    let adts = api.library.registry().next_id;
+    let natives = api.library.natives().count();
     prelude::install(api);
     methods::array::install(api);
     methods::dict::install(api);
@@ -45,6 +47,10 @@ pub fn std<'gc>(api: &mut Api<'_, 'gc>) {
     std_lib::parse::install(api);
     std_lib::process::install(api);
     std_lib::sys::install(api);
+
+    let adts = adts..api.library.registry().next_id;
+    let natives = natives..api.library.natives().count();
+    api.library.mark_std(adts, natives);
 }
 
 #[cfg(test)]
