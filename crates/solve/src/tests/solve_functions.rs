@@ -215,6 +215,30 @@ test_ty!(
     "|| -> int { 1 }" => func!(() -> Int),
 );
 test_ty!(
+    closure_annotation_with_early_return,
+    "|n: int| -> int {
+         if n > 0 {
+             return 1;
+         }
+         2
+     }" => func!((Int) -> Int),
+);
+test_ty!(
+    closure_return_infers_type,
+    "|n: int| {
+         return n;
+     }" => func!((Int) -> Int),
+);
+test_ty!(
+    closure_raise_with_result_annotation,
+    r#"|n: int| -> int! {
+           if n < 0 {
+               raise "negative";
+           }
+           n
+       }"# => func!((Int) -> result!(Int)),
+);
+test_ty!(
     named_args_all_by_name,
     "fn foo(a: int, b: int, c: int = 0) -> int { a + b + c }",
     "foo(b=2, a=1)" => Int
@@ -341,6 +365,44 @@ test_fail!(
     closure_param_type_mismatch,
     "fn run(f: (str) -> int) -> int { f(\"hi\") }
      let r = run(|n| n + 1);"
+);
+test_fail!(
+    closure_annotation_mismatch,
+    "let f = |n: int| -> str { n };",
+);
+test_fail!(
+    closure_annotation_not_all_paths_return,
+    "let pairs = |n: int| -> [int] {
+         for i in [n, n + 1] collect i;
+     };",
+);
+test_fail!(
+    closure_partial_return,
+    "fn outer() -> int {
+         let f = |n: int| {
+             if n > 0 {
+                 return 1;
+             }
+         };
+         0
+     }",
+);
+test_fail!(
+    closure_return_does_not_return_outer_fn,
+    "fn outer() -> int {
+         let f = || {
+             return 5;
+         };
+     }",
+);
+test_success!(
+    closure_return_ignores_outer_fn_type,
+    "fn outer() -> int {
+         let f = || {
+             return true;
+         };
+         0
+     }"
 );
 
 // NotFound / NotCallable in call position

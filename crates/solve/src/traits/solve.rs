@@ -896,10 +896,37 @@ impl Solve for Closure {
             parameters.push(param);
         }
 
+        // a `return` in here exits the closure (not the enclosing fn). without an annotation,
+        // the first return or the body's value settles the type.
+        let expected_ty = match &self.return_type {
+            Some(annotation) => Ty::from_annotation(annotation.clone(), solver)?,
+            None => Ty::Vid(solver.vid()),
+        };
+        solver.fn_stack.push(FnRun {
+            expected_ty: expected_ty.clone(),
+        });
+        solver.control_flow.enter();
         let body_ty = self.body.query(solver)?;
+        solver.fn_stack.pop().unwrap();
+        let flow = solver.control_flow.exit();
+
+        let expected_ty = expected_ty.normalized(solver);
+        if body_ty != Ty::Unit || matches!(expected_ty, Ty::Vid(_)) {
+            self.body.fulfill_ty(expected_ty.clone(), solver)?;
+        } else if expected_ty != Ty::Unit
+            && solver.control_flow.quantify(&flow) != Quantification::Universal
+        {
+            Err(NotAllPathsReturn {
+                src: solver.src(self.body.location()),
+                at: self.body.location().into(),
+                ty: expected_ty.to_string(),
+            })?;
+        }
+
         solver.ribs.pop();
 
-        Ok(Ty::Fn(FnHeader::new(parameters, body_ty, false)))
+        let return_ty = expected_ty.normalized(solver);
+        Ok(Ty::Fn(FnHeader::new(parameters, return_ty, false)))
     }
 }
 
