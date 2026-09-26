@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use api::{ApiConstant, ApiEntry, Library, ManifestRef};
+use api::{ApiConstant, ApiEntry, Library, Manifest, Project};
 use shared::{Literal, Ty};
 
 use super::utils::{open, tree};
@@ -40,13 +40,8 @@ fn write(root: &Path, binary: &str, constant: &str, age: Duration) {
         value: Literal::Float(1.0),
         doc: String::new(),
     });
-    let manifest = ManifestRef {
-        version: api::VERSION,
-        library: &library,
-    };
-    let path = api::manifest_file(&root.join("target"), binary);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let path = Manifest::path(&root.join("target"), binary);
+    Manifest::new(library).write(&path).unwrap();
     File::options()
         .write(true)
         .open(&path)
@@ -64,15 +59,16 @@ fn has(library: &Library<()>, constant: &str) -> bool {
 #[test]
 fn newest_binary_manifest_wins() {
     let root = package("newest");
-    let (library, missing) = HostApi::Packages.library(Some(&root));
+    let project = Project::of(&root.join("scripts/speed.mim"));
+    let (library, missing) = HostApi::Packages.library(&project);
     assert!(!has(&library, "SPEED"));
     assert!(missing.is_some());
 
     write(&root, "game", "SPEED", Duration::from_secs(60));
-    assert!(has(&HostApi::Packages.library(Some(&root)).0, "SPEED"));
+    assert!(has(&HostApi::Packages.library(&project).0, "SPEED"));
 
     write(&root, "editor", "ZOOM", Duration::ZERO);
-    let (library, missing) = HostApi::Packages.library(Some(&root));
+    let (library, missing) = HostApi::Packages.library(&project);
     assert!(has(&library, "ZOOM"));
     assert_eq!(missing, None);
     std::fs::remove_dir_all(root).unwrap();
@@ -95,10 +91,10 @@ fn running_the_host_rechecks_its_scripts() {
 fn an_unreadable_manifest_says_how_to_write_it() {
     let json = format!(r#"{{"version": "{}", "library": []}}"#, api::VERSION);
     let root = tree("unreadable", &[("api.json", &json)]);
-    let (_, problem) = HostApi::Manifest(root.join("api.json")).library(None);
+    let (_, problem) = HostApi::Manifest(root.join("api.json")).library(&Project::of(&root));
     let problem = problem.unwrap();
     assert!(
-        problem.contains("isn't a host API this server can read"),
+        problem.contains("isn't a host API mimas can read"),
         "{problem}"
     );
     assert!(problem.contains("`mimas::write_api`"), "{problem}");

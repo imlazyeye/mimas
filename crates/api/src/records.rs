@@ -1,5 +1,6 @@
 use shared::{AdtId, Literal, Ty};
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApiFunction<C> {
     pub name: String,
@@ -11,6 +12,7 @@ pub struct ApiFunction<C> {
     pub call: C,
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApiMethod<C> {
     pub recv_ty: Ty,
@@ -23,6 +25,7 @@ pub struct ApiMethod<C> {
     pub call: C,
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApiConstant {
     pub name: String,
@@ -34,6 +37,7 @@ pub struct ApiConstant {
     pub doc: String,
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(bound(deserialize = "C: Default")))]
 pub enum ApiEntry<C> {
@@ -42,6 +46,7 @@ pub enum ApiEntry<C> {
     Constant(ApiConstant),
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApiAdt {
     pub name: String,
@@ -59,6 +64,7 @@ pub enum ApiAdtKind {
     Struct,
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApiVariant {
     pub name: String,
@@ -67,6 +73,7 @@ pub struct ApiVariant {
     pub fields: ApiVariantFields,
 }
 
+#[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ApiVariantFields {
     Unit,

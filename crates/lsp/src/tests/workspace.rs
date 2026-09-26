@@ -1,8 +1,7 @@
+use api::Project;
+
 use super::utils::{open, tree, update};
-use crate::{
-    host_api::HostApi,
-    workspace::{Workspace, root_of},
-};
+use crate::{host_api::HostApi, workspace::Workspace};
 
 #[test]
 fn nested_script_in_package_sees_modules_above() {
@@ -29,17 +28,16 @@ fn nested_script_in_package_sees_modules_above() {
     let changed = open(&mut workspace, &script);
     assert!(changed.contains(&(script.clone(), 0)), "{changed:?}");
     assert!(changed.iter().all(|(_, count)| *count == 0), "{changed:?}");
-    let package = root.join("pkg");
     assert_eq!(
-        root_of(&script),
-        (
-            root.join("pkg/scripts").as_path(),
-            true,
-            Some(package.as_path())
-        )
+        Project::of(&script),
+        Project {
+            root: root.join("pkg/scripts"),
+            recursive: true,
+            package: Some(root.join("pkg")),
+        }
     );
     assert_eq!(
-        root_of(&root.join("pkg/tests/t.mim")).0,
+        Project::of(&root.join("pkg/tests/t.mim")).root,
         root.join("pkg/tests")
     );
     std::fs::remove_dir_all(root).unwrap();
@@ -72,16 +70,22 @@ fn loose_scripts_share_the_highest_folder() {
     let loose = root.join("tools/loose.mim");
     let fodder = root.join("tools/fodder/main.mim");
     let docs = root.join("tools/docs/scripts/main.mim");
-    assert_eq!(root_of(&loose), (root.join("tools").as_path(), true, None));
-    assert_eq!(root_of(&fodder).0, root.join("tools"));
-    let package = root.join("tools/docs");
     assert_eq!(
-        root_of(&docs),
-        (
-            root.join("tools/docs/scripts").as_path(),
-            true,
-            Some(package.as_path())
-        )
+        Project::of(&loose),
+        Project {
+            root: root.join("tools"),
+            recursive: true,
+            package: None,
+        }
+    );
+    assert_eq!(Project::of(&fodder).root, root.join("tools"));
+    assert_eq!(
+        Project::of(&docs),
+        Project {
+            root: root.join("tools/docs/scripts"),
+            recursive: true,
+            package: Some(root.join("tools/docs")),
+        }
     );
 
     let mut workspace = Workspace::new(HostApi::Off);
@@ -111,7 +115,14 @@ fn a_file_outside_any_repository_takes_its_folder_alone() {
     );
     std::fs::remove_dir(root.join(".git")).unwrap();
     let x = root.join("x.mim");
-    assert_eq!(root_of(&x), (root.as_path(), false, None));
+    assert_eq!(
+        Project::of(&x),
+        Project {
+            root: root.clone(),
+            recursive: false,
+            package: None,
+        }
+    );
     let mut workspace = Workspace::new(HostApi::Off);
     assert_eq!(open(&mut workspace, &x), [(x.clone(), 0)]);
     std::fs::remove_dir_all(root).unwrap();

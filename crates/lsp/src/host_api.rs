@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use api::Library;
+use api::{Library, Manifest, Project};
 
 /// Where projects get their host API from.
 pub enum HostApi {
@@ -14,96 +14,31 @@ pub enum HostApi {
 }
 
 impl HostApi {
-    /// The library to check a project in `package` against, read fresh from its manifest. It's std
-    /// alone when there's no manifest to go by, along with why when one was expected.
-    pub fn library(&self, package: Option<&Path>) -> (Library<()>, Option<String>) {
-        let std_alone = || vm::Vm::new().install_library(library::std);
+    /// The library to check `project` against, read fresh from its manifest. It's std alone when
+    /// there's no manifest to go by, along with why when one was expected.
+    pub fn library(&self, project: &Project) -> (Library<()>, Option<String>) {
         // a problem ends with how to write a manifest this server can read
-        let (owner, manifests, fix) = match (self, package) {
-            (HostApi::Packages, Some(package)) => (
-                package,
-                manifests(package),
+        let (manifest, fix) = match self {
+            HostApi::Packages => (
+                Manifest::find(project),
                 "Run the binary with `cargo run` to write it, or write it manually with \
                  `mimas::write_api` and point `mimas.apiPath` at it.",
             ),
-            (HostApi::Manifest(path), _) => (
-                path.as_path(),
-                vec![path.clone()],
+            HostApi::Manifest(path) => (
+                Manifest::read(path).map(Some),
                 "Write it with `mimas::write_api`, or clear `mimas.apiPath`.",
             ),
-            _ => return (std_alone(), None),
+            HostApi::Off => (Ok(None), ""),
         };
-        // a package with no binaries hosts nothing, so it has no manifest to wait for
-        if manifests.is_empty() {
-            return (std_alone(), None);
-        }
-        let newest = manifests
-            .iter()
-            .filter_map(|path| Some((std::fs::metadata(path).ok()?.modified().ok()?, path)))
-            .max();
-        let problem = match newest {
-            Some((_, path)) => match read(path) {
-                Ok(library) => return (library, None),
-                Err(problem) => problem,
-            },
-            None => format!("no host API for {} yet", owner.display()),
-        };
-        let message = format!("{problem}, so scripts get the standard library alone. {fix}");
-        return (std_alone(), Some(message));
-
-        // every bin and example target of the package, each writing its own manifest
-        fn manifests(package: &Path) -> Vec<PathBuf> {
-            // cargo knows the real target dir: a parent workspace, CARGO_TARGET_DIR, or a
-            // configured target-dir
-            let Some(meta) = std::process::Command::new("cargo")
-                .args(["metadata", "--format-version", "1", "--no-deps"])
-                .current_dir(package)
-                .output()
-                .ok()
-                .and_then(|out| serde_json::from_slice::<serde_json::Value>(&out.stdout).ok())
-            else {
-                return Vec::new();
-            };
-            let dir = PathBuf::from(meta["target_directory"].as_str().unwrap_or_default());
-            let Ok(manifest) = std::fs::canonicalize(package.join("Cargo.toml")) else {
-                return Vec::new();
-            };
-            meta["packages"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                // canonical on both sides, since on Windows only ours carries the `\\?\` prefix
-                .filter(|package| {
-                    let path = package["manifest_path"].as_str().unwrap_or_default();
-                    std::fs::canonicalize(path).is_ok_and(|path| path == manifest)
-                })
-                .flat_map(|package| package["targets"].as_array().into_iter().flatten())
-                .filter(|target| matches!(target["kind"][0].as_str(), Some("bin" | "example")))
-                .filter_map(|target| Some(api::manifest_file(&dir, target["name"].as_str()?)))
-                .collect()
-        }
-
-        fn read(path: &Path) -> Result<Library<()>, String> {
-            let unreadable = || format!("{} isn't a host API this server can read", path.display());
-            let json = std::fs::read(path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-                .ok_or_else(unreadable)?;
-            let version = json["version"].as_str().unwrap_or("unknown");
-            if version != api::VERSION {
-                return Err(format!(
-                    "{} is from mimas {version} and this server needs mimas {}",
-                    path.display(),
-                    api::VERSION
-                ));
+        let std_alone = || vm::Vm::new().install_library(library::std);
+        match manifest {
+            Ok(Some(manifest)) => (manifest.library, None),
+            Ok(None) => (std_alone(), None),
+            Err(problem) => {
+                let message =
+                    format!("{problem}, so scripts get the standard library alone. {fix}");
+                (std_alone(), Some(message))
             }
-            // which field didn't match only helps whoever changed the format, so it goes to the log
-            serde_json::from_value::<api::Manifest>(json)
-                .map(|manifest| manifest.library)
-                .map_err(|e| {
-                    eprintln!("mimas-lsp: {}: {e}", path.display());
-                    unreadable()
-                })
         }
     }
 }

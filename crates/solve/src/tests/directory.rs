@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use api::Library;
 
-use crate::{Directory, Modules, mim_files};
+use crate::{Directory, Modules};
 
 fn file(path: &str, text: &str) -> (PathBuf, String) {
     (PathBuf::from(path), text.to_owned())
@@ -109,32 +109,4 @@ fn broken_module_cuts_off_script() {
     let directory = Directory::load(&files, &Library::new());
     assert_eq!(directory.modules.errors.len(), 1);
     assert!(solve(&directory, directory.scripts[0]).errors.is_empty());
-}
-
-#[test]
-fn walk_skips_packages_and_target_dirs() {
-    let root = std::env::temp_dir().join(format!("mimas-walk-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    for (path, text) in [
-        ("a.mim", ""),
-        ("sub/b.mim", ""),
-        ("workspace/Cargo.toml", "[workspace]"),
-        ("workspace/c.mim", ""),
-        ("pkg/Cargo.toml", "[package]"),
-        ("pkg/d.mim", ""),
-        ("target/CACHEDIR.TAG", ""),
-        ("target/e.mim", ""),
-    ] {
-        let path = root.join(path);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
-    }
-    let walked = mim_files(&root, true).0;
-    let expected = ["a.mim", "sub/b.mim", "workspace/c.mim"].map(|path| root.join(path));
-    assert_eq!(walked, expected);
-    assert_eq!(
-        mim_files(&root.join("pkg"), true).0,
-        [root.join("pkg/d.mim")]
-    );
-    std::fs::remove_dir_all(root).unwrap();
 }

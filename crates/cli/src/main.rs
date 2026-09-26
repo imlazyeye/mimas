@@ -42,7 +42,7 @@ fn main() {
 fn check(path: Option<PathBuf>, color: bool) -> i32 {
     let timer = std::time::Instant::now();
     let unit = Unit::new(&resolve_path(path));
-    let library = vm::Vm::new().install_library(library::std);
+    let library = host_library(&unit);
     let (directory, mut count) = match load(&unit, &library, color) {
         Ok(loaded) => loaded,
         Err(code) => return code,
@@ -84,7 +84,7 @@ fn check(path: Option<PathBuf>, color: bool) -> i32 {
 fn build(path: Option<PathBuf>, color: bool, disasm: bool, dump_ir: bool) -> i32 {
     let timer = std::time::Instant::now();
     let unit = Unit::new(&resolve_path(path));
-    let library = vm::Vm::new().install_library(library::std);
+    let library = host_library(&unit);
     let (directory, mut count) = match load(&unit, &library, color) {
         Ok(loaded) => loaded,
         Err(code) => return code,
@@ -306,6 +306,23 @@ fn massage_args(mut args: Vec<String>) -> Vec<String> {
         }
     }
     args
+}
+
+/// The library the unit's scripts are checked against: what its host last wrote, or std alone
+/// (saying why) when there's no manifest to read.
+fn host_library(unit: &Unit) -> Library<()> {
+    let found = api::Manifest::find(&unit.project);
+    let (library, problem) = api::Manifest::library(found, std_alone);
+    if let Some(problem) = problem {
+        let warning = "warning".bright_yellow().bold();
+        println!("{warning}: {problem}, so scripts are checked against std alone");
+    }
+    library
+}
+
+/// The standard library alone.
+fn std_alone() -> Library<()> {
+    vm::Vm::new().install_library(library::std)
 }
 
 fn resolve_path(path: Option<PathBuf>) -> PathBuf {

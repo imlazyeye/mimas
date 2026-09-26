@@ -1,7 +1,7 @@
 mod analysis;
 mod host_api;
-mod project;
 mod server;
+mod solved;
 mod source_file;
 mod workspace;
 
@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     mod host_api;
-    mod project;
+    mod solved;
     mod utils;
     mod workspace;
 }

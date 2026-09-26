@@ -4,9 +4,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use api::{ApiConstant, ApiEntry, Library, Manifest, ManifestRef};
+use api::{ApiConstant, ApiEntry, Library, Manifest};
 use mimas::{Literal, Ty, Vm, mimas, write_api};
-use vm::export::{manifest_path, target_dir};
 
 #[mimas]
 fn cheer(name: String) -> String {
@@ -69,12 +68,8 @@ fn installed() -> Library<()> {
     Vm::new().install_library(mimas::library::std)
 }
 
-fn round_trip(library: &Library<()>) -> Library<()> {
-    let json = serde_json::to_string(&ManifestRef {
-        version: api::VERSION,
-        library,
-    })
-    .unwrap();
+fn round_trip(library: Library<()>) -> Library<()> {
+    let json = serde_json::to_string(&Manifest::new(library)).unwrap();
     serde_json::from_str::<Manifest>(&json).unwrap().library
 }
 
@@ -95,26 +90,16 @@ fn scratch(name: &str) -> PathBuf {
 
 #[test]
 fn manifest_round_trip() {
-    let library = installed();
-    let json = serde_json::to_string(&ManifestRef {
-        version: api::VERSION,
-        library: &library,
-    })
-    .unwrap();
+    let json = serde_json::to_string(&Manifest::new(installed())).unwrap();
     let manifest: Manifest = serde_json::from_str(&json).unwrap();
     assert_eq!(manifest.version, api::VERSION);
-    let again = serde_json::to_string(&ManifestRef {
-        version: &manifest.version,
-        library: &manifest.library,
-    })
-    .unwrap();
-    assert_eq!(json, again);
+    assert_eq!(json, serde_json::to_string(&manifest).unwrap());
 }
 
 #[test]
 fn library_round_trip() {
     let original = installed();
-    let loaded = round_trip(&original);
+    let loaded = round_trip(original.clone());
 
     let script = format!("{STD_SCRIPT}\n{HOST_SCRIPT}");
     assert_eq!(errors(&script, &original), Vec::<String>::new());
@@ -130,7 +115,7 @@ fn library_round_trip() {
 fn resolve_host_items() {
     assert!(!errors(HOST_SCRIPT, &Library::new()).is_empty());
     assert_eq!(
-        errors(HOST_SCRIPT, &round_trip(&installed())),
+        errors(HOST_SCRIPT, &round_trip(installed())),
         Vec::<String>::new()
     );
 }
@@ -175,56 +160,41 @@ fn unchanged_manifest_is_not_rewritten() {
 }
 
 #[test]
-fn target_dir_finds_the_cachedir_tag() {
-    let dir = scratch("cachedir");
-    std::fs::write(dir.join("CACHEDIR.TAG"), "").unwrap();
-    assert_eq!(
-        target_dir(&dir.join("debug").join("app")),
-        Some(dir.as_path())
-    );
-    assert_eq!(
-        target_dir(&dir.join("release").join("examples").join("ex")),
-        Some(dir.as_path())
-    );
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn target_dir_skips_test_binaries() {
-    let dir = scratch("deps");
-    std::fs::write(dir.join("CACHEDIR.TAG"), "").unwrap();
-    assert_eq!(
-        target_dir(&dir.join("debug").join("deps").join("app-1234")),
-        None
-    );
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn target_dir_needs_a_cargo_target() {
-    let dir = scratch("no-target");
-    assert_eq!(target_dir(&dir.join("debug").join("app")), None);
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn manifest_is_named_after_the_binary() {
+fn host_manifest_is_named_after_the_binary() {
     let dir = scratch("named");
     std::fs::write(dir.join("CACHEDIR.TAG"), "").unwrap();
     assert_eq!(
-        manifest_path(&dir.join("debug").join("game-loop")),
+        Manifest::host_path(&dir.join("debug").join("game-loop")),
         Some(dir.join("mimas").join("game-loop.json"))
     );
     assert_eq!(
-        manifest_path(&dir.join("release").join("examples").join("ex")),
+        Manifest::host_path(&dir.join("release").join("examples").join("ex")),
         Some(dir.join("mimas").join("ex.json"))
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
+fn host_manifest_skips_test_binaries() {
+    let dir = scratch("deps");
+    std::fs::write(dir.join("CACHEDIR.TAG"), "").unwrap();
+    assert_eq!(
+        Manifest::host_path(&dir.join("debug").join("deps").join("app-1234")),
+        None
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn host_manifest_needs_a_cargo_target() {
+    let dir = scratch("no-target");
+    assert_eq!(Manifest::host_path(&dir.join("debug").join("app")), None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn host_constants_link_to_their_entry() {
-    let library = round_trip(&installed());
+    let library = round_trip(installed());
     let loaded = solve::Modules::from_files([("main.mim", HOST_SCRIPT)], &library);
     assert!(loaded.errors.is_empty());
     let resolutions = solve::Resolutions::from(loaded.solver);
