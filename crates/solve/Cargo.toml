@@ -1,6 +1,6 @@
 [package]
 name = "mimas-solve"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Type solver and checker for the mimas language. Internal to mimas; not intended for direct use."
 license.workspace = true
@@ -13,9 +13,9 @@ name = "solve"
 path = "src/lib.rs"
 
 [dependencies]
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
-parse = { package = "mimas-parse", path = "../parse", version = "0.2.0" }
-api = { package = "mimas-api", path = "../api", version = "0.2.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.3.0" }
+api = { package = "mimas-api", path = "../api", version = "0.3.0" }
 chompy.workspace = true
 colored.workspace = true
 pretty_assertions.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "mimas-macros"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Procedural macros for the mimas language (the `#[mimas]` attribute). Internal to mimas; not intended for direct use."
 license.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "mimas-compile"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Bytecode compiler for the mimas language. Internal to mimas; not intended for direct use."
 license.workspace = true
@@ -9,10 +9,10 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-parse = { package = "mimas-parse", path = "../parse", version = "0.2.0" }
-solve = { package = "mimas-solve", path = "../solve", version = "0.2.0" }
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
-api = { package = "mimas-api", path = "../api", version = "0.2.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.3.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.3.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
+api = { package = "mimas-api", path = "../api", version = "0.3.0" }
 itertools.workspace = true
 colored.workspace = true
 chompy.workspace = true

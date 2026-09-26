@@ -1,6 +1,6 @@
 [package]
 name = "mimas-bevy"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A plugin for Bevy to support the usage of mimas for scripting."
 license = "MIT OR Apache-2.0"
@@ -13,13 +13,13 @@ keywords = ["scripting", "language", "embedded", "gamedev", "interpreter"]
 categories = ["compilers", "game-development"]
 
 [dependencies]
-api = { package = "mimas-api", path = "../api", version = "0.2.0" }
-compile = { package = "mimas-compile", path = "../compile", version = "0.2.0" }
-library = { package = "mimas-library", path = "../library", version = "0.2.0" }
-macros = { package = "mimas-macros", path = "../macros", version = "0.2.0" }
-parse = { package = "mimas-parse", path = "../parse", version = "0.2.0" }
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
-vm = { package = "mimas-vm", path = "../vm", version = "0.2.0" }
+api = { package = "mimas-api", path = "../api", version = "0.3.0" }
+compile = { package = "mimas-compile", path = "../compile", version = "0.3.0" }
+library = { package = "mimas-library", path = "../library", version = "0.3.0" }
+macros = { package = "mimas-macros", path = "../macros", version = "0.3.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.3.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
+vm = { package = "mimas-vm", path = "../vm", version = "0.3.0" }
 miette = { version = "7.6", features = ["fancy"] }
 bevy = { version = "0.19.1", default-features = false, features = [
     "std",

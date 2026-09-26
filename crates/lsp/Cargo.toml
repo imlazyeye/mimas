@@ -1,6 +1,6 @@
 [package]
 name = "mimas-lsp"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Language server for mimas."
 license.workspace = true
@@ -13,12 +13,12 @@ name = "mimas-lsp"
 path = "src/main.rs"
 
 [dependencies]
-parse = { package = "mimas-parse", path = "../parse", version = "0.2.0" }
-solve = { package = "mimas-solve", path = "../solve", version = "0.2.0" }
-vm = { package = "mimas-vm", path = "../vm", version = "0.2.0" }
-library = { package = "mimas-library", path = "../library", version = "0.2.0" }
-api = { package = "mimas-api", path = "../api", version = "0.2.0", features = ["serde"] }
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.3.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.3.0" }
+vm = { package = "mimas-vm", path = "../vm", version = "0.3.0" }
+library = { package = "mimas-library", path = "../library", version = "0.3.0" }
+api = { package = "mimas-api", path = "../api", version = "0.3.0", features = ["serde"] }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
 lsp-server = "0.10"
 lsp-types = { package = "gen-lsp-types", version = "0.11", features = ["url"] }
 line-index = "0.1"

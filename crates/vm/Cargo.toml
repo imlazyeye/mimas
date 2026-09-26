@@ -1,6 +1,6 @@
 [package]
 name = "mimas-vm"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Register-based virtual machine for the mimas language. Internal to mimas; not intended for direct use."
 license.workspace = true
@@ -13,12 +13,12 @@ name = "vm"
 path = "src/lib.rs"
 
 [dependencies]
-solve = { package = "mimas-solve", path = "../solve", version = "0.2.0" }
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
-compile = { package = "mimas-compile", path = "../compile", version = "0.2.0" }
-parse = { package = "mimas-parse", path = "../parse", version = "0.2.0" }
-api = { package = "mimas-api", path = "../api", version = "0.2.0" }
-macros = { package = "mimas-macros", path = "../macros", version = "0.2.0" }
+solve = { package = "mimas-solve", path = "../solve", version = "0.3.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
+compile = { package = "mimas-compile", path = "../compile", version = "0.3.0" }
+parse = { package = "mimas-parse", path = "../parse", version = "0.3.0" }
+api = { package = "mimas-api", path = "../api", version = "0.3.0" }
+macros = { package = "mimas-macros", path = "../macros", version = "0.3.0" }
 inventory = "0.3"
 itertools.workspace = true
 indexmap.workspace = true

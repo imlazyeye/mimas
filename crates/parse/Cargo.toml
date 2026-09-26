@@ -1,6 +1,6 @@
 [package]
 name = "mimas-parse"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Lexer and parser for the mimas language. Internal to mimas; not intended for direct use."
 license.workspace = true
@@ -13,7 +13,7 @@ name = "parse"
 path = "src/lib.rs"
 
 [dependencies]
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
 chompy.workspace = true
 pretty_assertions.workspace = true
 itertools.workspace = true

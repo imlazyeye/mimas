@@ -4,6 +4,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
 This update focuses on usability for mimas, introducing a language server, [a full reference](https://mim.as/std.html) to the standard library, and the ability for users to generate their own documentation for their mimas projects, Rust types included. As always, please feel free to submit an issue if you have any issues or requests.
 
 ### Added
@@ -101,5 +103,6 @@ These are rejected with a clear error rather than misbehaving, and are documente
 - No generics, no async, and dictionary keys must be strings.
 
 <!-- next-release -->
+[0.3.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.3.0
 [0.2.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.2.0
 [0.1.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.1.0

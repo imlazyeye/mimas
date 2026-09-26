@@ -1,6 +1,6 @@
 [package]
 name = "mimas-api"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Shared API definitions for the mimas language. Internal to mimas; not intended for direct use."
 license.workspace = true
@@ -13,7 +13,7 @@ name = "api"
 path = "src/lib.rs"
 
 [dependencies]
-shared = { package = "mimas-shared", path = "../shared", version = "0.2.0" }
+shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
 serde = { workspace = true, optional = true }
 serde_json = { version = "1", optional = true }
 walkdir.workspace = true
