@@ -14,7 +14,6 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - The book has a [Library Reference](https://mim.as/std.html) for the standard library. It's generated from the doc comments in `crates/library` every time the book builds using a script written in mimas ([std.mim](./tools/book/scripts/std.mim)). This tool will be linked into the `mimas` cli in a future update so that users can use it on their own projects. It can export all items from both your Rust host and your scripts.
 - Arrays gained `insert`, `deduped`, `reversed` and `to_dict`.
 - Dictionaries gained `get` and `get_or_insert`.
-- `mimas export-api <path>` writes the standard library's API to a JSON manifest.
 
 ### Changed
 
