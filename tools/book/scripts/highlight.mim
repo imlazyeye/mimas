@@ -1,7 +1,8 @@
 use std::sys;
 use std::parse;
 use shiki::Shiki;
-use mdbook::{ MdBook, BLOCK_PATTERN };
+
+const BLOCK_PATTERN = "```mimas[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
 
 match (sys::arg(1), sys::arg(2)) {
     ("supports"?, renderer?) => sys::exit(if renderer == "html" 0 else 1),
@@ -13,10 +14,49 @@ match (sys::arg(1), sys::arg(2)) {
 /// mdBook preprocessor entry: read the `[context, book]` payload from stdin, render every mimas code
 /// block in the book to highlighted HTML, and emit the modified book back as JSON on stdout.
 fn modify_book() {
-    let input = sys::stdin()!;
-    let book = parse::from_json(input)!.as_array()![1];
-    let rendered = MdBook::from_value(book)!.render()!;
-    print(parse::to_json(rendered.serialize())!);
+    let book = parse::from_json(sys::stdin()!)!.as_array()![1];
+    let parse::Value::Object(root) = book else { panic("the book isn't an object") };
+    let parse::Value::Array(sections) = root["sections"] ?? parse::Value::Null else {
+        panic("the book has no sections")
+    };
+    let chapters = chapters(sections);
+
+    let sources = [];
+    for chapter in chapters {
+        for found in chapter["content"]!.as_str()!.find_all(BLOCK_PATTERN)! {
+            sources.push(found[1]);
+        }
+    }
+    let cache = ~{};
+    for (i, shiki) in Shiki::from_many(sources)!.enumerate() {
+        cache[sources[i]] = shiki.to_html();
+    }
+
+    for chapter in chapters {
+        let content = chapter["content"]!.as_str()!;
+        for found in content.find_all(BLOCK_PATTERN)! {
+            content = content.replace(f"```mimas\n{found[1]}\n```", cache[found[1]]!);
+        }
+        chapter["content"] = parse::Value::String(content);
+    }
+    print(parse::to_json(book)!);
+}
+
+/// Every chapter among `items` or anywhere beneath them, as the book's own dicts so that editing
+/// one edits the book.
+fn chapters(items: [parse::Value]) -> [~{parse::Value}] {
+    let out = [];
+    for item in items {
+        if let parse::Value::Object(item) = item {
+            if let parse::Value::Object(chapter) = item["Chapter"] ?? parse::Value::Null {
+                out.push(chapter);
+                if let parse::Value::Array(sub_items) = chapter["sub_items"] ?? parse::Value::Null {
+                    out.extend(chapters(sub_items));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Rewrites a markdown file in-place, replacing mimas code blocks with svg renders stored in

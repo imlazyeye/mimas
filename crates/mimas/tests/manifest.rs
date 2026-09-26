@@ -97,6 +97,24 @@ fn manifest_round_trip() {
 }
 
 #[test]
+fn without_std_keeps_the_host_items() {
+    let library = round_trip(installed()).without_std();
+    let mut natives: Vec<&str> = library
+        .natives()
+        .map(|(_, entry)| match entry {
+            ApiEntry::Function(f) => f.name.as_str(),
+            ApiEntry::Method(m) => m.name.as_str(),
+            ApiEntry::Constant(c) => c.name.as_str(),
+        })
+        .collect();
+    natives.sort();
+    assert_eq!(natives, ["MAX", "cheer", "hurt"]);
+    let mut adts: Vec<&str> = library.adts().iter().map(|adt| adt.name.as_str()).collect();
+    adts.sort();
+    assert_eq!(adts, ["Hero", "Mood"]);
+}
+
+#[test]
 fn library_round_trip() {
     let original = installed();
     let loaded = round_trip(original.clone());

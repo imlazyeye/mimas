@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use shared::IdVec;
 
@@ -14,6 +14,9 @@ pub struct Library<C> {
     adts: Vec<ApiAdt>,
     #[cfg_attr(feature = "serde", serde(skip))]
     registry: Registry,
+    /// The adt ids and natives (by index) the standard library took. We use this in other places
+    /// to carve out the library to exclusively user types.
+    std: Option<(Range<u32>, Range<usize>)>,
 }
 
 impl<C> Library<C> {
@@ -23,6 +26,7 @@ impl<C> Library<C> {
             intrinsics: HashMap::new(),
             adts: Vec::new(),
             registry: Registry::new(),
+            std: None,
         }
     }
 
@@ -68,6 +72,29 @@ impl<C> Library<C> {
 
     pub fn intrinsics(&self) -> &HashMap<NativeId, Intrinsic> {
         &self.intrinsics
+    }
+
+    /// Marks `adts` (by id) and `natives` (by index) as the standard library.
+    pub fn mark_std(&mut self, adts: Range<u32>, natives: Range<usize>) {
+        self.std = Some((adts, natives));
+    }
+
+    /// The library without what [`Library::mark_std`] marked. The ids stay as they were, so it's
+    /// for reading what the host added, not for checking scripts against.
+    pub fn without_std(mut self) -> Self {
+        let Some((adts, natives)) = self.std.take() else {
+            return self;
+        };
+        let mut kept = IdVec::new();
+        for (index, entry) in self.natives.into_values().enumerate() {
+            if !natives.contains(&index) {
+                kept.push(entry);
+            }
+        }
+        self.natives = kept;
+        self.adts
+            .retain(|adt| !adts.contains(&(adt.adt_id.index() as u32)));
+        self
     }
 }
 
