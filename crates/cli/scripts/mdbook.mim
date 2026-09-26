@@ -1,9 +1,6 @@
 module @;
 
 use std::parse;
-use shiki::Shiki;
-
-pub const BLOCK_PATTERN = "```mimas[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
 
 /// A deserialized mdBook Book -- the second element of the `[context, book]` payload mdBook hands
 /// a preprocessor through stdin.
@@ -18,26 +15,6 @@ impl MdBook {
         Self {
             sections = for item in book["sections"]!.as_array()! collect BookItem::from_value(item)!,
         }
-    }
-
-    /// Returns a copy with every chapter's mimas code blocks rendered to highlighted html.
-    pub fn render(self) -> Self! {
-        let sources = self.sources()!;
-        let cache = ~{};
-        for (i, shiki) in Shiki::from_many(sources)!.enumerate() {
-            cache[sources[i]] = shiki.to_html();
-        }
-        Self {
-            sections = for item in self.sections collect item.render(cache)!,
-        }
-    }
-
-    fn sources(self) -> [str]! {
-        let out: [str] = [];
-        for item in self.sections {
-            out.extend(item.sources()!);
-        }
-        out
     }
 
     /// Serializes back into a Value ready for `parse::to_json`.
@@ -69,20 +46,6 @@ impl BookItem {
             } else {
                 raise "unknown book item"
             }
-        }
-    }
-
-    fn render(self, cache: ~{ str }) -> Self! {
-        match self {
-            BookItem::Chapter(chapter) => BookItem::Chapter(chapter.render(cache)!),
-            other => other,
-        }
-    }
-
-    fn sources(self) -> [str]! {
-        match self {
-            BookItem::Chapter(chapter) => chapter.sources()!,
-            _ => [],
         }
     }
 
@@ -124,37 +87,6 @@ impl Chapter {
         }
     }
 
-    fn render(self, cache: ~{ str }) -> Self! {
-        Self {
-            name = self.name,
-            content = self.render_blocks(cache)!,
-            number = self.number,
-            path = self.path,
-            source_path = self.source_path,
-            parent_names = self.parent_names,
-            sub_items = for s in self.sub_items collect s.render(cache)!,
-        }
-    }
-
-    fn sources(self) -> [str]! {
-        let out = for found in self.content.find_all(BLOCK_PATTERN)! collect found[1];
-        for s in self.sub_items {
-            out.extend(s.sources()!);
-        }
-        out
-    }
-
-    /// Replaces every ```mimas fence in a markdown string with a Shiki HTML block.
-    fn render_blocks(self, cache: ~{ str }) -> str! {
-        let out = self.content;
-        for found in self.content.find_all(BLOCK_PATTERN)! {
-            let original = f"```mimas\n{found[1]}\n```";
-            out = out.replace(original, cache[found[1]]!);
-        }
-        out
-    }
-
-
     fn serialize(self) -> parse::Value {
         parse::Value::Object(~{
             name = parse::Value::String(self.name),
@@ -171,4 +103,3 @@ impl Chapter {
         })
     }
 }
-

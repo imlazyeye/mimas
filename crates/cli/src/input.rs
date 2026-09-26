@@ -56,4 +56,26 @@ pub enum Commands {
         #[clap(parse(from_os_str))]
         path: Option<PathBuf>,
     },
+    /// Writes markdown documentation of what a Rust host gives its scripts, read from the manifest
+    /// the host writes to `target/mimas` when it runs from there.
+    Docs {
+        /// The path to output the documentation to.
+        #[clap(parse(from_os_str), required_unless_present = "mdbook")]
+        output_path: Option<PathBuf>,
+
+        /// The path to the manifest to build the documentation off of. Defaults to the newest one
+        /// written by a binary of the cargo package you're in.
+        #[clap(parse(from_os_str))]
+        manifest_path: Option<PathBuf>,
+
+        /// Includes the standard library, which is left out otherwise. Without a manifest, this
+        /// documents the standard library alone.
+        #[clap(long)]
+        include_std: bool,
+
+        /// Runs as an mdBook preprocessor instead, adding the pages under the chapter at this path
+        /// (i.e. `api.md`) along with a table of them. The manifest is always the default one.
+        #[clap(long, value_name = "CHAPTER")]
+        mdbook: Option<String>,
+    },
 }

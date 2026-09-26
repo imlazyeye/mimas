@@ -20,9 +20,10 @@ fn ty(value: Value, anons: ~{str}) -> str {
     input
 }
 
-/// Extracts the module an item belongs to.
-fn module_of(item: ~{Value}) -> [str] {
-    for x in item.get("module")!.as_array()! collect x.as_str()!
+/// The page of the module an item belongs to, where the root module's page is the prelude.
+fn module_of(item: ~{Value}) -> str {
+    let path = for x in item.get("module")!.as_array()! collect x.as_str()!;
+    if path.is_empty() "Prelude" else path.join("::")
 }
 
 /// Formats a function signature.
@@ -119,91 +120,143 @@ fn render(title: str, page: Page) -> str {
     blocks.join("\n\n") + "\n"
 }
 
-// fetch the api, start building
-let api = std::parse::from_json(docs::std_api())!.as_dict()!;
-let adts = for x in api.get("adts")!.as_array()! collect x.as_dict()!;
-let natives = for x in api.get("natives")!.as_array()! collect x.as_dict()!;
-let adt_modules = (for adt in adts collect (adt["name"]!.as_str()!, module_of(adt).join("::"))).to_dict();
-
-// page title -> page, where an adt's page is titled with its bare name
-let pages = ~{};
-for native in natives {
-    let item = Item::from_value(native, adt_modules);
-    let entry = pages
-        .get_or_insert(item.page, Page::new())
-        .sections
-        .get_or_insert(item.section, ~{})
-        .get_or_insert(item.heading, Entry { signatures = [], doc = item.doc });
-    entry.signatures.push(item.signature);
-}
-
-for adt in adts {
-    let name = adt["name"]!.as_str()!;
-    let home = module_of(adt).join("::");
-    let doc = adt["doc"]!.as_str()!;
-    let page = pages.get_or_insert(name, Page::new());
-    page.intro = f"```mimas\n{declaration(adt)}\n```\n\n{doc}";
-
-    let link = f"./{home.replace("std::", "").to_lower()}/{name.to_lower()}.md";
-    pages
-        .get_or_insert(home, Page::new())
-        .types
-        .push(f"### [`{name}`]({link})\n\n{doc.split("\n\n")[0]}");
-}
-
-// mdbook passes `[context, book]` through stdin and takes the book back through stdout. the pages
-// go under std.md's chapter, which SUMMARY.md leaves empty
-let book = MdBook::from_value(std::parse::from_json(std::sys::stdin()!)!.as_array()![1])!;
-let found = for item in book.sections {
-    if let BookItem::Chapter(chapter) = item {
-        if chapter.path == "std.md" {
-            break chapter;
+/// Writes a markdown page for every module and type in `api` (a host's library, as its manifest
+/// holds it) into `folder`.
+fn markdown(api: Value, folder: str) {
+    for (title, page, types) in pages(api) {
+        let file = f"{folder}/{file_of(title)}";
+        std::fs::make_dir(file.find("^(.*)/")![1])!;
+        std::fs::write(f"{file}.md", render(title, page))!;
+        for (name, page) in types {
+            std::fs::make_dir(file)!;
+            std::fs::write(f"{file}/{name.to_lower()}.md", render(name, page))!;
         }
     }
-};
-let std_chapter? = found else { panic("SUMMARY.md has no std.md") };
-let number = std_chapter.number!;
+}
 
-let rows = [];
-let items = [];
-for (title, page) in pages.pairs() {
-    if title in adt_modules {
-        continue;
-    }
+/// Runs as an mdBook preprocessor, adding a page for every module and type in `api` under the
+/// chapter at `chapter`, in a folder named after it. mdbook passes `[context, book]` through stdin
+/// and takes the book back through stdout.
+fn preprocess(api: Value, chapter: str) {
+    let book = MdBook::from_value(std::parse::from_json(std::sys::stdin()!)!.as_array()![1])!;
+    let parent? = find_chapter(book.sections, chapter) else { panic(f"the book has no {chapter}") };
+    let folder = chapter.find("^(.*)\\.md$")![1];
 
-    let file = f"std/{title.replace("std::", "").to_lower()}";
-    let at = [number, [(items.len() + 1).to_float()]].flat();
-    let children = [];
-    for (name, home) in adt_modules.pairs() {
-        if home == title {
+    let rows = [];
+    let items = [];
+    for (title, page, types) in pages(api) {
+        let file = f"{folder}/{file_of(title)}";
+        let number = numbered(parent.number, items.len() + 1);
+        let content = render(title, page);
+        let children = [];
+        for (name, page) in types {
             children.push(BookItem::Chapter(Chapter {
                 name = name,
-                content = render(name, pages[name]!),
-                number = [at, [(children.len() + 1).to_float()]].flat(),
+                content = render(name, page),
+                number = numbered(number, children.len() + 1),
                 path = f"{file}/{name.to_lower()}.md",
                 source_path = null,
-                parent_names = [std_chapter.name, title],
+                parent_names = [parent.parent_names, [parent.name, title]].flat(),
                 sub_items = [],
             }));
         }
-    }
-    items.push(BookItem::Chapter(Chapter {
-        name = title,
-        content = render(title, page),
-        number = at,
-        path = f"{file}.md",
-        source_path = null,
-        parent_names = [std_chapter.name],
-        sub_items = children,
-    }));
+        items.push(BookItem::Chapter(Chapter {
+            name = title,
+            content = content,
+            number = number,
+            path = f"{file}.md",
+            source_path = null,
+            parent_names = [parent.parent_names, [parent.name]].flat(),
+            sub_items = children,
+        }));
 
-    let label = if title.starts_with("std::") f"`{title}`" else title;
-    rows.push(f"| [{label}](./{file}.md) |");
+        // module paths are lowercase, unlike the names of the other pages
+        let label = if title == title.to_lower() f"`{title}`" else title;
+        rows.push(f"| [{label}](./{folder.find("[^/]*$")![0]}/{file_of(title)}.md) |");
+    }
+
+    parent.content += f"\n| Page |\n| :-- |\n{rows.join("\n")}\n";
+    parent.sub_items = items;
+    print(std::parse::to_json(book.serialize())!);
 }
 
-std_chapter.content += rows.join("\n") + "\n";
-std_chapter.sub_items = items;
-print(std::parse::to_json(book.serialize())!);
+/// Every module page of `api` by title, each with the pages of its types (titled with their bare
+/// names).
+fn pages(api: Value) -> [(str, Page, [(str, Page)])] {
+    let api = api.as_dict()!;
+    let adts = for x in api["adts"]!.as_array()! collect x.as_dict()!;
+    let natives = for x in api["natives"]!.as_array()! collect x.as_dict()!;
+    let adt_modules = (for adt in adts collect (adt["name"]!.as_str()!, module_of(adt))).to_dict();
+
+    let pages = ~{};
+    for native in natives {
+        let item = Item::from_value(native, adt_modules);
+        let entry = pages
+            .get_or_insert(item.page, Page::new())
+            .sections
+            .get_or_insert(item.section, ~{})
+            .get_or_insert(item.heading, Entry { signatures = [], doc = item.doc });
+        entry.signatures.push(item.signature);
+    }
+
+    for adt in adts {
+        let name = adt["name"]!.as_str()!;
+        let home = module_of(adt);
+        let doc = adt["doc"]!.as_str()!;
+        let page = pages.get_or_insert(name, Page::new());
+        page.intro = f"```mimas\n{declaration(adt)}\n```\n\n{doc}";
+
+        let link = f"./{file_of(home).find("[^/]*$")![0]}/{name.to_lower()}.md";
+        pages
+            .get_or_insert(home, Page::new())
+            .types
+            .push(f"### [`{name}`]({link})\n\n{doc.split("\n\n")[0]}");
+    }
+
+    let out = [];
+    for (title, page) in pages.pairs() {
+        if title in adt_modules {
+            continue;
+        }
+        let types = [];
+        for (name, home) in adt_modules.pairs() {
+            if home == title {
+                types.push((name, pages[name]!));
+            }
+        }
+        out.push((title, page, types));
+    }
+    out
+}
+
+/// Where a page goes in the docs folder, where std's modules drop their `std::`.
+fn file_of(title: str) -> str {
+    title.find("^(?:std::)?(.*)$")![1].replace("::", "/").to_lower()
+}
+
+/// The chapter at `path` among `items` or anywhere beneath them.
+fn find_chapter(items: [BookItem], path: str) -> Chapter? {
+    for item in items {
+        if let BookItem::Chapter(chapter) = item {
+            if chapter.path == path {
+                return chapter;
+            }
+            if let found? = find_chapter(chapter.sub_items, path) {
+                return found;
+            }
+        }
+    }
+    null
+}
+
+/// The number of the `index`th chapter under one numbered `parent`.
+fn numbered(parent: [float]?, index: int) -> [float]? {
+    if let n? = parent {
+        [n, [index.to_float()]].flat()
+    } else {
+        null
+    }
+}
 
 /// Everything about one native that its page needs.
 struct Item {
@@ -262,14 +315,13 @@ impl Item {
             };
         }
 
-        let path = module_of(value);
         let (section, sig) = if kind == "Function" {
             ("Functions", signature(value, [], anons))
         } else {
             ("Constants", f"const {name}: {ty(value["ty"]!, anons)}")
         };
         Item {
-            page = if path.is_empty() { "Prelude" } else { path.join("::") },
+            page = module_of(value),
             section = section,
             heading = name,
             signature = sig,

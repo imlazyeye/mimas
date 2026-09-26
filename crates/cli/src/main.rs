@@ -5,6 +5,7 @@ use num_format::{Locale, ToFormattedString};
 use parse::Ast;
 use solve::{Directory, Modules};
 use std::{path::PathBuf, time::Duration};
+use vm::conversion::Raisable;
 
 mod ice;
 mod input;
@@ -14,6 +15,8 @@ pub use input::*;
 use unit::Unit;
 
 const ICE_EXIT_CODE: i32 = 101;
+const DOCS_SCRIPT: &str = include_str!("../scripts/docs.mim");
+const MDBOOK_SCRIPT: &str = include_str!("../scripts/mdbook.mim");
 
 fn main() {
     ice::install_hook();
@@ -34,6 +37,12 @@ fn main() {
             input.dump_ir,
             input.time,
         ),
+        Some(Commands::Docs {
+            output_path,
+            manifest_path,
+            include_std: std,
+            mdbook,
+        }) => docs(output_path, manifest_path, std, mdbook, input.color),
         None => 0,
     };
     std::process::exit(status_code);
@@ -208,6 +217,82 @@ fn run(
     }
 }
 
+fn docs(
+    output_path: Option<PathBuf>,
+    manifest_path: Option<PathBuf>,
+    std: bool,
+    mdbook: Option<String>,
+    color: bool,
+) -> i32 {
+    // mdbook asks `supports <renderer>` before running us, and markdown pages suit every renderer
+    if mdbook.is_some() && output_path.is_some() {
+        return 0;
+    }
+
+    let error = "error".bright_red().bold();
+    let manifest = match manifest_path {
+        Some(path) => api::Manifest::read(&path).map(Some),
+        None => api::Manifest::find(&api::Project::of(&resolve_path(None))),
+    };
+    let host = match manifest {
+        Ok(Some(manifest)) => manifest.library,
+        Ok(None) if std => std_alone(),
+        Ok(None) => {
+            eprintln!(
+                "{error}: no manifest found. Run your host with `cargo run` to write one, or pass \
+                 `--include-std` to document the standard library."
+            );
+            return 1;
+        }
+        Err(problem) => {
+            eprintln!("{error}: {problem}. Run your host with `cargo run` to write it.");
+            return 1;
+        }
+    };
+    // every adt keeps its name, since the host's own types can name std's
+    let names: Vec<_> = host
+        .adts()
+        .iter()
+        .map(|adt| (adt.adt_id, adt.name.clone()))
+        .collect();
+    let host = if std { host } else { host.without_std() };
+    let json = serde_json::to_value(&host).expect("couldn't serialize the manifest");
+
+    let files = [("docs.mim", DOCS_SCRIPT), ("mdbook.mim", MDBOOK_SCRIPT)];
+    let result = vm::Vm::compile_files(&files, |api| {
+        library::std(api);
+        api.module("docs").add(display_ty);
+    })
+    .and_then(|mut vm| {
+        // solving docs.mim named its own adts over the ids the manifest's adts use
+        for (id, name) in &names {
+            shared::name_adt(id.index(), name);
+        }
+        vm.run()?;
+        let json = library::Value::from(json);
+        match (mdbook, output_path) {
+            (Some(chapter), _) => Ok(vm.call("preprocess", (json, chapter))?),
+            (None, Some(folder)) => Ok(vm.call("markdown", (json, folder.display().to_string()))?),
+            (None, None) => unreachable!("clap requires one"),
+        }
+    });
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            render::emit(e.0.as_ref(), color);
+            1
+        }
+    }
+}
+
+/// Reads a type from its parsed json and writes it as mimas source would.
+#[vm::native]
+fn display_ty(value: library::Value) -> Raisable<String> {
+    serde_json::from_value::<shared::Ty>(value.into())
+        .map(|ty| ty.to_string())
+        .into()
+}
+
 /// Loads the unit's project and prints the errors outside its scripts, counting them, or says
 /// with which exit code that crashed.
 fn load<'a>(
@@ -298,7 +383,7 @@ fn compile(
 // bare `mimas foo.mim` means `mimas run foo.mim`; inject `run` when the first
 // positional isn't already a subcommand. `mimas` alone still falls through to help.
 fn massage_args(mut args: Vec<String>) -> Vec<String> {
-    const SUBCOMMANDS: [&str; 4] = ["check", "build", "run", "help"];
+    const SUBCOMMANDS: [&str; 5] = ["check", "build", "run", "help", "docs"];
     if let Some(idx) = args.iter().skip(1).position(|a| !a.starts_with('-')) {
         let idx = idx + 1;
         if !SUBCOMMANDS.contains(&args[idx].as_str()) {
