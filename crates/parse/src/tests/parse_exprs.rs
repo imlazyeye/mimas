@@ -958,6 +958,16 @@ expr_test!(
 expr_test!(closure, "|| {}", Closure::new(vec![], block!()));
 
 expr_test!(
+    closure_without_parameters_with_return_type,
+    "|| -> int { 1 }",
+    Closure {
+        parameters: vec![],
+        body: Block::new_with_yield(vec![], int!(1)).into_expr(),
+        return_type: Some(Annotation::Kw(TyKw::Int)),
+    }
+);
+
+expr_test!(
     closure_with_parameters,
     "|a: int, b| {}",
     Closure::new(

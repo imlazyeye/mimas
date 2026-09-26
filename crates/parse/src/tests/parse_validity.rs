@@ -319,7 +319,12 @@ test_ok!(
          let x = 1;
      }"
 );
-test_ok!(closure_with_return_type, "a = |a: int| -> int { a };");
+test_ok!(
+    closure_with_return_type,
+    "a = |a: int| -> int { a };",
+    "a = || -> int { 1 };"
+);
+test_fail!(closure_return_type_after_body, "a = || { 1 } -> int;");
 test_ok!(
     pact_default_body_no_semi,
     "pact Foo { fn bar() { 0 } }",

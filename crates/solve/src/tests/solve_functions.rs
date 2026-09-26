@@ -211,6 +211,10 @@ test_ty!(
     "|a: int| -> int { a }" => func!((Int) -> Int),
 );
 test_ty!(
+    closure_without_parameters_with_return_type_annotation,
+    "|| -> int { 1 }" => func!(() -> Int),
+);
+test_ty!(
     named_args_all_by_name,
     "fn foo(a: int, b: int, c: int = 0) -> int { a + b + c }",
     "foo(b=2, a=1)" => Int
