@@ -59,15 +59,16 @@ print(f"found {big.len()}: {big}"); // -> found 2: [5, 8]
 <!-- homepage benchmark start -->
 <div class="bench"><h4><a href="https://github.com/imlazyeye/mimas/tree/main/benchmarks/physics">physics</a> <small>struct field access, float math</small></h4>
 <table class="charts-css bar show-labels data-spacing-4"><tbody>
-<tr><th scope="row">mimas</th><td class="me" style="--size:0.06605518443274426"><span class="data">1.01s</span></td></tr>
-<tr><th scope="row" class="long">fabricator</th><td style="--size:0.2038977897498234"><span class="data">3.13s</span></td></tr>
-<tr><th scope="row">rune</th><td style="--size:0.2170012171295753"><span class="data">3.33s</span></td></tr>
-<tr><th scope="row">boa</th><td style="--size:0.32569439875679207"><span class="data">5.00s</span></td></tr>
-<tr><th scope="row">koto</th><td style="--size:0.5292279572602921"><span class="data">8.12s</span></td></tr>
-<tr><th scope="row">dyon</th><td style="--size:0.5851366781949663"><span class="data">8.98s</span></td></tr>
-<tr><th scope="row">steel</th><td style="--size:0.6407169746847973"><span class="data">9.83s</span></td></tr>
-<tr><th scope="row">rhai</th><td style="--size:0.9012004380228912"><span class="data">13.83s</span></td></tr>
-<tr><th scope="row" class="long">rustpython</th><td style="--size:1"><span class="data">15.34s</span></td></tr>
+<tr><th scope="row">roto</th><td style="--size:0.04651442203178244"><span class="data">545ms</span></td></tr>
+<tr><th scope="row">mimas</th><td class="me" style="--size:0.05118415210687621"><span class="data">600ms</span></td></tr>
+<tr><th scope="row" class="long">fabricator</th><td style="--size:0.2165644648504353"><span class="data">2.54s</span></td></tr>
+<tr><th scope="row">rune</th><td style="--size:0.29833970378087943"><span class="data">3.50s</span></td></tr>
+<tr><th scope="row">boa</th><td style="--size:0.35636305132766133"><span class="data">4.18s</span></td></tr>
+<tr><th scope="row">koto</th><td style="--size:0.607862901226413"><span class="data">7.12s</span></td></tr>
+<tr><th scope="row">steel</th><td style="--size:0.6250830196526688"><span class="data">7.33s</span></td></tr>
+<tr><th scope="row">dyon</th><td style="--size:0.7877781869684274"><span class="data">9.23s</span></td></tr>
+<tr><th scope="row" class="long">rustpython</th><td style="--size:0.9955489344277314"><span class="data">11.67s</span></td></tr>
+<tr><th scope="row">rhai</th><td style="--size:1"><span class="data">11.72s</span></td></tr>
 </tbody></table></div>
 <p class="bench-legend">Pure-Rust runtimes, measured on an AMD Ryzen 7 9800X3D running Linux. <a href="https://github.com/imlazyeye/mimas">mimas</a> v0.3.0 · <a href="https://github.com/rhaiscript/rhai">Rhai (perf)</a> v1.26.0 · <a href="https://github.com/rune-rs/rune">Rune</a> v0.14.2 · <a href="https://github.com/koto-lang/koto">Koto</a> v0.16.1 · <a href="https://github.com/PistonDevelopers/dyon">Dyon</a> v0.51.2 · <a href="https://github.com/mattwparas/steel">Steel</a> v0.8.3 · <a href="https://github.com/boa-dev/boa">Boa</a> v0.22.0 · <a href="https://github.com/RustPython/RustPython">RustPython</a> v0.5.0 · <a href="https://github.com/kyren/fabricator">Fabricator</a> git cef73ca</p>
 <!-- homepage benchmark end -->
