@@ -1649,8 +1649,23 @@ impl Vm {
     {
         let mut vm = Self::new();
         let library = vm.install_library(install_lib);
+        // the first library a host installs is its manifest, when it runs from its cargo target dir
         #[cfg(feature = "export-api")]
-        crate::export::auto_export(&library);
+        {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static WRITTEN: AtomicBool = AtomicBool::new(false);
+            if !WRITTEN.swap(true, Ordering::Relaxed)
+                && let Some(path) = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| ::api::Manifest::host_path(&exe))
+                && let Err(e) = write_api(&library, &path)
+            {
+                eprintln!(
+                    "mimas: couldn't write the API manifest to {}: {e}",
+                    path.display()
+                );
+            }
+        }
         let (program, sources) = Self::build_program(files, &library)?;
 
         vm.load_program(program);
@@ -1689,6 +1704,13 @@ impl Vm {
         ir.lower(&stmts);
         Ok((compile::Compiler::new().compile(ir), sources))
     }
+}
+
+/// Writes `library` to `path` as a manifest unless its output would be identical to what is
+/// already present.
+#[cfg(feature = "export-api")]
+pub fn write_api(library: &::api::Library<()>, path: &std::path::Path) -> std::io::Result<()> {
+    ::api::Manifest::new(library.clone()).write(path)
 }
 
 /// Single error surface for [`Vm::execute`]. Every stage (parse, solve, runtime) now emits

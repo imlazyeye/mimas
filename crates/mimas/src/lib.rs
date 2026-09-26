@@ -64,7 +64,7 @@ pub use vm::{Ctx, Val, Vm, api::Api};
 /// # Ok::<(), std::io::Error>(())
 /// ```
 #[cfg(feature = "export-api")]
-pub use vm::export::write_api;
+pub use vm::write_api;
 
 /// Compiles the given source with mimas's std included.
 pub fn compile_source(source: &str) -> Result<vm::Vm, vm::ExecuteError> {

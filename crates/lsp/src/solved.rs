@@ -12,12 +12,12 @@ use crate::analysis::Analysis;
 
 /// The files under one root, solved the way a host runs them: the modules on their own, and each
 /// script with every module. A script sees every module and nothing of the other scripts.
-pub struct Project {
+pub struct Solved {
     modules: Analysis,
     scripts: IndexMap<PathBuf, Analysis>,
 }
 
-impl Project {
+impl Solved {
     pub fn load(files: Vec<(PathBuf, String)>, library: Library<()>) -> Self {
         let library = Rc::new(library);
         let (modules, scripts): (Vec<_>, Vec<_>) = files

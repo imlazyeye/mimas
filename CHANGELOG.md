@@ -19,13 +19,14 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 - **Breaking**: The project structure no longer utilizes a `main.mim` file.
   - Scripts (files that don't declare a module) are individual executables and cannot see one another
-  - Scripts can see and use any module within its directory (including sub-direrctories)
+  - Scripts can see and use any module in their project: the highest folder holding a `.mim` file in the cargo package or repository around them, including its sub-directories. The CLI and the language server agree on this. See [Projects](https://mim.as/reference/scripts.html#projects).
   - `mimas run <directory>` can still be used as long as your project as a singular script
   - Projects with multiple scripts can still use `mimas run <script_file>`
 - **Breaking**: The array method `flatten` is now `flat`.
 - **Breaking**: `Api::add_described` and `Api::add_assoc_described` take each parameter as a `(name, type)` pair.
 - The parser now recovers from syntax errors, so the `mimas` CLI reports every syntax error in a file instead of stopping at the first. Embedding through the `mimas` crate still returns only the first.
 - Using a module, a library namespace, or a method without calling it as a value (i.e.: `let a = std::fs;`, `1.max;`) is now a type error with a hint.
+- `mimas check` and `mimas build` check the scripts of a cargo package against the API manifest its host writes, the same way the language server does. See [Cargo Projects](https://mim.as/reference/scripts.html#cargo-projects).
 
 ## [0.2.0] - 2026-09-17
 

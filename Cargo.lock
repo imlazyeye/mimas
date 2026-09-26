@@ -2465,6 +2465,8 @@ version = "0.2.0"
 dependencies = [
  "mimas-shared",
  "serde",
+ "serde_json",
+ "walkdir",
 ]
 
 [[package]]
@@ -2500,7 +2502,6 @@ dependencies = [
  "mimas-vm",
  "num-format",
  "owo-colors",
- "walkdir",
 ]
 
 [[package]]
@@ -2613,7 +2614,6 @@ dependencies = [
  "mutants",
  "pretty_assertions",
  "thiserror 1.0.69",
- "walkdir",
 ]
 
 [[package]]
@@ -2636,7 +2636,6 @@ dependencies = [
  "mutants",
  "pretty_assertions",
  "rustc-hash 2.1.2",
- "serde_json",
  "smallvec",
  "thiserror 1.0.69",
 ]

@@ -7,6 +7,7 @@ pub struct AdtBinding {
     pub variant_layout_ids: Vec<AdtId>,
 }
 
+#[derive(Clone)]
 pub struct Registry {
     next_id: u32,
     bindings: HashMap<TypeId, AdtBinding>,

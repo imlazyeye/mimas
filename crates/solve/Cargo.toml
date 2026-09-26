@@ -26,7 +26,6 @@ indexmap.workspace = true
 mutants.workspace = true
 miette.workspace = true
 thiserror.workspace = true
-walkdir.workspace = true
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["pretty_assertions"]

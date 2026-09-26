@@ -2264,6 +2264,7 @@ name = "mimas-api"
 version = "0.2.0"
 dependencies = [
  "mimas-shared",
+ "walkdir",
 ]
 
 [[package]]
@@ -2367,7 +2368,6 @@ dependencies = [
  "mutants",
  "pretty_assertions",
  "thiserror 1.0.69",
- "walkdir",
 ]
 
 [[package]]

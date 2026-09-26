@@ -30,11 +30,10 @@ smallvec = "1.15.1"
 rustc-hash = "2"
 itoa = "1.0.18"
 glam.workspace = true
-serde_json = { version = "1", optional = true }
 
 [features]
 op-count = []
-export-api = ["api/serde", "dep:serde_json"]
+export-api = ["api/serde"]
 
 [dev-dependencies]
 pretty_assertions.workspace = true

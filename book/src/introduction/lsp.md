@@ -71,11 +71,8 @@ let count = items.len(); // your editor can render this as `let count: int = ...
 
 ### Projects
 
-Each file is checked as part of the project it sits in: the highest folder holding a `.mim` file in
-the cargo package or repository around it, along with every folder below. That's what a host
-loading its whole scripts folder sees, so scripts in subfolders can use every module in the project.
-A project never takes in another cargo package or a `target` directory. A file outside any package
-or repository is checked with the `.mim` files next to it.
+Each file is checked as part of its [project](../reference/scripts.md#projects), the same one
+`mimas run` and `mimas check` use, so a script sees every module in it.
 
 ## What it does not support
 
@@ -124,26 +121,12 @@ vim.lsp.enable("mimas")
 
 ### Host APIs
 
-When a Rust host embeds mimas, its scripts use the functions, types, and constants it registers.
-The server learns about those from a file the host writes. Running the host from its cargo target
-dir writes its API to `target/mimas/<binary>.json`, named after the binary so hosts sharing a target
-dir (i.e.: a workspace) keep their own. A script is checked against the host of the cargo package it sits in, and the
-server asks `cargo` for that package's binaries and target dir. When several of them have written a
-file, the newest wins. Until one has, a warning at the top of every file in the project says so.
-After you change the host's API, run it again, and diagnostics pick up the change on your next edit
-in that project.
-
-- The host and the server have to be the same version of mimas. On a mismatch, the server shows a
-  warning and falls back to the standard library alone.
-- To turn the automatic write off, depend on `mimas` with `default-features = false`.
-- Only a binary running from inside a cargo target dir writes the file automatically, so a shipped
-  build never does, and neither do test or bench builds. If you want to export it yourself (e.g.
-  for modding support), call `mimas::write_api`.
-
-```rust
-let library = mimas::Vm::new().install_library(mimas::library::std);
-mimas::write_api(&library, "scripts/api.json".as_ref())?;
-```
+When a Rust host embeds mimas, its scripts use the functions, types, and constants it registers. The
+server checks them against the manifest the host writes, found the way
+[Cargo Projects](../reference/scripts.md#cargo-projects) describes. Until the host has written one,
+or when it's from another version of mimas, a warning at the top of every file in the project says
+so and the server falls back to the standard library alone. After you change the host's API, run it
+again, and diagnostics pick up the change on your next edit in that project.
 
 In VS Code, the `mimas.apiPath` setting points the server at one file for every script (relative to
 the workspace folder), or turns it off with `off`, which leaves only the standard library. The

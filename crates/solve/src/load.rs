@@ -8,7 +8,6 @@ use api::Library;
 use miette::NamedSource;
 use parse::{Ast, Parser, lex::Lexer};
 use shared::FileId;
-use walkdir::WalkDir;
 
 use crate::{Error, Solver};
 
@@ -101,51 +100,5 @@ impl<'a> Directory<'a> {
             library,
         );
         Self { modules, scripts }
-    }
-}
-
-/// Every `.mim` file under `root` (or only directly in it, unless `recursive`), sorted by path,
-/// with whatever the walk couldn't read. The walk leaves out any directory below `root` holding
-/// another cargo package, and any cargo target dir.
-pub fn mim_files(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<std::io::Error>) {
-    let mut files = Vec::new();
-    let mut errors = Vec::new();
-    let depth = if recursive { usize::MAX } else { 1 };
-    let walk = WalkDir::new(root)
-        .max_depth(depth)
-        .into_iter()
-        .filter_entry(|entry| {
-            let dir = entry.path();
-            entry.depth() == 0
-                || !entry.file_type().is_dir()
-                || !(is_package(dir) || dir.join("CACHEDIR.TAG").is_file())
-        });
-    for entry in walk {
-        match entry {
-            Ok(entry) => {
-                let is_mim = entry.file_type().is_file()
-                    && entry.path().extension().and_then(|e| e.to_str()) == Some("mim");
-                if is_mim {
-                    files.push(entry.into_path());
-                }
-            }
-            Err(e) => errors.push(std::io::Error::other(format!("{}: {e}", root.display()))),
-        }
-    }
-    files.sort();
-    (files, errors)
-}
-
-/// Whether `dir` holds a cargo package, not just a workspace.
-pub fn is_package(dir: &Path) -> bool {
-    std::fs::read_to_string(dir.join("Cargo.toml"))
-        .is_ok_and(|toml| toml.lines().any(|line| line.trim() == "[package]"))
-}
-
-/// A file's directory, `.` for a bare name, so a path typed and a path walked compare alike.
-pub fn dir_of(path: &Path) -> &Path {
-    match path.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        _ => Path::new("."),
     }
 }

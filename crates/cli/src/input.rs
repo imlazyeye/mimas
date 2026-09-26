@@ -27,14 +27,15 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Checks a script with the modules below its directory, or every script in a directory.
+    /// Checks a script with the modules of its project, or every script in a directory. Scripts in
+    /// a cargo package are checked against the API its host last wrote.
     Check {
         /// The path to the project directory to run on. Uses the current directory if not
         /// provided.
         #[clap(parse(from_os_str))]
         path: Option<PathBuf>,
     },
-    /// Runs a script with the modules below its directory, or a directory's only script.
+    /// Runs a script with the modules of its project, or a directory's only script.
     Run {
         /// The path to the project directory to run on. Uses the current directory if not
         /// provided.
@@ -47,7 +48,8 @@ pub enum Commands {
         #[clap(last = true)]
         script_args: Vec<String>,
     },
-    /// Builds but does not run
+    /// Builds but does not run. Scripts in a cargo package are checked against the API its host
+    /// last wrote.
     Build {
         /// The path to the project directory to run on. Uses the current directory if not
         /// provided.
