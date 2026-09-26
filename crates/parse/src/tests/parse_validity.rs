@@ -283,6 +283,7 @@ test_ok!(
     "a = b in c;",
     r#"a = "x" in "xyz";"#
 );
+test_fail!(in_does_not_chain, "a = b in c in d;");
 
 // misc valid forms
 test_ok!(while_statement_no_semicolon, "while true {}");

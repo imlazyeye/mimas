@@ -897,21 +897,22 @@ impl<'s> Parser<'s> {
     fn binary(&mut self, min_power: u8) -> Expr {
         let start = self.next_start();
         let mut left = self.unary();
+        // only looser operators can follow an `in`, which doesn't chain
+        let mut max_power = u8::MAX;
         while let Some((op, power)) = BinaryOp::of(self.peek())
-            && power >= min_power
+            && (min_power..max_power).contains(&power)
         {
             self.advance();
             let right = self.binary(power + 1);
-            let chains = !matches!(op, BinaryOp::In(_));
+            if matches!(op, BinaryOp::In(_)) {
+                max_power = power;
+            }
             left = match op {
                 BinaryOp::Logical(op) => self.new_expr(Logical::new(left, op, right), start),
                 BinaryOp::Equality(op) => self.new_expr(Equality::new(left, op, right), start),
                 BinaryOp::In(condition) => self.new_expr(In::new(left, right, condition), start),
                 BinaryOp::Eval(op) => self.new_expr(Evaluation::new(left, op, right), start),
             };
-            if !chains {
-                break;
-            }
         }
         left
     }
@@ -1898,7 +1899,6 @@ impl BinaryOp {
         if let Ok(op) = EqualityOp::try_from(kind) {
             return Some((Self::Equality(op), 2));
         }
-        // `in` doesn't chain, so `binary` stops after taking one
         if matches!(kind, TokKind::In | TokKind::NotIn) {
             return Some((Self::In(kind == TokKind::In), 3));
         }

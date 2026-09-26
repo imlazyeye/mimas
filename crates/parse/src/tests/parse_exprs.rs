@@ -1655,3 +1655,13 @@ expr_test!(
 expr_test!(membership, "1 in 1", In::new(int!(1), int!(1), true));
 
 expr_test!(not_membership, "1 !in 1", In::new(int!(1), int!(1), false));
+
+expr_test!(
+    membership_before_or,
+    "1 in 1 || 1 !in 1",
+    Logical::new(
+        In::new(int!(1), int!(1), true).into_expr(),
+        LogicalOp::Or,
+        In::new(int!(1), int!(1), false).into_expr(),
+    )
+);
