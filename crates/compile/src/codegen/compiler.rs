@@ -192,17 +192,26 @@ impl Compiler {
         let root = export(&mut ir, &signatures, root);
 
         for (body_id, mut body) in ir.bodies {
+            // body compilation happens in 9 stages
+            //
+            // 1. clean      -- dce, phi threading, etc
+            // 2. local regs -- assign every local a register
+            // 3. phi regs   -- assign every phi a reg now that locals are known
+            // 4. constants  -- decide which constants to inline or pin
+            // 5. order      -- determine the order blocks are written in
+            // 6. liveness   -- compute when every value is needed
+            // 7. positions  -- use stage 6 to compute where every value dies
+            // 8. copies     -- detach reads that cannot safely share the local's reg
+            // 9. emit       -- walk over it all and write the ops
+            //
+            // stage 1: clean
             clean::clean(&mut body);
 
+            // stage 2: allocate a register for every single local. these go first so that the
+            // register of a local is always aligned with 0..bodies.locals.len(). we use this at the
+            // emit stage to ask if a given register is a local
             let mut regs: IdVec<Reg, ()> = IdVec::new();
             let mut local_to_reg: IdVec<Local, Reg> = IdVec::new();
-            let cross = clean::cross_block_iids(&body);
-            let last_use_by_block: HashMap<BlockId, HashMap<InstId, InstId>> = body
-                .blocks
-                .iter()
-                .map(|(bid, _)| (bid, clean::last_uses(&body, bid)))
-                .collect();
-
             body.locals.iter().for_each(|_| {
                 local_to_reg.push(regs.push(()));
             });
@@ -210,6 +219,9 @@ impl Compiler {
             let mut inst_to_reg: IdVec<InstId, Option<Reg>> =
                 vec![None; body.instructions.len()].into();
 
+            // stage 3: phi registers. phis are ephemeral, representing the value from whatever
+            // block we just came from. note that a phi's operand is read at the _end of its
+            // predecessor_, not within the block the phi sits in. that matters for liveness!
             let mut phi_copies: HashMap<BlockId, Vec<(Reg, InstId)>> = HashMap::new();
 
             for (_, block) in body.blocks.iter() {
@@ -227,8 +239,10 @@ impl Compiler {
             let chunk_offset = bytes.len();
             let mut byte_offset = chunk_offset;
             let mut body_ops = Vec::new();
-            let mut block_offset: IdVec<BlockId, usize> =
-                IdVec::from(vec![0usize; body.blocks.len()]);
+            // used only for --dump-bytes, screw your compile times
+            let mut freed_after: HashMap<usize, Vec<Reg>> = HashMap::new();
+            let mut hidden: HashSet<InstId> = HashSet::new();
+            let mut block_offset: IdVec<BlockId, usize> = IdVec::from(vec![0; body.blocks.len()]);
             let mut locs: Vec<(u32, Location)> = Vec::new();
             let push_loc = |off: usize, loc: Location, locs: &mut Vec<(u32, Location)>| {
                 let rel = u32::try_from(off - chunk_offset).unwrap();
@@ -266,7 +280,7 @@ impl Compiler {
                     .collect()
             };
 
-            // pre-scan: give each DISTINCT cache-friendly constant a pinned register, so
+            // stage 4: give each DISTINCT cache-friendly constant a pinned register, so
             // loop-resident loads can be hoisted to the prologue and every use just aliases the
             // reg.
             //
@@ -300,8 +314,6 @@ impl Compiler {
 
             // get the emit order of each block so that we can identify which jumps are
             // fallthroughs. we can't just look at block index + 1 because dce could have made gaps.
-
-            // successors of a block: (fall-through, branches)
             let successors = |bid: BlockId| {
                 let mut fallthrough = None;
                 let mut branches = Vec::new();
@@ -321,6 +333,10 @@ impl Compiler {
                 (fallthrough, branches)
             };
 
+            // stage 5: get the order we'll write the blocks in. depth-first walk from the entry so
+            // that unreachable blocks are never visited. we guarantee that the _makes_ of values
+            // always occur before they are ever _read_, so that running in the opposite direction
+            // can support the liveness stage later.
             let mut order = Vec::new();
             let mut placed = vec![false; body.blocks.len()];
             let mut stack = vec![BlockId::ZERO];
@@ -345,6 +361,123 @@ impl Compiler {
                 }
             }
 
+            // stage 6: compute the liveness of values. a value is "live" at a given point in the
+            // code if something later will still read it. at this stage we only notate the values
+            // that are alive in a given block. later, we'll boil that down to an actual position.
+            //
+            // to compute this, we walk a block from its last instruction to its first, carrying a
+            // set. since we're going backwards, this means we can add something to our set whenever
+            // it is read, and remove it whenever it is made. when reversed again, the accurate
+            // lifespan of a value is left.
+            //
+            // note that this requires the while loop because the final block in a loop (B) jumps
+            // back to the first (A), which means that A depends on B, and B depends on A. no
+            // visiting order can get that in one pass, so we repeat until no more diffs are found.
+            let mut live_in: HashMap<BlockId, HashSet<InstId>> = HashMap::new();
+
+            // #58: a GetLocal emits nothing. its value just "lives" in the local's register. that
+            // is only true as long as nobody _sets_ that local. if a SetLocal to `x` runs while
+            // an earlier read of `x` is still live, whoever uses that read gets the new value.
+            // for example, with `x + { x = 5; 1 }`, the read of `x` is live from before the block
+            // until the end of the add, causing the add to use `5` instead of whatever x's previous
+            // value was. to avoid this, we use CopyLocal to create a safe barrier when the pattern
+            // is encountered.
+            let mut needs_copy: HashSet<InstId> = HashSet::new();
+
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for &bid in order.iter().rev() {
+                    let (fallthrough, branches) = successors(bid);
+                    let mut live = HashSet::new();
+                    for succ in fallthrough.into_iter().chain(branches) {
+                        live.extend(live_in.get(&succ).into_iter().flatten().copied());
+                    }
+                    // a phi reads its operand at the end of the predecessor
+                    live.extend(phi_copies.get(&bid).into_iter().flatten().map(|(_, v)| *v));
+                    for &iid in body.blocks[bid].stream.iter().rev() {
+                        // this instruction makes `iid`, so nothing above this line can need it
+                        live.remove(&iid);
+                        match &body.instructions[iid] {
+                            // phis are counted at their corresponding tail -- we avoid counting
+                            // them twice here
+                            Inst::Phi(_) => continue,
+                            // see above note about #58/copies
+                            Inst::SetLocal(l, _) => needs_copy.extend(live.iter().filter(
+                                |v| matches!(body.instructions[**v], Inst::GetLocal(r) if r == *l),
+                            )),
+                            _ => {}
+                        }
+                        live.extend(uses(&body.instructions[iid]));
+                    }
+                    // only a change at the top of the block can affect anyone else
+                    if live_in.get(&bid) != Some(&live) {
+                        live_in.insert(bid, live);
+                        changed = true;
+                    }
+                }
+            }
+
+            // stage 7: now that liveness is known we can distill it into positions. this lets us
+            // free and reuse registers when they're no longer needed, reducing frame size.
+            let mut pos = vec![0; body.instructions.len()];
+            let mut dies_at = vec![0; body.instructions.len()];
+            let mut next = 0;
+            for &bid in &order {
+                for &iid in &body.blocks[bid].stream {
+                    pos[iid.index()] = next;
+                    dies_at[iid.index()] = next;
+                    next += 1;
+                }
+            }
+            // now we check for the reasons a value may still be needed
+            for &bid in &order {
+                let block = &body.blocks[bid];
+                // reason 1: something still will read it
+                for &iid in &block.stream {
+                    if matches!(body.instructions[iid], Inst::Phi(_)) {
+                        continue;
+                    }
+                    for u in uses(&body.instructions[iid]) {
+                        dies_at[u.index()] = dies_at[u.index()].max(pos[iid.index()]);
+                    }
+                }
+                let Some(&last) = block.stream.last() else {
+                    continue;
+                };
+                // reason 2: a successor needs it on arrival, so it has to make it to the end of
+                // this block. this is what makes the dependence of A/B in loop bodies described
+                // above function fine
+                //
+                // reason 3: this block's phi copies read it at the tail.
+                let (fallthrough, branches) = successors(bid);
+                let flows = fallthrough
+                    .into_iter()
+                    .chain(branches)
+                    .flat_map(|succ| live_in.get(&succ).into_iter().flatten().copied());
+                let phi_reads = phi_copies.get(&bid).into_iter().flatten().map(|(_, v)| *v);
+                for u in flows.chain(phi_reads) {
+                    dies_at[u.index()] = dies_at[u.index()].max(pos[last.index()]);
+                }
+            }
+            let mut dying: Vec<Vec<InstId>> = vec![Vec::new(); next];
+            for &bid in &order {
+                for &iid in &body.blocks[bid].stream {
+                    dying[dies_at[iid.index()]].push(iid);
+                }
+            }
+
+            // stage 8: swap the flagged reads from GetLocal to CopyLocal, in place. from here on
+            // they're two different instructions -- a GetLocal never emits anything, a CopyLocal
+            // always emits one Move into a register of its own. this has to happen after liveness
+            // (which needs to see them as GetLocals to match them against a SetLocal) and before
+            // emit. it's also the first write to `body` since clean, so `successors` is done for.
+            for iid in needs_copy {
+                if let Inst::GetLocal(l) = body.instructions[iid] {
+                    body.instructions[iid] = Inst::CopyLocal(l);
+                }
+            }
+
             let non_empty: Vec<BlockId> = order
                 .iter()
                 .copied()
@@ -353,16 +486,31 @@ impl Compiler {
             let fallthrough: HashMap<BlockId, BlockId> =
                 non_empty.windows(2).map(|w| (w[0], w[1])).collect();
 
+            // stage 9: emit. a few helpers first.
+            //
+            // `owns`: whether a value has a register of its own to give back. a GetLocal is sitting
+            // in the local's register, and a phi's register is written from other blocks and never
+            // reused. everything else (CopyLocal included) owns its register.
+            let owns = |u: InstId| -> bool {
+                !matches!(body.instructions[u], Inst::GetLocal(_) | Inst::Phi(_))
+            };
+            // `clean_is_safe`: iid is the very last thing that needs u, and u owns its register.
+            // the shortcuts below ask this before taking over u's register or throwing its op
+            // away. it used to mean "last read within this block, and never leaves it".
+            let clean_is_safe = |iid: InstId, u: InstId| -> bool {
+                dies_at[u.index()] == pos[iid.index()] && owns(u)
+            };
+
+            // the free list. `Ctx::reg` pops from here and only makes a new register when it's
+            // empty. this used to live inside the block loop, so every block started from an empty
+            // list and nothing freed in one block could be reused in the next. now that we know
+            // exactly when each value dies it lives for the whole body, which is where most of the
+            // frame size savings come from (eval went from 22 registers to 13). in
+            // `if c { x + 100 } else { x * 2 }` the add's temp is freed after its phi copy and the
+            // multiply in the else block picks it right back up.
+            let mut free: Vec<Reg> = Vec::new();
             for &bid in &order {
                 let block = &body.blocks[bid];
-                let last_use = &last_use_by_block[&bid];
-                let mut free: Vec<Reg> = Vec::new();
-
-                let clean_is_safe = |iid: InstId, u: InstId| -> bool {
-                    last_use.get(&u) == Some(&iid)
-                        && !cross.contains(&u)
-                        && !matches!(body.instructions[u], Inst::GetLocal(_) | Inst::Phi(_))
-                };
 
                 block_offset[bid] = byte_offset;
 
@@ -387,11 +535,42 @@ impl Compiler {
                     let inst = &body.instructions[iid];
                     let loc = body.locs[iid];
 
+                    // release: everything whose dies_at was the previous position gives its
+                    // register back. previous rather than current so that an instruction never
+                    // lands its result on one of its own operands (the old code picked the result
+                    // register first and freed operands after, same effect). this runs ahead of the
+                    // shortcuts below, which `continue` past the rest.
+                    //
+                    // locals keep their registers (they're 0..locals.len()), which also covers a
+                    // SetLocal's own "value" and a retargeted value that now lives in a local. so
+                    // do pinned constants. the debug_assert is a tripwire for a double free, which
+                    // would hand one register to two values and produce a wrong answer, no crash.
+                    if let Some(prev) = pos[iid.index()].checked_sub(1) {
+                        for &dead in &dying[prev] {
+                            if let Some(reg) = inst_to_reg[dead]
+                                && owns(dead)
+                                && reg.index() >= body.locals.len()
+                                && !constants.values().any(|&r| r == reg)
+                            {
+                                debug_assert!(!free.contains(&reg), "freed {reg:?} twice");
+                                free.push(reg);
+                                // the dump notes it on the op that was the last to need it
+                                if self.disasm
+                                    && !hidden.contains(&dead)
+                                    && let Some(i) = body_ops.len().checked_sub(1)
+                                {
+                                    freed_after.entry(i).or_default().push(reg);
+                                }
+                            }
+                        }
+                    }
+
                     // some insts have optimization shortcuts
                     match inst {
                         Inst::Phi(_) => continue,
                         Inst::GetLocal(l) => {
-                            // alias it straight away -- no need for a move
+                            // alias it straight away -- no need for a move. the reads where that
+                            // isn't safe became CopyLocals in stage 8 and take the normal path
                             inst_to_reg[iid] = Some(local_to_reg[l]);
                             continue;
                         }
@@ -418,6 +597,7 @@ impl Compiler {
                             {
                                 let cmp = body_ops.pop().unwrap();
                                 byte_offset -= cmp.encoded_len();
+                                hidden.insert(*condition);
                                 let op = fuse_branch!(cmp, block_target;
                                     IntLt => BIntLt, IntLe => BIntLe, IntGt => BIntGt,
                                     IntGe => BIntGe, IntEq => BIntEq, IntNe => BIntNe,
@@ -435,6 +615,8 @@ impl Compiler {
                             }
                         }
                         Inst::Jump { target, .. } => {
+                            // the phi copies from stage 3. these are the reads liveness counts at
+                            // the tail of the predecessor
                             if let Some(copies) = phi_copies.get(&bid) {
                                 for &(dst, value) in copies {
                                     let op = Op::Move {
@@ -504,10 +686,6 @@ impl Compiler {
                             ),
                         };
                         inst_to_reg[iid] = Some(dst);
-                        if clean_is_safe(iid, non_const) && !constants.values().any(|&r| r == left)
-                        {
-                            free.push(left);
-                        }
                         push_loc(byte_offset, loc, &mut locs);
                         byte_offset += imm.encoded_len();
                         body_ops.push(imm);
@@ -526,16 +704,6 @@ impl Compiler {
                     };
 
                     inst_to_reg[iid] = op.reg();
-
-                    // free each operand whose last use is here (uses() is already deduped, so a
-                    // value filling two slots like `x * x` won't get freed twice). a pinned
-                    // constant register is never recycled -- its value must outlive every use.
-                    for u in uses(&body.instructions[iid]) {
-                        let reg = inst_to_reg[u].unwrap();
-                        if clean_is_safe(iid, u) && !constants.values().any(|&r| r == reg) {
-                            free.push(reg);
-                        }
-                    }
 
                     push_loc(byte_offset, loc, &mut locs);
                     byte_offset += op.encoded_len();
@@ -615,7 +783,7 @@ impl Compiler {
                 );
                 let mut rel = 0;
                 let mut shown_line: Option<usize> = None;
-                for op in body_ops.iter() {
+                for (i, op) in body_ops.iter().enumerate() {
                     // print the source line above the ops it lowered from, when it changes.
                     let loc = locs
                         .partition_point(|(b, _)| (*b as usize) <= rel)
@@ -636,7 +804,13 @@ impl Compiler {
                     // byte-offset column, colored like the existing address column so jump
                     // targets are cross-referenceable.
                     let addr = format!("{:04}", chunk_offset + rel).bright_black().bold();
-                    println!("  {addr}  {op}");
+                    // the registers this op was the last to need
+                    let freed = freed_after.get(&i).map_or(String::new(), |regs| {
+                        let regs: Vec<String> =
+                            regs.iter().map(|r| format!("r{}", r.index())).collect();
+                        format!("· {} free", regs.join(" ")).dimmed().to_string()
+                    });
+                    println!("  {addr}  {op}{freed}");
                     rel += op.encoded_len();
                 }
             }

@@ -405,6 +405,10 @@ impl Op {
                 src: ctx.i2r(value),
             },
             Inst::GetLocal(_) => unreachable!("GetLocal is aliased at codegen, never emitted"),
+            Inst::CopyLocal(local) => Op::Move {
+                dst: ctx.reg(),
+                src: ctx.local_to_reg[*local],
+            },
             Inst::Phi(_) => unreachable!("phis should be handled before Op::from_inst"),
             Inst::BinOp {
                 left,

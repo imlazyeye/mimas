@@ -179,3 +179,65 @@ test_vm!(
      for k in 60 { let lst = build(k); total += sum(lst); }",
     "total" => Int(35990),
 );
+
+// regression test for #58, CopyLocal usage
+test_vm!(
+    read_then_assign_in_expression,
+    "let x = 1;
+     let y = x + {
+         x = 5;
+         1
+     };",
+    "y" => Int(2),
+);
+
+// regression test for #58, CopyLocal usage
+test_vm!(
+    read_then_assign_across_branches,
+    "fn f(c: bool) -> int {
+         let x = 1;
+         x + (if c {
+             x = 5;
+             1
+         } else {
+             2
+         })
+     }",
+    "f(true)" => Int(2),
+    "f(false)" => Int(3),
+);
+
+// regression test for #58, CopyLocal usage
+test_vm!(
+    read_then_compound_assign,
+    "let x = 1;
+     x += {
+         x = 10;
+         1
+     };",
+    "x" => Int(2),
+);
+
+// regression test for #58, CopyLocal usage
+test_vm!(
+    for_over_reassigned_array,
+    "let a = [1, 2, 3];
+     let total = 0;
+     for v in a {
+         a = [10, 20, 30];
+         total += v;
+     }",
+    "total" => Int(6),
+);
+
+// regression test for #58, CopyLocal usage
+test_vm!(
+    for_over_reassigned_bound,
+    "let n = 3;
+     let count = 0;
+     for i in 0..n {
+         n = 10;
+         count += 1;
+     }",
+    "count" => Int(3),
+);
