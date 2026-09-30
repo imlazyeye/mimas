@@ -16,6 +16,7 @@ pub enum Inst {
     Constant(Constant),
     SetLocal(Local, InstId),
     GetLocal(Local),
+    CopyLocal(Local),
     BinOp {
         left: InstId,
         op: BinOp,
@@ -164,6 +165,7 @@ impl Inst {
             // pure value producers: droppable when their result is unused.
             Inst::Constant(..)
             | Inst::GetLocal(..)
+            | Inst::CopyLocal(..)
             | Inst::BinOp { .. }
             | Inst::UnaryOp { .. }
             | Inst::Phi(..)
@@ -210,6 +212,7 @@ impl Inst {
             Inst::Constant(..)
             | Inst::SetLocal(..)
             | Inst::GetLocal(..)
+            | Inst::CopyLocal(..)
             | Inst::Phi(..)
             | Inst::NewArray
             | Inst::NewDict
@@ -252,6 +255,7 @@ impl IrDisplay for Inst {
                 format!("set {variable}: {inst}")
             }
             Inst::GetLocal(variable) => format!("get {variable}"),
+            Inst::CopyLocal(variable) => format!("copy {variable}"),
             Inst::BinOp {
                 left,
                 op,

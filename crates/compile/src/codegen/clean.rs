@@ -154,38 +154,6 @@ pub(crate) fn uses(inst: &Inst) -> Vec<InstId> {
     out
 }
 
-/// Yields the operands that die in this block.
-pub(crate) fn last_uses(body: &Body, block: BlockId) -> HashMap<InstId, InstId> {
-    let mut last_use = HashMap::new();
-    for &iid in body.blocks[block].stream.iter().rev() {
-        for u in uses(&body.instructions[iid]) {
-            last_use.entry(u).or_insert(iid);
-        }
-    }
-    last_use
-}
-
-// any inst used in a block other than the one it was defined in, so they don't get freed.
-pub(crate) fn cross_block_iids(body: &Body) -> HashSet<InstId> {
-    let mut defs = HashMap::new();
-    for (bid, block) in body.blocks.iter() {
-        for &iid in &block.stream {
-            defs.insert(iid, bid);
-        }
-    }
-    let mut cross = HashSet::new();
-    for (bid, block) in body.blocks.iter() {
-        for &iid in &block.stream {
-            for u in uses(&body.instructions[iid]) {
-                if defs.get(&u) != Some(&bid) {
-                    cross.insert(u);
-                }
-            }
-        }
-    }
-    cross
-}
-
 /// Finds blocks that are exclusively a jump and remaps them so that they can be skipped.
 ///
 /// Example: given b0, b1, and b2, if b0 jumps to b1, and b1 has only one instruction which is to
