@@ -160,6 +160,7 @@ impl TyExt for Ty {
                             at: segment.location.into(),
                             field_name: segment.lexeme.clone(),
                         })?;
+                    solver.check_vis(field.dec, segment.location)?;
                     solver.note(&segment, field.ty.clone(), Some(field.dec));
                     ty = field.ty;
                 }

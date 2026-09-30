@@ -22,8 +22,8 @@ From outside its module, a struct's private fields are neither readable nor writ
 
 ```mimas
 // in another module:
-let c = Config { name = "x", secret = "y" }; // error: `Config::secret` is not accessible
-let s = c.secret;                            // error: `Config::secret` is not accessible
+let c = Config { name = "x", secret = "y" }; // error: `secret` is private to its module
+let s = c.secret;                            // error: `secret` is private to its module
 ```
 
 The fix is to expose a public surface -- a constructor and accessors -- and keep the internals sealed:

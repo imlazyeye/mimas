@@ -435,6 +435,7 @@ impl Solve for Access {
                             };
 
                             if let Some((ty, dec)) = field {
+                                solver.check_vis(dec, right.location())?;
                                 solver.note(right.as_ident().unwrap(), ty.clone(), Some(dec));
                                 ty
                             } else {
@@ -1721,6 +1722,7 @@ impl Solve for Literal {
                         })?;
 
                     if let FieldKey::Ident(key) = field_name {
+                        solver.check_vis(target.dec, key.location)?;
                         solver.note(key, target.ty.clone(), Some(target.dec));
                     }
                     value.fulfill_ty(target.ty, solver)?;
