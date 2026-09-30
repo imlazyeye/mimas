@@ -23,7 +23,6 @@ pub enum BinOp {
     BitXor,
     BitShiftLeft,
     BitShiftRight,
-    Coalesce,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -71,7 +70,7 @@ impl BinOp {
                 let s: u32 = b.try_into().map_err(|_| BinFault::InvalidShift)?;
                 Scalar::Int(a.checked_shr(s).ok_or(BinFault::InvalidShift)?)
             }
-            And | Or | Xor | Coalesce => return Err(BinFault::Type),
+            And | Or | Xor => return Err(BinFault::Type),
         })
     }
 
@@ -90,7 +89,7 @@ impl BinOp {
             LessEqual => Scalar::Bool(a <= b),
             GreaterThan => Scalar::Bool(a > b),
             GreaterEqual => Scalar::Bool(a >= b),
-            And | Or | Xor | BitAnd | BitOr | BitXor | BitShiftLeft | BitShiftRight | Coalesce => {
+            And | Or | Xor | BitAnd | BitOr | BitXor | BitShiftLeft | BitShiftRight => {
                 return Err(BinFault::Type);
             }
         })
@@ -121,7 +120,6 @@ impl std::fmt::Display for BinOp {
             BinOp::BitXor => f.pad("bit_xor"),
             BinOp::BitShiftLeft => f.pad("bit_shift_left"),
             BinOp::BitShiftRight => f.pad("bit_shift_right"),
-            BinOp::Coalesce => f.pad("null_coalesce"),
         }
     }
 }
@@ -169,7 +167,6 @@ impl From<LogicalOp> for BinOp {
 impl From<AssignmentOp> for BinOp {
     fn from(value: AssignmentOp) -> Self {
         match value {
-            AssignmentOp::Identity => BinOp::Identity,
             AssignmentOp::PlusEqual => BinOp::Add,
             AssignmentOp::MinusEqual => BinOp::Sub,
             AssignmentOp::StarEqual => BinOp::Mult,
@@ -177,9 +174,11 @@ impl From<AssignmentOp> for BinOp {
             AssignmentOp::XorEqual => BinOp::BitXor,
             AssignmentOp::OrEqual => BinOp::BitOr,
             AssignmentOp::AndEqual => BinOp::BitAnd,
-            AssignmentOp::NullCoalescenceEqual => BinOp::Coalesce,
             AssignmentOp::ModEqual => BinOp::Mod,
             AssignmentOp::DivEqual => BinOp::IDiv,
+            AssignmentOp::Identity | AssignmentOp::NullCoalescenceEqual => {
+                unreachable!("lowered on their own")
+            }
         }
     }
 }

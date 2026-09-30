@@ -4,10 +4,10 @@ use crate::{
 };
 use api::NativeId;
 use parse::{
-    Absolve, Access, AccessKind, Block, Break, Call, Closure, Coalescence, Collect, Continue,
-    Equality, Evaluation, Expr, ExprKind, FString, FStringPart, For, Grouping, Ident, If, In,
-    Literal, Logical, Loop, Match, MatchCase, NodeId, Raise, Range, Return, Stmt, StmtKind, Unary,
-    Unwrap, While,
+    Absolve, Access, AccessKind, AssignmentOp, Block, Break, Call, Closure, Coalescence, Collect,
+    Continue, Equality, Evaluation, Expr, ExprKind, FString, FStringPart, For, Grouping, Ident, If,
+    In, Literal, Logical, Loop, Match, MatchCase, NodeId, Raise, Range, Return, Stmt, StmtKind,
+    Unary, Unwrap, While,
     components::{Binding, Pat, PatKind},
 };
 use shared::{Located, PactId};
@@ -93,15 +93,19 @@ impl Ir {
             }
             StmtKind::Assignment(ass) => {
                 let place = ass.left.place(ir)?;
-                let value = match ass.op.into() {
-                    BinOp::Identity => ass.right.lower(ir)?,
+                let value = match ass.op {
+                    AssignmentOp::Identity => ass.right.lower(ir)?,
+                    AssignmentOp::NullCoalescenceEqual => {
+                        let lhs = place.load(ir);
+                        emit_coalesce(ir, lhs, &ass.right)?
+                    }
                     op => {
                         // the compound op's result type is the place's type (a typed lvalue); a
                         // mismatched runtime operand falls back to the generic op.
                         let kind = num_kind(ir, stmt.id(), &ass.left, &ass.right);
                         let lhs = place.load(ir);
                         let rhs = ass.right.lower(ir)?;
-                        ir.current().bin(op, lhs, rhs, kind)
+                        ir.current().bin(op.into(), lhs, rhs, kind)
                     }
                 };
                 let is_scalar = matches!(
@@ -636,34 +640,8 @@ impl Emit for Closure {
 
 impl Emit for Coalescence {
     fn emit(&self, _id: NodeId, ir: &mut Ir) -> Option<InstId> {
-        // `??` short-circuits: the rhs only evaluates when the lhs is null. a non-null
-        // option's runtime value IS its inner value, so the keep branch passes the lhs
-        // straight through.
-        let rhs_block = ir.push_block("rhs");
-        let keep_block = ir.push_block("keep");
-        let merge_block = ir.push_block("merge");
-
         let lhs = self.left.lower(ir)?;
-        ir.in_current(|block| {
-            block.jump_if_null(lhs, rhs_block);
-            block.jump(keep_block);
-        });
-
-        let rhs_branch = ir.in_block(rhs_block, |block| {
-            let value = block.emit_expr(&self.right)?;
-            let end = block.id();
-            block.jump(merge_block);
-            Some((end, value))
-        });
-
-        let keep_branch = ir.in_block(keep_block, |block| {
-            let end = block.id();
-            block.jump(merge_block);
-            Some((end, lhs))
-        });
-
-        let branches: Vec<_> = [rhs_branch, keep_branch].into_iter().flatten().collect();
-        merge_branches(ir, merge_block, branches)
+        emit_coalesce(ir, lhs, &self.right)
     }
 }
 
@@ -1460,6 +1438,35 @@ fn emit_bin_op(
     let left = left.lower(ir)?;
     let right = right.lower(ir)?;
     Some(ir.current().bin(op.into(), left, right, kind))
+}
+
+fn emit_coalesce(ir: &mut Ir, lhs: InstId, rhs: &Expr) -> Option<InstId> {
+    // `??` short-circuits: the rhs only evaluates when the lhs is null. a non-null option's runtime
+    // value IS its inner value, so the keep branch passes the lhs straight through.
+    let rhs_block = ir.push_block("rhs");
+    let keep_block = ir.push_block("keep");
+    let merge_block = ir.push_block("merge");
+
+    ir.in_current(|block| {
+        block.jump_if_null(lhs, rhs_block);
+        block.jump(keep_block);
+    });
+
+    let rhs_branch = ir.in_block(rhs_block, |block| {
+        let value = block.emit_expr(rhs)?;
+        let end = block.id();
+        block.jump(merge_block);
+        Some((end, value))
+    });
+
+    let keep_branch = ir.in_block(keep_block, |block| {
+        let end = block.id();
+        block.jump(merge_block);
+        Some((end, lhs))
+    });
+
+    let branches: Vec<_> = [rhs_branch, keep_branch].into_iter().flatten().collect();
+    merge_branches(ir, merge_block, branches)
 }
 
 fn num_kind(ir: &Ir, id: NodeId, left: &Expr, right: &Expr) -> OperandKind {
