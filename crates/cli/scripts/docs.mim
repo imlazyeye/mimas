@@ -4,7 +4,7 @@ use mdbook::{ MdBook, BookItem, Chapter };
 /// Formats a type for display, keeping context with local anon types.
 fn ty(value: Value, anons: ~{str}) -> str {
     let input = docs::display_ty(value)!;
-    while let matches = input.find("\\?[av](\\d*)") {
+    while let matches? = input.find("\\?[av](\\d*)") {
         let key = matches[1];
         if key !in anons {
             anons[key] = match anons.len() {

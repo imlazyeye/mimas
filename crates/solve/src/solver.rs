@@ -1277,6 +1277,21 @@ impl Solver {
         }
     }
 
+    /// Solves the pattern of an `if let`, `while let` or `let else`. A bare name over an option or
+    /// result is rejected (it would always match).
+    pub(crate) fn solve_refutable_pat(&mut self, pat: &Pat, ty: Ty) -> Result<()> {
+        let ty = ty.normalized(self);
+        if let (PatKind::Ident(ident), Ty::Option(_) | Ty::Result(_)) = (pat.kind(), &ty) {
+            Err(crate::errors::MissingNullBind {
+                src: self.src(pat.location()),
+                at: pat.location().into(),
+                name: ident.lexeme.clone(),
+                ty: ty.to_string(),
+            })?
+        }
+        self.solve_match_pat(pat, ty, false)
+    }
+
     /// The set of names a pattern binds. Every alternative of an or-pattern must bind this same
     /// set (same as Rust's E0408). That, plus the shared dec the alternatives unify through, is
     /// what rejects `Foo::Bar(n) | Foo::Buzz(n)` when the payloads differ in type
@@ -1618,7 +1633,7 @@ impl Solver {
                                 at: else_branch.location().into(),
                             })?;
                         }
-                        self.solve_match_pat(left, ty, false)?;
+                        self.solve_refutable_pat(left, ty)?;
                     }
                 }
             }

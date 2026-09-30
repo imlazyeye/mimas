@@ -32,7 +32,7 @@ let evens = for x in numbers {
 It composes with every loop, including [`while let`](./while.md#while-let), which is handy for gathering results from a source until it's exhausted:
 
 ```mimas
-let ages: [int] = while let person = next_person() {
+let ages: [int] = while let person? = next_person() {
     collect person.age;
 };
 ```

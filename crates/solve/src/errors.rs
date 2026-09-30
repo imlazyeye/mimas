@@ -97,6 +97,18 @@ pub struct LetElseMustDiverge {
 }
 
 #[derive(Error, Debug, Diagnostic)]
+#[error("missing `?` in pattern")]
+#[diagnostic(help("`{name}?` binds the unwrapped value"))]
+pub struct MissingNullBind {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("`{name}` binds the whole `{ty}`, so it always matches")]
+    pub at: SourceSpan,
+    pub name: String,
+    pub ty: String,
+}
+
+#[derive(Error, Debug, Diagnostic)]
 #[error("invalid unwrap")]
 pub struct InvalidUnwrap {
     #[source_code]

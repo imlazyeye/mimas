@@ -116,7 +116,7 @@ test_ty!(while_let, "while let a = 0 { break a + 1; }" => option!(Int));
 test_ty!(
     while_let_on_option,
     "let a: int? = 0;
-    let c = while let b = a { break b + 1; };",
+    let c = while let b? = a { break b + 1; };",
     "c" => option!(Int)
 );
 test_ty!(while_collect, "while true { collect 0; }" => array!(Int));
@@ -357,6 +357,26 @@ test_ty!(
     if_let_null_pattern,
     "let a: int? = 0;",
     "if let b? = a { b } else { 0 }" => Int,
+);
+
+test_fail!(
+    if_let_bare_option,
+    "let a: int? = 0;
+     if let b = a {}",
+);
+
+test_fail!(
+    if_let_bare_result,
+    "fn f() -> int! {
+         0
+     }
+     if let v = f() {}",
+);
+
+test_fail!(
+    while_let_bare_option,
+    "let a: int? = 0;
+     while let b = a {}",
 );
 
 // Simple literals

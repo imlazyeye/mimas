@@ -39,7 +39,7 @@ impl Ir {
                     Some(else_expr) => {
                         let otherwise = ir.push_block("let_else");
                         let cont = ir.push_block("let_cont");
-                        ir.test_binding(&s.left, s.right.id(), value, otherwise)?;
+                        ir.current().test_pattern(&s.left, value, otherwise)?;
                         ir.current().jump(cont);
                         ir.target(otherwise);
                         let _ = else_expr.lower(ir);
@@ -166,22 +166,6 @@ impl Ir {
             }
             _ => todo!(),
         })
-    }
-
-    // test a refutable `pat` against a lowered scrutinee, routing every failure to `fail`; on
-    // success the bindings are set and control falls through. `if let` / `let else` over a `T?`
-    // implicitly null-test + unwrap unless the pattern is an explicit `?` (which tests itself).
-    pub(crate) fn test_binding(
-        &mut self,
-        pat: &Pat,
-        scrut: NodeId,
-        value: InstId,
-        fail: BlockId,
-    ) -> Option<()> {
-        if implicit_null_test(self, scrut, pat) {
-            self.current().jump_if_null(value, fail);
-        }
-        self.current().test_pattern(pat, value, fail)
     }
 }
 
@@ -948,7 +932,7 @@ impl Emit for If {
 
         let condition = if let Some(binding) = self.binding.as_ref() {
             let value = self.condition.lower(ir)?;
-            ir.test_binding(binding, self.condition.id(), value, else_block)?;
+            ir.current().test_pattern(binding, value, else_block)?;
             ir.current().constant(true)
         } else {
             self.condition.lower(ir)?
@@ -1405,19 +1389,10 @@ impl Emit for While {
         ir.loop_stack_mut()
             .push(LoopCtx::new(condition_block, exit, collection));
 
-        let needs_null_test = self
-            .binding
-            .as_ref()
-            .is_some_and(|binding| implicit_null_test(ir, self.header.id(), binding));
-
         let condition_reachable = ir.in_block(condition_block, |block| {
             let value = block.emit_expr(&self.header)?;
             match self.binding.as_ref() {
-                // `while let`: stop when the option goes null, else bind the unwrapped value.
                 Some(binding) => {
-                    if needs_null_test {
-                        block.jump_if_null(value, condition_exit);
-                    }
                     block.test_pattern(binding, value, condition_exit)?;
                 }
                 None => {
@@ -1512,13 +1487,6 @@ fn merge_branches(
 fn loop_result(ir: &mut Ir, exit: BlockId, branches: Vec<(BlockId, InstId)>) -> Option<InstId> {
     ir.target(exit);
     Some(ir.current().phi(branches))
-}
-
-/// whether an `if let` / `while let` binding needs the implicit null short-circuit: true when the
-/// scrutinee is option-typed and the pattern doesn't already do its own null/raised test (`?`).
-fn implicit_null_test(ir: &Ir, scrut: NodeId, binding: &Pat) -> bool {
-    matches!(ir.resolutions.node_tys.get(&scrut), Some(Ty::Option(_)))
-        && !matches!(binding.kind(), PatKind::NullBind(_))
 }
 
 fn loop_collects(expr: &Expr) -> bool {
