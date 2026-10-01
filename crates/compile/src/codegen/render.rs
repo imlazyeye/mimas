@@ -240,6 +240,10 @@ impl std::fmt::Display for Op {
                 )
             }
 
+            Op::GetFieldStruct { dst, src, slot } => {
+                write!(f, "{}{}{}.{slot}", OpName("get_field_struct"), dst, src)
+            }
+
             Op::SetField {
                 receiver,
                 slot,

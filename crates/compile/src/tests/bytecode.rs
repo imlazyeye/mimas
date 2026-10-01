@@ -148,6 +148,11 @@ fn decode_op(d: &mut Decoder) -> Op {
             slot: d.u32(),
             kind: AccessKind::decode(d),
         },
+        OpCode::GetFieldStruct => Op::GetFieldStruct {
+            dst: Reg::decode(d),
+            src: Reg::decode(d),
+            slot: d.u32(),
+        },
         OpCode::Len => Op::Len {
             dst: Reg::decode(d),
             src: Reg::decode(d),
@@ -985,10 +990,23 @@ test_lowering!(
     Op::NewInstance { .. }
 );
 test_lowering!(
-    field_access_lowers_to_get_field,
+    field_access_lowers_to_get_field_struct,
     "struct P { x: int }
      fn get(p: P) -> int { p.x }
      let _ = get(P { x = 1 });",
+    Op::GetFieldStruct { .. }
+);
+test_lowering!(
+    optional_field_access_lowers_to_get_field,
+    "struct P { x: int }
+     fn get(p: P?) -> int? { p?.x }
+     let _ = get(P { x = 1 });",
+    Op::GetField { .. }
+);
+test_lowering!(
+    tuple_access_lowers_to_get_field,
+    "fn get(t: (int, int)) -> int { t.0 }
+     let _ = get((1, 2));",
     Op::GetField { .. }
 );
 // `for x in <array>` derives its bound from the array length -> Op::Len (a `.len()` call can't be

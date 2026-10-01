@@ -53,6 +53,7 @@ macro_rules! for_each_op {
             // -- Inquires -- //
             GetIndex     [ (dst, Reg, reg) (set, Reg, reg) (index, Reg, reg) (kind, AccessKind, enum8) ];
             GetField     [ (dst, Reg, reg) (src, Reg, reg) (slot, u32, u32) (kind, AccessKind, enum8) ];
+            GetFieldStruct [ (dst, Reg, reg) (src, Reg, reg) (slot, u32, u32) ];
             Len          [ (dst, Reg, reg) (src, Reg, reg) ];
             ToFloat      [ (dst, Reg, reg) (src, Reg, reg) ];
             Sqrt         [ (dst, Reg, reg) (src, Reg, reg) ];
@@ -536,7 +537,19 @@ impl Op {
                 body: *body,
                 args: args.iter().map(|arg| ctx.i2r(arg)).collect(),
             },
-            Inst::GetField { src, slot, kind } => Op::GetField {
+            Inst::GetField {
+                src,
+                slot,
+                is_struct: true,
+                ..
+            } => Op::GetFieldStruct {
+                dst: ctx.reg(),
+                src: ctx.i2r(src),
+                slot: *slot,
+            },
+            Inst::GetField {
+                src, slot, kind, ..
+            } => Op::GetField {
                 dst: ctx.reg(),
                 src: ctx.i2r(src),
                 slot: *slot,
