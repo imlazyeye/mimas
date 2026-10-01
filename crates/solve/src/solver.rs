@@ -1490,14 +1490,16 @@ impl Solver {
                     }
                     (PatKind::Struct(_, field_pats), Variant::Struct(sv)) => {
                         for (name, sub) in field_pats {
-                            let fty =
-                                sv.fields.get(name).map(|f| f.ty.clone()).ok_or_else(|| {
-                                    FieldNotFound {
-                                        src: self.src(sub.location()),
-                                        at: sub.location().into(),
-                                        field_name: name.clone(),
-                                    }
+                            let (fty, dec) = sv
+                                .fields
+                                .get(name)
+                                .map(|f| (f.ty.clone(), f.dec))
+                                .ok_or_else(|| FieldNotFound {
+                                    src: self.src(sub.location()),
+                                    at: sub.location().into(),
+                                    field_name: name.clone(),
                                 })?;
+                            self.check_vis(dec, sub.location())?;
                             self.solve_match_pat(sub, fty, reuse)?;
                         }
                         Ok(())

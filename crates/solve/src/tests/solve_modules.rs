@@ -88,7 +88,7 @@ test_multi_file!(
 
 test_multi_file!(
     used_type_in_fn_signature,
-    foo => "module @; pub struct Bar { x: int }",
+    foo => "module @; pub struct Bar { pub x: int }",
     fizz => "module @; use foo::Bar; pub fn take(b: Bar) -> int { b.x }";
     "fizz::take" => func!((adt!({ x: Int })) -> Int),
 );
@@ -134,15 +134,98 @@ test_multi_file_fail!(
 
 test_multi_file_fail!(
     private_method_cross_module,
-    foo => "module @; pub struct Bar { x: int } impl Bar { fn secret(self) -> int { 0 } }",
+    foo => "module @; pub struct Bar { pub x: int } impl Bar { fn secret(self) -> int { 0 } }",
     main => "let b = foo::Bar { x = 0 }; let v = b.secret();";
 );
 
 test_multi_file!(
     pub_method_cross_module,
-    foo => "module @; pub struct Bar { x: int } impl Bar { pub fn ok(self) -> int { 0 } }",
+    foo => "module @; pub struct Bar { pub x: int } impl Bar { pub fn ok(self) -> int { 0 } }",
     main => "module @; pub fn use_it() -> int { foo::Bar { x = 0 }.ok() }";
     "main::use_it" => func!(() -> Int),
+);
+
+test_multi_file_fail!(
+    private_field_read_cross_module,
+    foo => "module @;
+            pub struct Bar {
+                x: int,
+            }
+            pub fn make() -> Bar {
+                Bar { x = 0 }
+            }",
+    main => "let x = foo::make().x;";
+);
+
+test_multi_file_fail!(
+    private_field_write_cross_module,
+    foo => "module @;
+            pub struct Bar {
+                x: int,
+            }
+            pub fn make() -> Bar {
+                Bar { x = 0 }
+            }",
+    main => "let b = foo::make();
+             b.x = 1;";
+);
+
+test_multi_file_fail!(
+    private_field_literal_cross_module,
+    foo => "module @;
+            pub struct Bar {
+                x: int,
+                pub y: int,
+            }",
+    main => "let b = foo::Bar { x = 0, y = 0 };";
+);
+
+test_multi_file_fail!(
+    private_field_pattern_cross_module,
+    foo => "module @;
+            pub struct Bar {
+                x: int,
+            }
+            pub fn make() -> Bar {
+                Bar { x = 0 }
+            }",
+    main => "use foo::Bar;
+             let v = match foo::make() {
+                 Bar { x } => x,
+             };";
+);
+
+test_multi_file_fail!(
+    private_type_annotation_cross_module,
+    foo => "module @;
+            struct Secret {
+                pub x: int,
+            }
+            pub fn make() -> Secret {
+                Secret { x = 0 }
+            }",
+    main => "let s: foo::Secret = foo::make();";
+);
+
+test_multi_file!(
+    pub_field_cross_module,
+    foo => "module @;
+            pub struct Open {
+                x: int,
+                pub y: int,
+            }
+            pub fn make() -> Open {
+                Open { x = 1, y = 2 }
+            }",
+    main => "module @;
+             use foo::Open;
+             pub fn read() -> int {
+                 let y = match foo::make() {
+                     Open { y } => y,
+                 };
+                 y + foo::make().y
+             }";
+    "main::read()" => Int,
 );
 
 test_multi_file!(

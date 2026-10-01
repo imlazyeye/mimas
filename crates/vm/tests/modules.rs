@@ -30,7 +30,7 @@ test_vm!(
 test_vm!(
     module_struct_instance_access,
     files {
-        foo => "module @; pub struct Bar { x: int }",
+        foo => "module @; pub struct Bar { pub x: int }",
         main => "use foo::Bar; let a = Bar { x = 7 }; let TEST_VALUE = a.x;",
     } => Int(7),
 );
@@ -38,7 +38,7 @@ test_vm!(
 test_vm!(
     module_direct_struct_instance_access,
     files {
-        foo => "module @; pub struct Bar { x: int }",
+        foo => "module @; pub struct Bar { pub x: int }",
         main => "let a = foo::Bar { x = 7 }; let TEST_VALUE = a.x;",
     } => Int(7),
 );
