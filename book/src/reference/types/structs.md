@@ -17,6 +17,11 @@ let p = Player {
 Construction uses `=` for each field (not `:`, which is reserved for type annotations). Read a field back with dot access:
 
 ```mimas
+# struct Player {
+#     name: str,
+#     score: int,
+# }
+# let p = Player { name = "ada", score = 0 };
 print(p.name);  // "ada"
 print(p.score); // 0
 ```
@@ -54,6 +59,16 @@ print(p.is_winner());         // call a method with `.`
 Calling a method with dot syntax is sugar that passes the receiver in as `self`. These two lines are equivalent:
 
 ```mimas
+# struct Player {
+#     name: str,
+#     score: int,
+# }
+# impl Player {
+#     const MAX_SCORE = 100;
+#     fn new(name: str) -> Self { Self { name = name, score = 0 } }
+#     fn is_winner(self) -> bool { self.score >= Self::MAX_SCORE }
+# }
+# let p = Player::new("ada");
 let won = p.is_winner();
 let won = Player::is_winner(p);
 ```
@@ -62,8 +77,16 @@ let won = Player::is_winner(p);
 
 mimas has one deliberate split from Rust: dot access can *also* reach an associated item through a value, not just through the type name. This matters for [pacts](../pacts.md), where you have a value but not its concrete type name.
 
-
 ```mimas
+# struct Player {
+#     name: str,
+#     score: int,
+# }
+# impl Player {
+#     const MAX_SCORE = 100;
+#     fn new(name: str) -> Self { Self { name = name, score = 0 } }
+#     fn is_winner(self) -> bool { self.score >= Self::MAX_SCORE }
+# }
 let p = Player::new("ada");
 print(p.MAX_SCORE);      // 100 -- the associated const, reached through the value
 print(Player::MAX_SCORE); // the same const, through the type

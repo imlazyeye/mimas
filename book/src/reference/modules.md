@@ -9,11 +9,14 @@ A file becomes a module with a `module` declaration at the top. Name it explicit
 ```mimas
 module colors;
 // equivalently, in colors.mim:
-module @;
+// module @;
 
 const INTERNAL = 0; // private to this module
 pub const RED = "#ff0000";
-pub fn mix(a: str, b: str) -> str { /* ... */ }
+pub fn mix(a: str, b: str) -> str {
+    // ...
+#     a
+}
 ```
 
 Modules can nest by qualifying the path with `::`:
@@ -30,18 +33,18 @@ A file that declares a module is a *library*, not a *script* -- it can't have to
 
 Bring a module into scope with `use`. By default this makes the module available under its name, and you reach its public items with `::` -- the same accessor structs use.
 
-```mimas
+```mimas ignore
 use colors;
 
 let r = colors::RED;
 let m = colors::mix(colors::RED, "#00ff00");
 
-let i = colors::INTERNAL; // error: `INTERNAL` is private to its module
+let i = colors::INTERNAL; // compile error: `INTERNAL` is private to its module
 ```
 
 You can also pull items *directly* into the current file. Import one item, several at once with braces, or everything with `*`:
 
-```mimas
+```mimas ignore
 use colors::RED;          // just `RED`
 use colors::{ RED, mix }; // several names
 use colors::*;            // every public item

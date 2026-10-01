@@ -49,6 +49,7 @@ Tuples are intentionally *not* iterable: each position can hold a different type
 Like [`while`](./while.md), a `for` loop isn't guaranteed to run -- the collection might be empty -- so a value it breaks comes back as an [option](../options.md).
 
 ```mimas
+# let numbers = [5, 500];
 let first_big: int? = for n in numbers {
     if n > 100 {
         break n; // -> int?, since `numbers` could be empty

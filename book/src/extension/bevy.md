@@ -97,7 +97,7 @@ fn main() {
 }
 ```
 
-```mimas
+```mimas ignore
 // assets/scripts/mover.mim
 fn move_along(v: Velocity, t: bevy::Transform) {
     t.translation.x += v.x * bevy::time::delta();
@@ -129,7 +129,7 @@ A script registers the functions it wants run by calling one of four natives in 
 
 Any function value works. A root function by name, a method or associated function off an impl, or a closure written inline can all be used as a hook. A method's `self` is its first parameter, filled by type like any other.
 
-```mimas
+```mimas ignore
 fn steer(t: bevy::Transform) { /* ... */ }
 
 bevy::update(steer);

@@ -3,6 +3,11 @@
 An `if` expression tests a `bool` condition and runs its block when the condition holds. An optional `else` -- including chained `else if` -- handles the other case.
 
 ```mimas
+# let ready = true;
+# let waiting = false;
+# fn launch() {}
+# fn hold() {}
+# fn abort() {}
 if ready {
     launch();
 }
@@ -21,6 +26,7 @@ if ready {
 Because `if` is an expression, it can produce a value. When you use it that way, an `else` is **required** -- without one, the `if` might produce nothing, so the only value it's allowed to have is `()`.
 
 ```mimas
+# let vip = true;
 let tier: int = if vip {
     0
 } else {
@@ -33,6 +39,8 @@ let c = if vip { 0 }; // compile error: an `if` used as a value must have an `el
 Each branch must agree on a type -- though a diverging branch (one that `return`s, `break`s, or `panic`s) contributes the [never type](../special-types.md) and bows out of that agreement:
 
 ```mimas
+# let configured = true;
+# fn configured_port() -> int { 8080 }
 let port: int = if configured {
     configured_port()
 } else {
@@ -45,6 +53,9 @@ let port: int = if configured {
 `if let` swaps the `bool` test for an **option test**. It evaluates an expression and, if the result is not `null`, binds the unwrapped value and runs the block. An `else` runs when the value was `null`.
 
 ```mimas
+# fn lookup_port() -> int? { 8080 }
+# fn connect(port: int) {}
+# fn use_default() {}
 if let port? = lookup_port() {
     // runs only when `lookup_port()` was not null;
     // `port` is the non-null value in here

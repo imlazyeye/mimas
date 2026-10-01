@@ -3,6 +3,7 @@
 `loop` is the simplest loop: it repeats its body forever until something stops it. Use `break` to exit and `continue` to skip to the next iteration.
 
 ```mimas
+# fn done() -> bool { true }
 loop {
     if done() {
         break;     // leave the loop
@@ -17,6 +18,8 @@ loop {
 A `loop` evaluates to whatever value you `break` with, which makes it a clean way to retry until you get a result:
 
 ```mimas
+# fn next_guess() -> int { 7 }
+# fn is_valid(guess: int) -> bool { true }
 let answer: int = loop {
     let guess = next_guess();
     if is_valid(guess) {

@@ -13,6 +13,7 @@ fn roll(sides: i64) -> i64 {
 ```
 
 ```mimas
+# fn roll(sides: int) -> int { sides }
 // mimas
 print(roll(20));
 ```

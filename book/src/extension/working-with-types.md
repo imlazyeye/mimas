@@ -96,7 +96,7 @@ fn uh_oh(a: &mut Vec<Val<'gc>>, b: Val<'gc>) {
     a.push(b);
 }
 ```
-```mimas
+```mimas ignore
 // mimas
 let a = [0, 1, 2];
 uh_oh(a, "not good...");

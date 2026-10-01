@@ -32,7 +32,7 @@ item.
 
 Functions carry where they came from, which matters once a project has modules:
 
-```mimas
+```mimas ignore
 // hovering `bar` anywhere it is used or declared
 one::two::Foo
 fn bar(self, fizz: int) -> Self
@@ -66,6 +66,7 @@ doesn't.
 A `let` written without an annotation shows the type that was inferred for it.
 
 ```mimas
+# let items = [1, 2, 3];
 let count = items.len(); // your editor can render this as `let count: int = ...`
 ```
 

@@ -40,15 +40,20 @@ let a: str = "hello!"; // valid -- `a` is now a str
 `let`/`else` binds a [pattern](./control-flow/match.md) and runs an `else` block when the value doesn't match. The `else` has to diverge -- `return`, `break`, `panic`, and so on -- so execution only continues past it when the binding succeeded.
 
 ```mimas
+# enum Shape { Circle(float), Square(float) }
+# fn example(shape: Shape) {
 let Shape::Circle(r) = shape else {
     return;
 };
 // `r` is in scope from here on
+# }
+# example(Shape::Circle(1.0));
 ```
 
 It accepts any pattern `match` does, including the `?` null-bind for [options](./options.md):
 
 ```mimas
+# fn lookup_port() -> int? { 8080 }
 let port? = lookup_port() else {
     panic("no port configured");
 };
@@ -59,6 +64,7 @@ let port? = lookup_port() else {
 Prefixing a name with `_` marks it as intentionally unused.
 
 ```mimas
+# fn compute() -> int { 0 }
 let _scratch = compute();
 ```
 
@@ -78,6 +84,7 @@ FOO = 1; // compile error: constants cannot be mutated after declaration
 A constant's value must be computable at **compile time**. Literals, operators, and references to other constants are all fair game; anything that requires running code at runtime -- like a function call -- is not.
 
 ```mimas
+# fn some_call() -> int { 0 }
 const BAR = 0;
 const FIZZ = BAR + 1;          // valid -- built from another const
 const GREETING = "hello";      // valid -- a literal

@@ -3,6 +3,9 @@
 mimas's control-flow constructs -- `if`, `match`, and the loops -- are all **expressions**: each one evaluates to a value, not just steer execution. That property runs through everything in this section:
 
 ```mimas
+# let score = 70;
+# let tag = 0;
+# let numbers = [1, 2, 3];
 let label = if score >= 50 { "pass" } else { "fail" };
 
 let kind = match tag {

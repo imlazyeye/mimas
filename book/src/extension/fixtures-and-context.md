@@ -82,6 +82,8 @@ fn process_request(ctx: Ctx) -> Option<Request> {
 ```
 
 ```mimas
+# struct Request(str);
+# fn process_request() -> Request? { Request("hello") }
 // mimas
 let request = process_request()!;
 print(request);

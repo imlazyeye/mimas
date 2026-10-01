@@ -80,6 +80,7 @@ fn on_tick<'gc>(ctx: Ctx<'gc>, f: anon::T<'gc>, receiver: anon::U<'gc>) {
 The two parameters take separate `anon` slots. Every `anon::T` in one signature is the *same* type, so a second `anon::T` would tie the receiver to the function's own type.
 
 ```mimas
+# fn on_tick(f: (Tally, int) -> int, receiver: Tally) {}
 struct Tally { n: int }
 impl Tally { 
     fn bump(self, by: int) -> int { 
@@ -105,6 +106,10 @@ assert_eq!(vm.call_value::<i64>(&f, (&receiver, 2)).unwrap(), 3);
 When the host has nothing to add to the call, let the script capture the receiver and hand over one closure instead:
 
 ```mimas
+# struct Tally { n: int }
+# impl Tally { fn bump(self, by: int) -> int { self.n += by; self.n } }
+# fn execute_call(f: () -> int) {}
+# let tally = Tally { n = 1 };
 execute_call(|| tally.bump(2));
 ```
 
@@ -127,6 +132,7 @@ fn handler<'gc>(ctx: Ctx<'gc>) -> Val<'gc> {
 ```
 
 ```mimas
+# fn handler() -> () -> () { || print("hi") }
 let f = handler();
 f();
 ```
@@ -139,6 +145,8 @@ What the script gets back is an untyped value, so nothing checks the call where 
 A closure holds everything it captured, and stashing it extends that for the life of the handle. A closure that captured a large array keeps that array out of the collector's hands until you drop the `Stashed`.
 
 ```mimas
+# fn load_everything() -> [str] { ["row"] }
+# fn execute_call(f: () -> ()) {}
 let rows = load_everything(); // stays alive as long as the handle does
 execute_call(|| print(rows[0]));
 ```

@@ -120,6 +120,7 @@ let (x, y) = (3, 4); // destructuring let
 Everything here is an **expression** -- `if`, `match`, blocks, and loops all yield values. Block braces are optional around a single expression.
 
 ```mimas
+# let x = 1;
 if x == 0 {
     print("zero");
 } else if x > 0 {
@@ -137,7 +138,7 @@ let total = {     // blocks yield their final semicolon-free expression
 };
 ```
 
-```mimas
+```mimas ignore
 // match -- first arm to fit wins. exhaustiveness is checked (Maranget-style).
 // the below is to illustrate all patterns (and as such wouldn't compile).
 let label = match value {
@@ -159,6 +160,10 @@ let code = match cmd {            // end with a bare `!` to promise exhaustivene
 ```
 
 ```mimas
+# let xs = [1, 2, 3, 4];
+# fn done() -> bool { true }
+# fn ready() -> bool { false }
+# fn work() {}
 loop {                            // infinite until `break`
     if done() { break; }
     continue;
@@ -182,6 +187,10 @@ let evens = for n in xs {
 A value that may be `null` is an **option**, written `T?`. `null` exists only where a `?` invites it, so the compiler guarantees you never hit an unexpected null.
 
 ```mimas
+# fn lookup() -> int? { 1 }
+# fn example() {
+# let name: str? = "ada";
+# let grid: [[int]?] = [null, [7]];
 let maybe: int? = lookup(); // an int, or null
 // let bad = maybe + 1;     // compile error: maybe may be null
 
@@ -191,6 +200,8 @@ let cell = grid[1]?[0];     // ?[] the same, for indexing
 let sure = maybe!;          // !   asserts non-null (faults if it was null)
 
 let n? = maybe else return; // let/else: bind, or diverge and move on
+# }
+# example();
 ```
 
 `T??` automatically flattens to `T?` -- there is no option-of-an-option.
@@ -202,7 +213,8 @@ let n? = maybe else return; // let/else: bind, or diverge and move on
 Two tiers of failure: an unrecoverable **panic** that halts the VM, and a recoverable **result** (`T!`) a caller can handle.
 
 ```mimas
-panic("unreachable");           // halts the VM immediately
+# let input = "80";
+panic("unreachable");           // runtime error: halts the VM immediately
 todo("later");                  // panic's cousin for unfinished code (msg optional)
 
 fn parse_port(s: str) -> int! { // `!` return type lets the fn `raise`
@@ -234,6 +246,7 @@ The error carried by a result is always a `str`. The plan is to move to an `Erro
 *See [Functions & Closures](../reference/functions.md).*
 
 ```mimas
+# fn current_time() -> int { 0 }
 fn square(n: int) -> int { n * n }   // body is a block; last expr returns
 fn greet(name: str) { print(name); } // no `->`: returns ()
 
@@ -250,6 +263,7 @@ let now = || current_time();         // no args
 `fn`s live only at the file's top level and capture nothing -- they're *second-class* (passable as arguments, but not bindable). Closures are *first-class* (bindable, storable) and capture their surrounding scope.
 
 ```mimas
+# let add = |a: int, b: int| a + b;
 let g = add;       // ok -- closures are values
 // let h = square; // error -- a fn isn't a value you can bind
 ```
@@ -322,6 +336,8 @@ impl Shape {
 A **pact** is mimas's trait analogue: a named set of method, associated-function, and constant signatures a type satisfies with `impl Pact for Type`. It's how you abstract over types without generics.
 
 ```mimas
+# pact Named {}
+# pact Identified {}
 pact Draw {
     fn draw(self);
     fn describe() { print("a shape"); } // items may ship a default
@@ -359,7 +375,7 @@ pub fn mix(a: int, b: int) -> int {
 }
 ```
 
-```mimas
+```mimas ignore
 // game.mim -- a script, which sees the modules beside it
 use colors;               // reach items via colors::RED
 use colors::{ RED, mix }; // or pull names in directly (also `colors::*`)
@@ -384,6 +400,8 @@ impl User {
 ```
 
 ```mimas
+# struct User(str);
+# impl User { fn greet(self) { print(f"Hello, {self.0}!"); } }
 let user = User("mimas");
 user.greet(); // -> Hello, mimas!
 ```

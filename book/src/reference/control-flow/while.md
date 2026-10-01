@@ -15,6 +15,9 @@ while i < 5 {
 Because a `while` loop might never run -- its condition could be false on the very first check -- a value broken out of it is wrapped in an [option](../options.md). The loop yields `null` if it ends without a `break value`.
 
 ```mimas
+# fn has_next() -> bool { true }
+# fn next() -> int { 2 }
+# fn matches(x: int) -> bool { x == 2 }
 let found: int? = while has_next() {
     let x = next();
     if matches(x) {
@@ -28,6 +31,9 @@ let found: int? = while has_next() {
 `while let` is to `while` what [`if let`](./if-else.md#if-let) is to `if`: instead of a `bool`, it evaluates an expression each pass and keeps looping as long as the result is **not `null`**, binding the unwrapped value in the body.
 
 ```mimas
+# let jobs = ["build", "test"];
+# let next_job = || jobs.pop();
+# fn process(job: str) {}
 while let job? = next_job() {
     // runs as long as `next_job()` returns a value;
     // stops the first time it returns null

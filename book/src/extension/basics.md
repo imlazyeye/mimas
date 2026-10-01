@@ -19,6 +19,7 @@ struct MyType(usize);
 By default the macro will place its imported items into the prelude, meaning your mimas code can reach it from anywhere.
 
 ```mimas
+# const HELLO: str = "Hello!";
 // mimas
 let hello: str = HELLO;
 ```
@@ -36,7 +37,7 @@ struct Monster {
 }
 ```
 
-```mimas
+```mimas ignore
 // mimas
 print(entities::ENTITY_COUNT);
 
@@ -70,6 +71,12 @@ impl Player {
 ```
 
 ```mimas
+# struct Player { name: str, health: int }
+# impl Player {
+#     const MAX_HEALTH: int = 100;
+#     fn new(name: str) -> Self { Player { name = name, health = Self::MAX_HEALTH } }
+#     fn damage(self, amount: int) { self.health -= amount; }
+# }
 // mimas
 let player = Player::new("Ferris");
 player.damage(30);

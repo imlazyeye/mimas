@@ -46,6 +46,7 @@ fn add_entry(ctx: Ctx, entry: String) {
 ```
 
 ```mimas
+# fn add_entry(entry: str) {}
 // mimas
 fn call_me() {
     add_entry("hello!");
