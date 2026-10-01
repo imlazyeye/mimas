@@ -20,7 +20,8 @@ impl PlaceTarget {
                 ir.current().get_index(array, index, AccessKind::Direct)
             }
             PlaceTarget::Field { receiver, slot } => {
-                ir.current().get_field(receiver, slot, AccessKind::Direct)
+                ir.current()
+                    .get_field(receiver, slot, AccessKind::Direct, false)
             }
         }
     }

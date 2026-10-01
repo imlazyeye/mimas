@@ -191,6 +191,11 @@ impl Emit for Access {
                     AccessKind::Direct
                 };
                 let recv = left.id();
+                let is_struct = kind == AccessKind::Direct
+                    && matches!(
+                        ir.resolutions.node_tys.get(&recv),
+                        Some(Ty::Adt(_) | Ty::Identity(_))
+                    );
                 let left = left.lower(ir)?;
                 let slot = match right.kind() {
                     ExprKind::Literal(Literal::Int(i)) => u32::try_from(*i).unwrap(),
@@ -199,7 +204,7 @@ impl Emit for Access {
                     }
                     _ => unreachable!(),
                 };
-                Some(ir.current().get_field(left, slot, kind))
+                Some(ir.current().get_field(left, slot, kind, is_struct))
             }
             Access::DoubleColon { .. } => {
                 let dec = ir.node_dec(id);

@@ -23,6 +23,20 @@ test_vm!(
 );
 
 test_vm!(
+    get_spilled_instance_field,
+    "struct Foo { a: int, b: int, c: int, d: int, e: int }
+     let foo = Foo { a = 1, b = 2, c = 3, d = 4, e = 5 };",
+    "foo.e" => Int(5)
+);
+
+test_vm!(
+    get_tuple_struct_field,
+    "struct Wrap(int);
+     let w = Wrap(7);",
+    "w.0" => Int(7)
+);
+
+test_vm!(
     set_instance_field,
     "struct Foo { x: int }
     let foo = Foo { x = 42 };

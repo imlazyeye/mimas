@@ -625,6 +625,22 @@ fn step_one<'gc>(
             };
             wr!(regs, dst, v);
         }
+        OpCode::GetFieldStruct => {
+            let dst = Reg::decode(code);
+            let src = Reg::decode(code);
+            let slot = code.u32() as usize;
+            let Val::Instance(i) = rd!(regs, src) else {
+                unreachable!("illegal get_field_struct receiver")
+            };
+            debug_assert!(i.0.try_borrow().is_ok());
+            // SAFETY: no borrow of an instance is alive while script code runs (ops drop theirs
+            // before returning, and natives can't call back into scripts)
+            let v = match unsafe { &(*i.0.as_ptr()).fields } {
+                Fields::Inline { data, .. } => data[slot],
+                Fields::Spilled(v) => v[slot],
+            };
+            wr!(regs, dst, v);
+        }
         OpCode::SetField => {
             let receiver_reg = Reg::decode(code);
             let slot = code.u32() as usize;
