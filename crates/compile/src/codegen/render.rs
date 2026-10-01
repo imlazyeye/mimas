@@ -244,6 +244,10 @@ impl std::fmt::Display for Op {
                 write!(f, "{}{}{}.{slot}", OpName("get_field_struct"), dst, src)
             }
 
+            Op::GetIndexArray { dst, set, index } => {
+                write!(f, "{}{}{}{}", OpName("get_index_array"), dst, set, index)
+            }
+
             Op::SetField {
                 receiver,
                 slot,

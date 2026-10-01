@@ -654,14 +654,30 @@ handlers! {
         let Val::Instance(i) = rd!(regs, src) else {
             unreachable!("illegal get_field_struct receiver")
         };
-        debug_assert!(i.0.try_borrow().is_ok());
-        // SAFETY: no borrow of an instance is alive while script code runs (ops drop theirs
-        // before returning, and natives can't call back into scripts)
-        let v = match unsafe { &(*i.0.as_ptr()).fields } {
+        // SAFETY: a read that checks the borrow flag without counting, and the reference is gone
+        // before anything else can borrow the instance
+        let inst = unsafe { i.0.as_ref_cell().try_borrow_unguarded() }
+            .expect("already mutably borrowed");
+        let v = match &inst.fields {
             Fields::Inline { data, .. } => data[slot],
             Fields::Spilled(v) => v[slot],
         };
         wr!(regs, dst, v);
+    },
+    GetIndexArray => {
+        let dst = Reg::decode(code);
+        let set = Reg::decode(code);
+        let index = Reg::decode(code);
+        let (Val::Array(a), Val::Int(i)) = (rd!(regs, set), rd!(regs, index)) else {
+            unreachable!("illegal get_index_array operands")
+        };
+        // SAFETY: as in `GetFieldStruct`
+        let items = unsafe { a.0.as_ref_cell().try_borrow_unguarded() }
+            .expect("already mutably borrowed");
+        let Some(v) = usize::try_from(i).ok().and_then(|i| items.get(i)) else {
+            return Err(RtErr::IndexOutOfBounds);
+        };
+        wr!(regs, dst, *v);
     },
     SetField => {
         let receiver_reg = Reg::decode(code);

@@ -158,7 +158,8 @@ impl Ir {
             PatKind::Tuple(pats) => {
                 for (i, pat) in pats.iter().enumerate() {
                     let index = ir.current().constant(i);
-                    let value = value.map(|v| ir.current().get_index(v, index, AccessKind::Direct));
+                    let value =
+                        value.map(|v| ir.current().get_index(v, index, AccessKind::Direct, false));
 
                     ir.pattern(pat, value)?; // todo: how could this actually return none?
                 }
@@ -234,9 +235,11 @@ impl Emit for Access {
                 } else {
                     AccessKind::Direct
                 };
+                let is_array = kind == AccessKind::Direct
+                    && matches!(ir.resolutions.node_tys.get(&left.id()), Some(Ty::Array(_)));
                 let left = left.lower(ir)?;
                 let key = key.lower(ir)?;
-                Some(ir.current().get_index(left, key, kind))
+                Some(ir.current().get_index(left, key, kind, is_array))
             }
         }
     }
@@ -819,7 +822,11 @@ impl Emit for For {
         ir.target(header);
         if let Some(seq) = seq {
             let i = ir.current().get_local(idx_local);
-            let elem = ir.current().get_index(seq, i, AccessKind::Direct);
+            let is_array = matches!(
+                ir.resolutions.node_tys.get(&self.iterator.id()),
+                Some(Ty::Array(_))
+            );
+            let elem = ir.current().get_index(seq, i, AccessKind::Direct, is_array);
             ir.pattern(&self.binding, Some(elem))?;
         }
 

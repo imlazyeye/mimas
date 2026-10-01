@@ -153,6 +153,11 @@ fn decode_op(d: &mut Decoder) -> Op {
             src: Reg::decode(d),
             slot: d.u32(),
         },
+        OpCode::GetIndexArray => Op::GetIndexArray {
+            dst: Reg::decode(d),
+            set: Reg::decode(d),
+            index: Reg::decode(d),
+        },
         OpCode::Len => Op::Len {
             dst: Reg::decode(d),
             src: Reg::decode(d),
@@ -928,7 +933,7 @@ test_lowering!(
 );
 test_lowering!(
     direct_index_uses_access_kind_direct,
-    "let a = [1, 2, 3];\nlet x = a[0];",
+    "let s = \"abc\";\nlet x = s[0];",
     Op::GetIndex {
         kind: AccessKind::Direct,
         ..
@@ -1008,6 +1013,27 @@ test_lowering!(
     "fn get(t: (int, int)) -> int { t.0 }
      let _ = get((1, 2));",
     Op::GetField { .. }
+);
+test_lowering!(
+    array_index_lowers_to_get_index_array,
+    "fn get(xs: [int]) -> int { xs[0] }
+     let _ = get([1, 2]);",
+    Op::GetIndexArray { .. }
+);
+test_lowering!(
+    optional_array_index_lowers_to_get_index,
+    "fn get(xs: [int]?) -> int? { xs?[0] }
+     let _ = get([1, 2]);",
+    Op::GetIndex { .. }
+);
+test_lowering!(
+    for_in_array_lowers_to_get_index_array,
+    "let xs = [1, 2, 3];
+     let s = 0;
+     for x in xs {
+         s = s + x;
+     }",
+    Op::GetIndexArray { .. }
 );
 // `for x in <array>` derives its bound from the array length -> Op::Len (a `.len()` call can't be
 // tested here: the bare test Solver has no std library, so the method wouldn't resolve)
