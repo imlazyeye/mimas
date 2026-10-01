@@ -38,11 +38,15 @@ pub enum Ty {
     /// Because a diverging branch can never actually supply a value, `!` coerces into any type.
     ///
     /// ```mimas
+    /// # fn foo() -> bool { true }
+    /// # fn example() {
     /// let a: int = if foo() {
     ///     1
     /// } else {
     ///     return; // `return` is `!`, so it fits where an `int` is expected
     /// };
+    /// # }
+    /// # example();
     /// ```
     ///
     /// See more in the [book](https://mim.as/reference/special-types.html#never--).

@@ -33,7 +33,7 @@ fn arg<'gc>(ctx: Ctx<'gc>, index: usize) -> Option<String> {
 
 /// Ends the program immediately with the exit code `code`. Nothing after the call runs.
 ///
-/// ```mimas
+/// ```mimas no_run
 /// use std::sys;
 ///
 /// if sys::arg(1) == null {

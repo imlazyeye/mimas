@@ -14,6 +14,11 @@ fn scripts(name: &str, b: &str) -> PathBuf {
                 "m.mim",
                 "module @;
                  /// The first number.
+                 ///
+                 /// ```mimas no_run
+                 /// # use m;
+                 /// let x = m::one();
+                 /// ```
                  pub fn one() -> int { 1 }",
             ),
             (
@@ -48,7 +53,9 @@ fn references_and_rename_reach_every_script() {
     let mut workspace = Workspace::new(HostApi::Off);
     open(&mut workspace, &a);
     let project = workspace.project(&a).unwrap();
-    let references = project.references(&m, at(&m, "one"), true).unwrap();
+    let references = project
+        .references(&m, at(&m, "one() -> int"), true)
+        .unwrap();
     assert_eq!(references.len(), 4, "{references:?}");
     let edit = project.rename(&a, at(&a, "one"), "uno").unwrap();
     let edits: usize = edit.changes.unwrap().values().map(Vec::len).sum();
@@ -68,7 +75,9 @@ fn a_script_that_does_not_check_has_no_references_to_add() {
     let mut workspace = Workspace::new(HostApi::Off);
     open(&mut workspace, &a);
     let project = workspace.project(&a).unwrap();
-    let references = project.references(&m, at(&m, "one"), true).unwrap();
+    let references = project
+        .references(&m, at(&m, "one() -> int"), true)
+        .unwrap();
     assert_eq!(references.len(), 2, "{references:?}");
     let refused = project.rename(&a, at(&a, "one"), "uno").unwrap_err();
     assert!(refused.contains("check cleanly"), "{refused}");
@@ -96,6 +105,11 @@ fn hover_shows_a_module_function_and_its_doc() {
     );
     assert!(
         content.value.contains("The first number."),
+        "{}",
+        content.value
+    );
+    assert!(
+        content.value.contains("let x = m::one();") && !content.value.contains("use m;"),
         "{}",
         content.value
     );

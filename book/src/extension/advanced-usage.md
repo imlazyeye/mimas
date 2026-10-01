@@ -132,7 +132,7 @@ fn roll(sides: i64) -> i64 { /* ... */ }
 api.add_assoc(Ty::Int, roll);
 ```
 
-```mimas
+```mimas ignore
 // mimas
 print(int::roll(20));
 ```

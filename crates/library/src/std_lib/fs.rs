@@ -20,6 +20,7 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
 ///
 /// ```mimas
 /// use std::fs;
+/// # fs::write("notes.txt", "")!;
 ///
 /// let notes = fs::read("notes.txt")!;
 /// let config = fs::read("config.txt") absolve |err| "";
@@ -50,6 +51,7 @@ fn write<'gc>(path: &str, contents: &str) -> Raisable<bool> {
 ///
 /// ```mimas
 /// use std::fs;
+/// # fs::write("scores.txt", "")!;
 ///
 /// fs::remove("scores.txt")!;
 /// ```
@@ -63,6 +65,7 @@ fn remove<'gc>(path: &str) -> Raisable<bool> {
 ///
 /// ```mimas
 /// use std::fs;
+/// # fs::make_dir("saves")!;
 ///
 /// fs::remove_dir("saves")!;
 /// ```
@@ -92,6 +95,7 @@ fn make_dir<'gc>(path: &str) -> Raisable<bool> {
 ///
 /// ```mimas
 /// use std::fs;
+/// # fs::make_dir("saves/slot1")!;
 ///
 /// for entry in fs::list_dir("saves")! {
 ///     print(entry); // saves/slot1, saves/slot2, ...
@@ -118,6 +122,7 @@ fn list_dir<'gc>(_ctx: Ctx<'gc>, path: &str) -> Raisable<Vec<String>> {
 ///
 /// ```mimas
 /// use std::fs;
+/// # fs::make_dir("assets")!;
 ///
 /// for path in fs::walk("assets")! {
 ///     if path.ends_with(".png") {

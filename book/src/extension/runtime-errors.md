@@ -4,7 +4,7 @@ There are three different methods of raising errors at runtime. The first one is
 
 ## Unrecoverable errors
 
-Using an ordinary `Result` as the return type of your function will raise the error immediatly within the VM if the error case is hit. 
+Using an ordinary `Result` as the return type of your function will raise the error immediatly within the VM if the error case is hit.
 
 ```rs
 // rust
@@ -13,7 +13,8 @@ fn oops() -> Result<(), RtErr> {
     Err(RtErr::Custom("oops!"));
 }
 ```
-```mimas
+
+```mimas ignore
 // mimas
 oops(); // runtime error: oops!
 ```
@@ -35,7 +36,9 @@ fn test(b: bool) -> Raisable<()> {
     }
 }
 ```
+
 ```mimas
+# fn test(b: bool) -> ()! { if !b { raise "not true!"; } return; }
 // mimas
 test(false) absolve |e| print(e); // > not true!
 ```

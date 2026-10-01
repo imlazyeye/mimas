@@ -169,6 +169,7 @@ impl Solve for Access {
             } else {
                 field.ty
             };
+            solver.check_fn_value(id, dec, &ty, right.location())?;
             solver.note(right, ty.clone(), Some(dec));
             Ok(ty)
         }
@@ -834,6 +835,7 @@ impl Solve for Call {
                         .expected_closures
                         .insert(arg.value.id(), header.parameters);
                 }
+                solver.fn_arg = Some(arg.value.id());
                 arg.value.fulfill_ty(params[slot].ty.clone(), solver)?;
                 filled[slot] = true;
             }
@@ -1285,6 +1287,7 @@ impl Solve for Ident {
 
         // mark this usage; every closure boundary crossed on the way to the binding captures it
         if let Some((dec_id, crossed)) = resolved {
+            solver.check_fn_value(id, dec_id, &ty, self.location)?;
             solver.node_decs.insert(id, dec_id);
             if matches!(solver.decs[dec_id].kind, DecKind::Local | DecKind::LoopVar) {
                 for closure in crossed {
@@ -1345,6 +1348,9 @@ impl Solve for If {
         // Ensure the branches match, or coercse an option.
         let (ty, negative) = if let Some(else_expr) = self.else_expr.as_ref() {
             solver.control_flow.enter();
+            // solved first so only a mismatch falls back to coercion (a failed solve would come
+            // back from the second query as a bare vid)
+            else_expr.query(solver)?;
             let ty = if let Err(e) = else_expr.fulfill_ty(positive_ty.clone(), solver) {
                 if let Some(ty) = Ty::coerce_option(else_expr.query(solver)?, positive_ty, solver) {
                     ty
@@ -1548,6 +1554,8 @@ impl Solve for Literal {
             let ty = if let Some(expr) = exprs.first() {
                 let mut first_ty = expr.query(solver)?;
                 for expr in exprs.iter().skip(1) {
+                    // see `If`
+                    expr.query(solver)?;
                     first_ty = if let Err(e) = expr.fulfill_ty(first_ty.clone(), solver) {
                         let found = expr.query(solver)?;
                         if let Some(ty) = Ty::coerce_option(found.clone(), first_ty.clone(), solver)
@@ -1798,6 +1806,8 @@ impl Solve for Match {
             result = Some(match result.take() {
                 None => body.query(solver)?,
                 Some(acc) => {
+                    // see `If`
+                    body.query(solver)?;
                     if let Err(e) = body.fulfill_ty(acc.clone(), solver) {
                         Ty::coerce_option(body.query(solver)?, acc, solver).ok_or(e)?
                     } else {

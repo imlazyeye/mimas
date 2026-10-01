@@ -2,7 +2,7 @@ use std::sys;
 use std::parse;
 use shiki::Shiki;
 
-const BLOCK_PATTERN = "```mimas[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
+const BLOCK_PATTERN = "```mimas(?:[ \\t][^\\r\\n]*)?\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```";
 
 match (sys::arg(1), sys::arg(2)) {
     ("supports"?, renderer?) => sys::exit(if renderer == "html" 0 else 1),
@@ -22,20 +22,26 @@ fn modify_book() {
     let chapters = chapters(sections);
 
     let sources = [];
+    let shown = [];
     for chapter in chapters {
         for found in chapter["content"]!.as_str()!.find_all(BLOCK_PATTERN)! {
             sources.push(found[1]);
+            // a `# ` line is only there for the doc tests
+            let lines = for line in found[1].split("\n") {
+                if line.trim() != "#" && !line.trim().starts_with("# ") collect line;
+            };
+            shown.push(lines.join("\n"));
         }
     }
     let cache = ~{};
-    for (i, shiki) in Shiki::from_many(sources)!.enumerate() {
+    for (i, shiki) in Shiki::from_many(shown)!.enumerate() {
         cache[sources[i]] = shiki.to_html();
     }
 
     for chapter in chapters {
         let content = chapter["content"]!.as_str()!;
         for found in content.find_all(BLOCK_PATTERN)! {
-            content = content.replace(f"```mimas\n{found[1]}\n```", cache[found[1]]!);
+            content = content.replace(found[0], cache[found[1]]!);
         }
         chapter["content"] = parse::Value::String(content);
     }

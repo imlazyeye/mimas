@@ -15,8 +15,8 @@ fn square(n: int) -> int {
 The body is a [block](./blocks.md), so its final bare expression is the return value. The annotated return type is enforced:
 
 ```mimas
-fn oops() {
-    0 // compile error: expected (), found int
+fn oops() { // compile error: expected (), found int
+    0
 }
 ```
 
@@ -75,13 +75,14 @@ let total = add(double(3), 4); // 10
 A no-argument closure uses an empty pair of pipes:
 
 ```mimas
+# fn current_time() -> int { 0 }
 let now = || current_time();
 ```
 
 ````admonish note title="Handing a function to the host"
 A native can take a function or a closure, keep it, and call it later. A host that offers one registers whatever it wants run, rather than the script having to declare functions under names the host already knows.
 
-```mimas
+```mimas ignore
 fn on_tick(n: int) { print(f"tick {n}"); }
 
 every_tick(on_tick);                  // a function by name
@@ -99,6 +100,7 @@ The two differ in two important ways.
 **First- vs. second-class.** Closures are *first-class*: assign them to bindings, store them in arrays, pass them around freely. Functions are *second-class* -- you can pass one as an argument, but you can't bind or store it as a value.
 
 ```mimas
+# fn apply(f: (int, int) -> int) -> int { f(1, 2) }
 let add = |a: int, b: int| -> int { a + b };
 fn sub(a: int, b: int) -> int { a - b }
 

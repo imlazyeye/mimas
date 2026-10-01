@@ -114,6 +114,7 @@ fn remove(d: &mut DictMap<'gc, anon::T<'gc>>, key: Str<'gc>) -> Option<anon::T<'
 /// A `for` loop over the dictionary visits the same pairs without building an array:
 ///
 /// ```mimas
+/// # let scores = ~{ ada = 3, bob = 5 };
 /// for (name, score) in scores {
 ///     print(f"{name} has {score}");
 /// }

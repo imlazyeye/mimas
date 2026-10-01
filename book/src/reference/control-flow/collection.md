@@ -14,6 +14,7 @@ let doubled = for x in numbers collect x * 2;
 Loop bodies don't have to be blocks, so that last example fits on one line -- close to a Python list comprehension:
 
 ```mimas
+# let numbers = [1, 2];
 // python:  doubled = [x * 2 for x in numbers]
 let doubled = for x in numbers collect x * 2;
 ```
@@ -21,6 +22,7 @@ let doubled = for x in numbers collect x * 2;
 Add an `if` to filter which values get collected:
 
 ```mimas
+# let numbers = [1, 2];
 let evens = for x in numbers {
     if x % 2 == 0 {
         collect x;
@@ -32,6 +34,9 @@ let evens = for x in numbers {
 It composes with every loop, including [`while let`](./while.md#while-let), which is handy for gathering results from a source until it's exhausted:
 
 ```mimas
+# struct Person { age: int }
+# let people = [Person { age = 30 }, Person { age = 41 }];
+# let next_person = || people.pop();
 let ages: [int] = while let person? = next_person() {
     collect person.age;
 };

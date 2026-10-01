@@ -7,7 +7,7 @@ mimas has two tiers of failure: an unrecoverable **panic** that tears down the V
 The blunt instrument is `panic`. It immediately halts the VM with a message -- use it for "this should never happen" situations.
 
 ```mimas
-panic("unreachable state");
+panic("unreachable state"); // runtime error: halts the VM
 ```
 
 `todo` is `panic`'s cousin for unfinished code; it halts the same way and even lets you omit the message.
@@ -53,6 +53,13 @@ A result has to be dealt with before you can use the value inside it. There are 
 The postfix `!` -- the same operator that unwraps an [option](./options.md#unwrapping) -- pulls the success value out of a result. If the result turned out to be a raised error, that becomes a runtime error and execution stops.
 
 ```mimas
+# fn parse_port(text: str) -> int! {
+#     let n = text.to_int();
+#     if n == null {
+#         raise "port must be a number";
+#     }
+#     n!
+# }
 let port: int = parse_port("8080")!; // 8080 -- or a hard stop if it had raised
 ```
 
@@ -65,6 +72,14 @@ Coming from Rust, the `!` here is *not* the `?` operator. It doesn't bubble an e
 `absolve` consumes a result and guarantees a plain value. You give it a closure that receives the error string; if the result raised, your closure runs and its value is used instead.
 
 ```mimas
+# fn parse_port(text: str) -> int! {
+#     let n = text.to_int();
+#     if n == null {
+#         raise "port must be a number";
+#     }
+#     n!
+# }
+# let input = "eighty";
 let port: int = parse_port(input) absolve |err| {
     print(f"bad config: {err}");
     8080 // fall back to a default

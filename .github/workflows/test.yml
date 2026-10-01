@@ -22,6 +22,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test
+      - run: cargo run -q -p mimas-cli -- run tools/autogen
       - run: cargo test --manifest-path crates/${{ matrix.crate }}/Cargo.toml --all-features
 
   lint:

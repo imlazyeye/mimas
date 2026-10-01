@@ -20,15 +20,17 @@ pub struct Config {
 
 From outside its module, a struct's private fields are neither readable nor writable. That also means you can't build the struct with a literal -- you'd have to name fields you aren't allowed to touch.
 
-```mimas
+```mimas ignore
 // in another module:
-let c = Config { name = "x", secret = "y" }; // error: `secret` is private to its module
-let s = c.secret;                            // error: `secret` is private to its module
+let c = Config { name = "x", secret = "y" }; // compile error: `secret` is private to its module
+let s = c.secret;                            // compile error: `secret` is private to its module
 ```
 
 The fix is to expose a public surface -- a constructor and accessors -- and keep the internals sealed:
 
 ```mimas
+# struct Config { name: str, secret: str }
+# fn generate() -> str { "s3cret" }
 impl Config {
     pub fn new(name: str) -> Self {
         Self { name = name, secret = generate() }

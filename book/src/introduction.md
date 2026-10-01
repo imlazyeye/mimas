@@ -18,6 +18,8 @@ mimas is a statically typed, embeddable scripting language for Rust. It carries 
 ````admonish typed
 **Static typing** with inference, **user-defined types**, exhaustive **pattern matching**, and more of the same features that empower you in Rust.
 ```mimas
+# enum Shape { Circle(float), Rectangle(float, float), Empty }
+# let my_shape = Shape::Circle(1.0);
 let area: float? = match my_shape {
     Shape::Circle(r) => r * r * std::math::PI,
     Shape::Rectangle(w, h) => w * h,
@@ -71,6 +73,8 @@ impl User {
 ```
 
 ```mimas
+# struct User(str);
+# impl User { fn greet(self) { print(f"Hello, {self.0}!"); } }
 // mimas
 let user = User("mimas");
 user.greet(); // Hello, mimas!
@@ -79,7 +83,7 @@ user.greet(); // Hello, mimas!
 
 ```admonish robust
 - **Guaranteed "Results"** -- mimas treats any panic as a bug, both in the compiler and the VM.
-- **Tested top to bottom** -- over **1,900 tests** cover every corner of the codebase. Even the tests are tested, thanks to [cargo mutants](https://mutants.rs/).
+- **Tested top to bottom** -- over **2,200 tests** cover every corner of the codebase. Even the tests are tested, thanks to [cargo mutants](https://mutants.rs/).
 - **Helpful diagnostics** -- bugs are caught at their source with clear reports powered by [miette](https://github.com/zkat/miette):
 
 <pre class="diagnostic">  <span style="font-weight:bold;filter: contrast(70%) brightness(190%);color:red;">error: </span> <span style="font-weight:bold;filter: contrast(70%) brightness(190%);color:gray;">non-exhaustive match</span>

@@ -3,6 +3,7 @@
 A `match` compares a value against a series of patterns and runs the first arm that fits. Each arm is `pattern => expression`, and arms are separated by commas.
 
 ```mimas
+# let status = 1;
 match status {
     0 => print("idle"),
     1 => print("running"),
@@ -14,6 +15,7 @@ match status {
 Like everything else in this section, `match` is an expression -- every arm yields a value, and the whole `match` evaluates to it:
 
 ```mimas
+# let status = 1;
 let label = match status {
     0 => "idle",
     1 => "running",
@@ -25,7 +27,7 @@ let label = match status {
 
 mimas supports a wide range of patterns:
 
-```mimas
+```mimas ignore
 match value {
     0 => "zero",                 // literal
     1 | 2 | 3 => "small",        // multiple literals (an "or" pattern)
@@ -50,10 +52,10 @@ mimas checks matches for exhaustiveness using the same Maranget-style analysis a
 
 ```mimas
 enum Flag { On, Off }
+# let flag = Flag::On;
 
-match flag {
+match flag { // compile error: non-exhaustive match -- missing `Flag::Off`
     Flag::On => {},
-    // compile error: non-exhaustive match -- missing `Flag::Off`
 }
 ```
 
@@ -66,6 +68,9 @@ You have two ways to deliberately *not* enumerate every case.
 A bare identifier (or `_`) at the end soaks up everything that's left, which satisfies the exhaustiveness check:
 
 ```mimas
+# enum Flag { On, Off }
+# let flag = Flag::On;
+# fn do_thing() {}
 match flag {
     Flag::On => do_thing(),
     _ => {},
@@ -77,6 +82,7 @@ match flag {
 When you're certain the remaining cases can't occur, end the `match` with a bare `!`. It promises exhaustiveness and, if execution ever actually reaches it, raises a runtime error.
 
 ```mimas
+# let command = "go";
 let n = match command {
     "go" => 1,
     "stop" => 2,
@@ -90,6 +96,9 @@ Because the `!` arm has the [never type](../special-types.md), it doesn't add to
 An arm with a guard might not fire, so the compiler can't treat it as covering its pattern. You'll still need a catch-all even when a guarded arm "looks" total:
 
 ```mimas
+# enum Flag { On, Off }
+# let flag = Flag::Off;
+# fn quiet() -> bool { true }
 match flag {
     Flag::On => {},
     Flag::Off if quiet() => {}, // doesn't fully cover `Flag::Off`

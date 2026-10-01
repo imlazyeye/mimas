@@ -229,6 +229,14 @@ fn docs(
         return 0;
     }
 
+    // compiled before the lookup, since this writes our own manifest (which is what a lookup in
+    // crates/cli finds)
+    let files = [("docs.mim", DOCS_SCRIPT), ("mdbook.mim", MDBOOK_SCRIPT)];
+    let compiled = vm::Vm::compile_files(&files, |api| {
+        library::std(api);
+        api.module("docs").add(display_ty);
+    });
+
     let error = "error".bright_red().bold();
     let manifest = match manifest_path {
         Some(path) => api::Manifest::read(&path).map(Some),
@@ -258,12 +266,7 @@ fn docs(
     let host = if std { host } else { host.without_std() };
     let json = serde_json::to_value(&host).expect("couldn't serialize the manifest");
 
-    let files = [("docs.mim", DOCS_SCRIPT), ("mdbook.mim", MDBOOK_SCRIPT)];
-    let result = vm::Vm::compile_files(&files, |api| {
-        library::std(api);
-        api.module("docs").add(display_ty);
-    })
-    .and_then(|mut vm| {
+    let result = compiled.and_then(|mut vm| {
         // solving docs.mim named its own adts over the ids the manifest's adts use
         for (id, name) in &names {
             shared::name_adt(id.index(), name);

@@ -47,6 +47,7 @@ print(a > b); // compile error: these values can't be compared like numerals
 Any type coerces *into* its option form when it meets a `null`. So an array literal with a `null` in it, or an `if` whose branches disagree about presence, infers an optional type automatically.
 
 ```mimas
+# let ready = true;
 let a = [0, null, 1];               // a is [int?]
 let b = ~{ x = null, y = 0 };       // b is ~{int?}
 let c = if ready { 0 } else { null }; // c is int?
@@ -64,6 +65,7 @@ d[0] = null; // compile error: expected int, found null
 There is no "option of an option." If a type would come out as `T??`, mimas automatically flattens it to `T?` -- the same choice Kotlin makes.
 
 ```mimas
+# let ready = true;
 fn maybe() -> int? { null }
 
 // `maybe()` is already int?, and the other branch is null, so this would be int??
@@ -76,16 +78,18 @@ let nested: int? = if ready { maybe() } else { null };
 To reach through a value that might be `null`, you'd otherwise write a guard:
 
 ```mimas
-let len: int? = if name == null {
-    null
-} else {
+# let name: str? = "ada";
+let len: int? = if let name? = name {
     name.len()
+} else {
+    null
 };
 ```
 
 The `?.` operator collapses that into one expression. If the receiver is `null`, the whole chain short-circuits to `null` and the call is never made; otherwise it proceeds and re-wraps the result as an option.
 
 ```mimas
+# let name: str? = "ada";
 let len: int? = name?.len();
 ```
 
@@ -130,18 +134,23 @@ A chain only rides a real `?` token. A bare dict index that happens to be an opt
 When a code path expects an option to actually hold a value, you **unwrap** it. Where `?` poses the *question* of an option, a postfix `!` asserts the *answer*: "this is not null." If it turns out to be `null`, that's a runtime error.
 
 ```mimas
+# fn lookup_port() -> int? { 8080 }
 let port: int = lookup_port()!; // `port` is a plain int from here on
 ```
 
 When you'd rather supply a fallback than risk a runtime error, reach for `??`, which yields its right side when the left is `null`:
 
 ```mimas
+# fn lookup_port() -> int? { 8080 }
 let port: int = lookup_port() ?? 8080; // the value if present, otherwise 8080
 ```
 
 And to branch on presence while binding the unwrapped value, use [`if let`](./control-flow/if-else.md#if-let) with a `?` on the binding to ask for the unwrap:
 
 ```mimas
+# fn lookup_port() -> int? { 8080 }
+# fn connect(port: int) {}
+# fn use_default() {}
 if let port? = lookup_port() {
     connect(port);
 } else {
@@ -152,6 +161,7 @@ if let port? = lookup_port() {
 When you want the unwrapped value for the rest of the scope and would rather bail out than nest, a [`let`/`else`](./variables.md#let-else) keeps things flat:
 
 ```mimas
+# fn lookup_port() -> int? { 8080 }
 let port? = lookup_port() else {
     panic("no port configured");
 };

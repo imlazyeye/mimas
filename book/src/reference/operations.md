@@ -52,6 +52,8 @@ print("a" < 1);          // compile error: these types cannot be compared
 | Not | `!` (prefix) | Negates a `bool`. |
 
 ```mimas
+# fn is_ready() -> bool { true }
+# fn is_locked() -> bool { false }
 let ok = is_ready() && !is_locked();
 ```
 
@@ -87,7 +89,7 @@ let shown = name ?? "anonymous"; // -> "anonymous"
 
 Every arithmetic, bitwise, and coalescing operator has a compound-assignment form that updates a binding in place.
 
-```mimas
+```mimas ignore
 a += 1;
 a -= 1;
 a *= 2;

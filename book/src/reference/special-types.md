@@ -21,7 +21,7 @@ let b: () = loop { break; };
 
 The **never type**, written `!`, is the type of an expression that diverges -- one after which no code can run. It arises from `return`, `panic`, `todo`, and infinitely-running `loop {}`. Only the compiler can produce a `!`; you can never annotate a binding with it directly.
 
-```mimas
+```mimas no_run
 let a = loop {};       // `a` is `!` -- the loop never ends, so `a` is never assigned
 panic("oh no!");       // `panic` diverges, so it is `!`
 ```
@@ -29,11 +29,15 @@ panic("oh no!");       // `panic` diverges, so it is `!`
 The useful part is that `!` **coerces into any type**. Because a diverging branch can never actually supply a value, the compiler lets it stand in for whatever type the surrounding code expects. That's why one arm of an `if` can bail out while the other still determines the type:
 
 ```mimas
+# fn example() {
+# let some_condition = true;
 let a: int = if some_condition {
     0
 } else {
     return;  // `return` is `!`, so it fits where an `int` is expected
 };
+# }
+# example();
 ```
 
 The same applies to `match`: an arm that `panic`s contributes `!`, which folds into the common type, so it doesn't force the other arms to become optional.

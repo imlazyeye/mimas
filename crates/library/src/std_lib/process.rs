@@ -71,7 +71,7 @@ fn run<'gc>(cmd: &str, args: Vec<&str>, stdin: Option<&str>) -> Raisable<String>
 /// non-zero exit code is returned like any other. Raises if the program can't be started or is
 /// stopped by a signal.
 ///
-/// ```mimas
+/// ```mimas no_run
 /// use std::process;
 ///
 /// let code = process::run_attached("cargo", ["test"])!;

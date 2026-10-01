@@ -42,6 +42,15 @@ Generates a randomized corpus of mimas code. Useful for benchmarking and stress 
 mimas tools/fodder -- [line-count-target] [out-dir]
 ```
 
+### Doctest
+
+Generates tests for every \`\`\`mimas block in the crates and the book. These go into `crates/cli/tests/doctests/main.rs`, which should be left as a stub on the remote.
+
+- Lines in codeblocks that start with a `#` will be hidden when using the LSP or reading the book. This allows you to set up your types ahead of your example code so that you can just show the important part.
+- You can write code blocks that are intended to fail by adding `compile error:` or `runtime error:` followed by the exact error message expected. If the message does not match, or the code does not error, the test will fail.
+- You can write `no_run` after your \`\`\`mimas opening to instruct the test to build, but not execute. This should be done for examples that run code that is not safe to run randomly (for example, various `std::fs` commands).
+- You can write `ignore` after your \`\`\`mimas opening to fully ignore a code block. This is generlly frowned upon, but makes sense in particular scenarios when it would be impractical to set up the types needed beforehand, or when showing illegal code without labeling its particular error message.
+
 ### Highlighter
 
 Replaces blocks of mimas code in the book with rendered, colorized SVGs. This is ran as a preprocessor for `mdbook`, so you'd rarely call it manually.

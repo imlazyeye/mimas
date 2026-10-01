@@ -27,6 +27,12 @@ You can't make a bare `Shape()`. There's no such thing as an enum value that isn
 [`match`](../control-flow/match.md) is how you take an enum apart: each arm names a variant and binds its payload. Because the compiler knows the full variant list, it can check that you've covered them all.
 
 ```mimas
+# enum Shape {
+#     Circle(float),
+#     Rectangle(float, float),
+#     Labeled { text: str },
+#     Empty,
+# }
 fn area(s: Shape) -> float {
     match s {
         Shape::Circle(r) => 3.14159 * r * r,
@@ -42,6 +48,12 @@ fn area(s: Shape) -> float {
 Like structs, enums take `impl` blocks for associated items and methods. A method that dispatches on `self` is the idiomatic way to fold behavior into the type itself:
 
 ```mimas
+# enum Shape {
+#     Circle(float),
+#     Rectangle(float, float),
+#     Labeled { text: str },
+#     Empty,
+# }
 impl Shape {
     fn area(self) -> float {
         match self {

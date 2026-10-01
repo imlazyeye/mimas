@@ -82,6 +82,16 @@ test_fail!(
 );
 
 test_fail!(
+    null_branch_keeps_errors,
+    "let name: str? = null;
+     let a = if true { null } else { name.len() };",
+    "let name: str? = null;
+     let a = [null, name.len()];",
+    "let name: str? = null;
+     let a = match 0 { 0 => null, _ => name.len() };",
+);
+
+test_fail!(
     null_is_permanent,
     "let a = null;
     if true {
