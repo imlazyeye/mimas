@@ -54,6 +54,7 @@ macro_rules! for_each_op {
             GetIndex     [ (dst, Reg, reg) (set, Reg, reg) (index, Reg, reg) (kind, AccessKind, enum8) ];
             GetField     [ (dst, Reg, reg) (src, Reg, reg) (slot, u32, u32) (kind, AccessKind, enum8) ];
             GetFieldStruct [ (dst, Reg, reg) (src, Reg, reg) (slot, u32, u32) ];
+            GetIndexArray [ (dst, Reg, reg) (set, Reg, reg) (index, Reg, reg) ];
             Len          [ (dst, Reg, reg) (src, Reg, reg) ];
             ToFloat      [ (dst, Reg, reg) (src, Reg, reg) ];
             Sqrt         [ (dst, Reg, reg) (src, Reg, reg) ];
@@ -461,7 +462,19 @@ impl Op {
             },
             Inst::NewArray => Op::NewArray { dst: ctx.reg() },
             Inst::NewDict => Op::NewDict { dst: ctx.reg() },
-            Inst::GetIndex { set, index, kind } => Op::GetIndex {
+            Inst::GetIndex {
+                set,
+                index,
+                is_array: true,
+                ..
+            } => Op::GetIndexArray {
+                dst: ctx.reg(),
+                set: ctx.i2r(set),
+                index: ctx.i2r(index),
+            },
+            Inst::GetIndex {
+                set, index, kind, ..
+            } => Op::GetIndex {
                 dst: ctx.reg(),
                 set: ctx.i2r(set),
                 index: ctx.i2r(index),

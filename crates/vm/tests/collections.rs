@@ -9,6 +9,14 @@ test_vm!(
     "a[0]" => Int(0)
 );
 
+test_fail!(
+    array_access_out_of_bounds,
+    "let a = [0, 1, 2];
+     let x = a[3];",
+    "let a = [0, 1, 2];
+     let x = a[-1];",
+);
+
 test_vm!(
     array_chained_access,
     "let a = [[[0]]];",

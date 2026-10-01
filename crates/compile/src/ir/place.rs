@@ -17,7 +17,8 @@ impl PlaceTarget {
         match self {
             PlaceTarget::Variable(variable) => ir.current().get_local(variable),
             PlaceTarget::Index { array, index } => {
-                ir.current().get_index(array, index, AccessKind::Direct)
+                ir.current()
+                    .get_index(array, index, AccessKind::Direct, false)
             }
             PlaceTarget::Field { receiver, slot } => {
                 ir.current()

@@ -57,6 +57,7 @@ pub enum Inst {
         set: InstId,
         index: InstId,
         kind: AccessKind,
+        is_array: bool,
     },
     GetField {
         src: InstId,
@@ -291,7 +292,9 @@ impl IrDisplay for Inst {
             Inst::Insert { dict, key, value } => {
                 format!("insert {dict}, {value} @ {}", ir.str(*key))
             }
-            Inst::GetIndex { set, index, kind } => {
+            Inst::GetIndex {
+                set, index, kind, ..
+            } => {
                 format!(
                     "get_index {set} @ {index}{}",
                     if kind == &AccessKind::Direct { "" } else { "?" }
@@ -428,7 +431,7 @@ impl BlockWriter<'_> {
             PatKind::Tuple(sub_pats) => {
                 for (i, sub) in sub_pats.iter().enumerate() {
                     let idx = self.constant(i);
-                    let elem = self.get_index(scrut_val, idx, AccessKind::Direct);
+                    let elem = self.get_index(scrut_val, idx, AccessKind::Direct, false);
                     self.test_pattern(sub, elem, fail_block)?;
                 }
                 Some(())
@@ -654,8 +657,19 @@ impl BlockWriter<'_> {
         })
     }
 
-    pub(crate) fn get_index(&mut self, set: InstId, index: InstId, kind: AccessKind) -> InstId {
-        self.instruct(Inst::GetIndex { set, index, kind })
+    pub(crate) fn get_index(
+        &mut self,
+        set: InstId,
+        index: InstId,
+        kind: AccessKind,
+        is_array: bool,
+    ) -> InstId {
+        self.instruct(Inst::GetIndex {
+            set,
+            index,
+            kind,
+            is_array,
+        })
     }
 
     pub(crate) fn get_field(
