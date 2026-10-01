@@ -367,8 +367,7 @@ test_ty!(
 
 test_ty!(
     function_type_annotation,
-    "fn helper(a: int, b: int) -> int { a + b }
-     let f: (int, int) -> int = helper;",
+    "let f: (int, int) -> int = |a: int, b: int| a + b;",
     "f(1, 2)" => Int,
 );
 
@@ -377,6 +376,33 @@ test_ty!(
     "fn helper(n: int) -> int { n + 1 }
      fn apply(f: (int) -> int, n: int) -> int { f(n) }",
     "apply(helper, 5)" => Int,
+);
+test_success!(
+    pass_path_fn_to_fn,
+    "struct S {}
+     impl S {
+         fn make() -> S {
+             S {}
+         }
+     }
+     fn run(f: () -> S) -> S { f() }
+     let s = run(S::make);"
+);
+test_fail!(
+    fn_is_not_a_value,
+    "fn helper(n: int) -> int { n }
+     let f = helper;",
+    "fn helper(n: int) -> int { n }
+     let fs = [helper];",
+    "fn helper(n: int) -> int { n }
+     let f = || helper;",
+    "struct S {}
+     impl S {
+         fn make() -> S {
+             S {}
+         }
+     }
+     let f = S::make;",
 );
 
 test_ty!(

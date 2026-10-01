@@ -133,7 +133,24 @@ impl Analysis {
             })
             .or(host_docs.filter(|doc| !doc.is_empty()));
         let value = match docs {
-            Some(docs) => format!("```mimas\n{text}\n```\n\n---\n\n{docs}"),
+            Some(docs) => {
+                // a `# ` line in a mimas block is only there for the doc tests
+                let mut in_mimas = false;
+                let docs = docs
+                    .lines()
+                    .filter(|line| {
+                        let line = line.trim();
+                        let hidden = in_mimas && (line == "#" || line.starts_with("# "));
+                        if line.starts_with("```") {
+                            in_mimas =
+                                !in_mimas && line.split_whitespace().next() == Some("```mimas");
+                        }
+                        !hidden
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("```mimas\n{text}\n```\n\n---\n\n{docs}")
+            }
             None => format!("```mimas\n{text}\n```"),
         };
 

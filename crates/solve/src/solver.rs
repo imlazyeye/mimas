@@ -3,8 +3,9 @@ use crate::{
     components::*,
     errors::{
         AssignToConst, AssignToLoopVar, AssignToStringIndex, BareNullBinding, ExtraTupleMembers,
-        FieldNotFound, InvalidAssignTarget, InvalidPattern, InvalidUseTarget, MissingTupleMembers,
-        MultipleConstDeclarations, NonConstantValue, NotFound, SelfOutOfContext,
+        FieldNotFound, FnIsNotAValue, InvalidAssignTarget, InvalidPattern, InvalidUseTarget,
+        MissingTupleMembers, MultipleConstDeclarations, NonConstantValue, NotFound,
+        SelfOutOfContext,
     },
     traits::*,
 };
@@ -50,6 +51,7 @@ pub struct Solver {
     pub(crate) loop_stack: Vec<LoopRun>,
     pub(crate) fn_stack: Vec<FnRun>,
     pub(crate) non_value: Option<NodeId>,
+    pub(crate) fn_arg: Option<NodeId>,
 }
 
 // Public impls
@@ -80,6 +82,7 @@ impl Solver {
             dec_to_native: HashMap::new(),
             native_constants: HashMap::new(),
             non_value: None,
+            fn_arg: None,
         };
         solver.ribs.push_import();
         solver.ribs.push_block();
@@ -127,6 +130,27 @@ impl Solver {
                     at: dec.location.into(),
                     name: dec.name.clone(),
                 }],
+            })?
+        }
+        Ok(())
+    }
+
+    /// Errs if node `id` names the fn `dec` (typed `ty`) anywhere but a call's callee or argument.
+    pub(crate) fn check_fn_value(
+        &self,
+        id: NodeId,
+        dec: DecId,
+        ty: &Ty,
+        at: Location,
+    ) -> Result<()> {
+        if matches!(self.decs[dec].kind, DecKind::Item { .. })
+            && matches!(ty.clone().normalized(self), Ty::Fn(_))
+            && self.non_value != Some(id)
+            && self.fn_arg != Some(id)
+        {
+            Err(FnIsNotAValue {
+                src: self.src(at),
+                at: at.into(),
             })?
         }
         Ok(())

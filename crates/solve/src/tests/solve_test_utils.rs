@@ -18,6 +18,11 @@ impl TestSession {
     }
 
     pub(crate) fn run(&mut self, source: &str, file_name: impl Into<String>) -> Result<()> {
+        let ast = self.parse(source, file_name);
+        self.0.solve(&ast)
+    }
+
+    pub(crate) fn parse(&mut self, source: &str, file_name: impl Into<String>) -> parse::Ast {
         let file_name = file_name.into();
         let source = Box::leak(Box::new(source.to_string()));
         let mut sources = std::collections::HashMap::new();
@@ -28,9 +33,7 @@ impl TestSession {
         self.0.set_sources(sources);
         let lexer = Lexer::new(source, 0, file_name);
         let parser = Parser::new(lexer);
-        let ast = parser.try_into_ast().unwrap();
-        self.0.solve(&ast)?;
-        Ok(())
+        parser.try_into_ast().unwrap()
     }
 
     pub(crate) fn test_ty(
@@ -43,7 +46,12 @@ impl TestSession {
         let uses: String = modules.iter().map(|m| format!("use {}; ", m)).collect();
         let source = Box::leak(Box::new(format!("{uses}let TEST_VALUE = {src};")));
         self.0.ribs.push_block();
-        self.run(source, "test").unwrap();
+        let ast = self.parse(source, "test");
+        // a fn's type is read by binding it, which is otherwise only legal for an argument
+        if let Some(parse::StmtKind::Let(binding)) = ast.stmts().last().map(|stmt| stmt.kind()) {
+            self.0.fn_arg = Some(binding.right.id());
+        }
+        self.0.solve(&ast).unwrap();
         let ty = self
             .0
             .resolve_name(&Ident::synthetic("TEST_VALUE"), shared::Location::default())

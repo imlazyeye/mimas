@@ -675,6 +675,15 @@ pub struct MethodIsNotAValue {
 }
 
 #[derive(Error, Debug, Diagnostic)]
+#[error("fns are not values")]
+pub struct FnIsNotAValue {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("call it or pass it as an argument -- a fn can't be bound like a closure can")]
+    pub at: SourceSpan,
+}
+
+#[derive(Error, Debug, Diagnostic)]
 #[error("integer arithmetic overflows")]
 pub struct ConstOverflow {
     #[source_code]

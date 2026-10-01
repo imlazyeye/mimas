@@ -117,7 +117,18 @@ fn render(title: str, page: Page) -> str {
             collect block;
         }
     };
-    blocks.join("\n\n") + "\n"
+
+    // a `# ` line in a mimas block is only there for the doc tests
+    let in_mimas = false;
+    let lines = for line in (blocks.join("\n\n") + "\n").split("\n") {
+        let trimmed = line.trim();
+        let hidden = in_mimas && (trimmed == "#" || trimmed.starts_with("# "));
+        if trimmed.starts_with("```") {
+            in_mimas = !in_mimas && (trimmed == "```mimas" || trimmed.starts_with("```mimas "));
+        }
+        if !hidden collect line;
+    };
+    lines.join("\n")
 }
 
 /// Writes a markdown page for every module and type in `api` (a host's library, as its manifest
