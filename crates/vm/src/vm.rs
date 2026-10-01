@@ -245,9 +245,9 @@ macro_rules! wr {
 
 // The fast-path macros below all share one shape: decode operands, try the in-type case inline,
 // and on any other type combination `return` the matching cold helper. The `return` (not `?`) is
-// load-bearing: it puts the cold call in tail position so the arm forwards the helper's
-// `RtResult<Flow>` verbatim -- no per-arm Err-widening, and the operands are consumed by value by
-// the cold fn and never read again here, so they never need a stack home across the tag check.
+// load-bearing: it puts the cold call in tail position so the handler forwards the helper's
+// `RtResult<Flow>` verbatim -- no per-handler Err-widening, and the operands are consumed by value
+// by the cold fn and never read again here, so they never need a stack home across the tag check.
 macro_rules! int_arith {
     ($regs:ident, $code:ident, $ctx:ident, $checked:ident, $op:expr) => {{
         let dst = Reg::decode($code);
@@ -467,7 +467,9 @@ fn run_dispatch<'gc>(
         // refreshes touches thread.regs, so the pointer stays valid and this is the only live
         // reference into the window.
         let regs = unsafe { std::slice::from_raw_parts_mut(regs_ptr, regs_len) };
-        match HANDLERS[OpCode::decode(code) as usize](regs, code, ctx, strs) {
+        // only peek at the opcode (writing ip back here for the handler to reload put a store->load
+        // round trip on every op, which cost up to 27% depending on layout)
+        match HANDLERS[code.bytes[op_ip] as usize](regs, code, ctx, strs) {
             Ok(Flow::Next) => {}
             Ok(Flow::Call { target, dst, args }) => {
                 let (body, captures): (BodyId, &[Val<'gc>]) = match &target {
@@ -532,9 +534,9 @@ type Handler =
 ///
 /// Each handler runs one op against the current frame's register window. They're separate functions
 /// on purpose (as arms of one big match, adding a single arm could reshuffle the code of every
-/// other op and swing unrelated benchmarks by 10% or more). Ops with no handler fall back to
-/// `cold_dispatch`. Use the op-count feature (`--features op-count`) to identify how much an op is
-/// being used within a given run.
+/// other op and swing unrelated benchmarks by 10% or more). Every op needs a handler, and one
+/// without fails to compile. Use the op-count feature (`--features op-count`) to identify how much
+/// an op is being used within a given run.
 ///
 /// Inside a handler, avoid any (non-inlined) calls anywhere but the tail position, as to not force
 /// stack homes for values that don't otherwise need them. A hot op with a rare slow path should
@@ -552,22 +554,23 @@ macro_rules! handlers {
                     $ctx: Ctx<'gc>,
                     $strs: &StrInterner,
                 ) -> RtResult<Flow<'gc>> {
+                    $code.ip += 1; // past the opcode
                     $body;
                     Ok(Flow::Next)
                 }
             )*
-            fn cold<'gc>(
-                regs: &mut [Val<'gc>],
-                code: &mut Decoder,
-                ctx: Ctx<'gc>,
-                strs: &StrInterner,
-            ) -> RtResult<Flow<'gc>> {
-                code.ip -= 1;
-                let op = OpCode::decode(code);
-                cold_dispatch(code, regs, ctx, op, strs)
+            const fn handler(op: OpCode) -> Handler {
+                match op {
+                    $(OpCode::$op => $op,)*
+                }
             }
-            let mut table = [cold as Handler; OpCode::COUNT];
-            $(table[OpCode::$op as usize] = $op;)*
+            let mut table = [handler(OpCode::Move); OpCode::COUNT];
+            let mut i = 0;
+            while i < OpCode::COUNT {
+                // SAFETY: every byte below `OpCode::COUNT` is an opcode
+                table[i] = handler(unsafe { std::mem::transmute::<u8, OpCode>(i as u8) });
+                i += 1;
+            }
             table
         };
     };
@@ -903,6 +906,146 @@ handlers! {
     BFloatGeImm => branch_float_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
     BFloatEqImm => branch_float_imm!(regs, code, ctx, ==, BinOp::Identity),
     BFloatNeImm => branch_float_imm!(regs, code, ctx, !=, BinOp::NotEqual),
+    Bin => {
+        let dst = Reg::decode(code);
+        let left = Reg::decode(code);
+        let op = BinOp::decode(code);
+        let right = Reg::decode(code);
+        let v = crate::val::bin(rd!(regs, left), ctx, rd!(regs, right), op)?;
+        wr!(regs, dst, v);
+    },
+    Unary => {
+        let dst = Reg::decode(code);
+        let op = UnaryOp::decode(code);
+        let src = Reg::decode(code);
+        let v = crate::val::unary(rd!(regs, src), ctx, op)?;
+        wr!(regs, dst, v);
+    },
+    Switch => {
+        let scrut = Reg::decode(code);
+        let base = code.u32();
+        let default = code.u32() as usize;
+        let len = code.u16() as usize;
+        let table = code.ip;
+        let target = match rd!(regs, scrut) {
+            Val::Instance(i) => {
+                let idx = i.0.borrow().struct_id.wrapping_sub(base) as usize;
+                if idx < len {
+                    code.peek_u32(table + idx * 4) as usize
+                } else {
+                    default
+                }
+            }
+            Val::Int(v) => {
+                let idx = v.wrapping_sub(base as i64);
+                if idx >= 0 && (idx as usize) < len {
+                    code.peek_u32(table + idx as usize * 4) as usize
+                } else {
+                    default
+                }
+            }
+            _ => default,
+        };
+        code.ip = target;
+    },
+    NewArray => {
+        let dst = Reg::decode(code);
+        wr!(regs, dst, Val::Array(ctx.new_array(Vec::new())));
+    },
+    NewDict => {
+        let dst = Reg::decode(code);
+        wr!(regs, dst, Val::Dict(ctx.new_dict(DictMap::new())));
+    },
+    Insert => {
+        let dict_reg = Reg::decode(code);
+        let key_id = shared::StrId::from(code.u32());
+        let value_reg = Reg::decode(code);
+        let dict = rd!(regs, dict_reg).as_dict().unwrap();
+        let value = rd!(regs, value_reg);
+        let key = ctx.intern(strs.get(key_id));
+        dict.0.borrow_mut(&ctx).insert(key, value);
+    },
+    Format => {
+        let dst = Reg::decode(code);
+        let len = code.u16();
+        let mut text = String::with_capacity(32); // gives us a little size just to start
+        for _ in 0..len {
+            match OpFormatPart::decode(code) {
+                OpFormatPart::Literal(str_id) => text.push_str(strs.get(str_id)),
+                OpFormatPart::Value(reg) => ctx.to_string_into(&mut text, rd!(regs, reg)),
+            }
+        }
+        wr!(regs, dst, Val::Str(ctx.intern(&text)));
+    },
+    NewInstance => {
+        let dst = Reg::decode(code);
+        let adt = code.u32();
+        let len = code.u8() as usize;
+        let fields = if len <= INLINE_FIELDS {
+            let mut data = [Val::Null; INLINE_FIELDS];
+            for slot in data.iter_mut().take(len) {
+                let reg = Reg::decode(code);
+                *slot = rd!(regs, reg);
+            }
+            Fields::Inline {
+                len: len as u8,
+                data,
+            }
+        } else {
+            let mut v = Vec::with_capacity(len);
+            for _ in 0..len {
+                let reg = Reg::decode(code);
+                v.push(rd!(regs, reg));
+            }
+            Fields::Spilled(v)
+        };
+        let inst = ctx.new_instance(adt, fields);
+        wr!(regs, dst, Val::Instance(inst));
+    },
+    Panic => return Err(RtErr::MatchPanicReached),
+    IsInstance => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let adt = code.u32();
+        let matches = matches!(
+            rd!(regs, src),
+            Val::Instance(i) if i.0.borrow().struct_id == adt,
+        );
+        wr!(regs, dst, Val::Bool(matches));
+    },
+    NewClosure => {
+        let dst = Reg::decode(code);
+        let body = BodyId::decode(code);
+        let len = code.u8() as usize;
+        let mut captures = Vec::with_capacity(len);
+        for _ in 0..len {
+            let reg = Reg::decode(code);
+            captures.push(rd!(regs, reg));
+        }
+        let closure = ctx.new_closure(body, captures);
+        wr!(regs, dst, Val::Closure(closure));
+    },
+    Raise => {
+        let src = Reg::decode(code);
+        let Val::Str(err) = rd!(regs, src) else {
+            unreachable!("raise on a non-str value")
+        };
+        return Ok(Flow::Return(Val::Raised(err)));
+    },
+    IsRaised => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let v = rd!(regs, src);
+        wr!(regs, dst, Val::Bool(matches!(v, Val::Raised(_))));
+    },
+    UnwrapRaised => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let Val::Raised(err) = rd!(regs, src) else {
+            unreachable!("UnwrapRaised on non-raised value")
+        };
+        wr!(regs, dst, Val::Str(err));
+    },
 }
 
 /// Push a new frame for `body`: grow `regs`, copy args into the param registers and captures into
@@ -949,7 +1092,7 @@ fn enter_call<'gc>(
     Ok(())
 }
 
-/// The callee of a dynamic call wasn't a fn or a closure. Cold so the `Call` arm's shared frame
+/// The callee of a dynamic call wasn't a fn or a closure. Cold so the `Call` handler's frame
 /// doesn't pay for the capture.
 #[cold]
 #[inline(never)]
@@ -1141,14 +1284,14 @@ fn contains<'gc>(needle: Val<'gc>, haystack: Val<'gc>, condition: bool) -> Val<'
     Val::Bool(c == condition)
 }
 
-// Each of these absorbs everything the arm would otherwise do inline on the slow path: the generic
-// `bin`/`unary` call, the register write (or branch / ip update), and -- because they return
-// `RtResult<Flow>` directly -- the error widening. The fast-path macros reach them with `return`,
-// so the arm forwards this result verbatim. That keeps the operands `Val`-by-value (never spilled
-// across the tag check in the hot arm) and collapses the per-arm error epilogues into one shared
-// tail. They MUST stay trivial past the `bin`/`unary` call: anything that takes the address of a
-// local in here reintroduces an escape (in this frame, harmless to the handler, but don't let these
-// balloon and then get inlined).
+// Each of these absorbs everything the handler would otherwise do inline on the slow path: the
+// generic `bin`/`unary` call, the register write (or branch / ip update), and -- because they
+// return `RtResult<Flow>` directly -- the error widening. The fast-path macros reach them with
+// `return`, so the handler forwards this result verbatim. That keeps the operands `Val`-by-value
+// (never spilled across the tag check in the hot handler) and collapses the per-handler error
+// epilogues into one shared tail. They MUST stay trivial past the `bin`/`unary` call: anything that
+// takes the address of a local in here reintroduces an escape (in this frame, harmless to the
+// handler, but don't let these balloon and then get inlined).
 
 #[cold]
 #[inline(never)]
@@ -1261,164 +1404,6 @@ fn branch_cold_imm_float<'gc>(
     if hit == is_true {
         code.ip = target;
     }
-    Ok(Flow::Next)
-}
-
-/// The genuinely-cold ops: ones that allocate, build collections, call out, or are otherwise rare.
-/// They share the `cold` fallback in `HANDLERS` instead of getting handlers of their own.
-#[cold]
-#[inline(never)]
-fn cold_dispatch<'gc>(
-    code: &mut Decoder,
-    regs: &mut [Val<'gc>],
-    ctx: Ctx<'gc>,
-    op: OpCode,
-    strs: &StrInterner,
-) -> RtResult<Flow<'gc>> {
-    match op {
-        OpCode::Bin => {
-            let dst = Reg::decode(code);
-            let left = Reg::decode(code);
-            let op = BinOp::decode(code);
-            let right = Reg::decode(code);
-            let v = crate::val::bin(rd!(regs, left), ctx, rd!(regs, right), op)?;
-            wr!(regs, dst, v);
-        }
-        OpCode::Unary => {
-            let dst = Reg::decode(code);
-            let op = UnaryOp::decode(code);
-            let src = Reg::decode(code);
-            let v = crate::val::unary(rd!(regs, src), ctx, op)?;
-            wr!(regs, dst, v);
-        }
-        OpCode::Switch => {
-            let scrut = Reg::decode(code);
-            let base = code.u32();
-            let default = code.u32() as usize;
-            let len = code.u16() as usize;
-            let table = code.ip;
-            let target = match rd!(regs, scrut) {
-                Val::Instance(i) => {
-                    let idx = i.0.borrow().struct_id.wrapping_sub(base) as usize;
-                    if idx < len {
-                        code.peek_u32(table + idx * 4) as usize
-                    } else {
-                        default
-                    }
-                }
-                Val::Int(v) => {
-                    let idx = v.wrapping_sub(base as i64);
-                    if idx >= 0 && (idx as usize) < len {
-                        code.peek_u32(table + idx as usize * 4) as usize
-                    } else {
-                        default
-                    }
-                }
-                _ => default,
-            };
-            code.ip = target;
-        }
-        OpCode::NewArray => {
-            let dst = Reg::decode(code);
-            wr!(regs, dst, Val::Array(ctx.new_array(Vec::new())));
-        }
-        OpCode::NewDict => {
-            let dst = Reg::decode(code);
-            wr!(regs, dst, Val::Dict(ctx.new_dict(DictMap::new())));
-        }
-        OpCode::Insert => {
-            let dict_reg = Reg::decode(code);
-            let key_id = shared::StrId::from(code.u32());
-            let value_reg = Reg::decode(code);
-            let dict = rd!(regs, dict_reg).as_dict().unwrap();
-            let value = rd!(regs, value_reg);
-            let key = ctx.intern(strs.get(key_id));
-            dict.0.borrow_mut(&ctx).insert(key, value);
-        }
-        OpCode::Format => {
-            let dst = Reg::decode(code);
-            let len = code.u16();
-            let mut text = String::with_capacity(32); // gives us a little size just to start
-            for _ in 0..len {
-                match OpFormatPart::decode(code) {
-                    OpFormatPart::Literal(str_id) => text.push_str(strs.get(str_id)),
-                    OpFormatPart::Value(reg) => ctx.to_string_into(&mut text, rd!(regs, reg)),
-                }
-            }
-            wr!(regs, dst, Val::Str(ctx.intern(&text)));
-        }
-        OpCode::NewInstance => {
-            let dst = Reg::decode(code);
-            let adt = code.u32();
-            let len = code.u8() as usize;
-            let fields = if len <= INLINE_FIELDS {
-                let mut data = [Val::Null; INLINE_FIELDS];
-                for slot in data.iter_mut().take(len) {
-                    let reg = Reg::decode(code);
-                    *slot = rd!(regs, reg);
-                }
-                Fields::Inline {
-                    len: len as u8,
-                    data,
-                }
-            } else {
-                let mut v = Vec::with_capacity(len);
-                for _ in 0..len {
-                    let reg = Reg::decode(code);
-                    v.push(rd!(regs, reg));
-                }
-                Fields::Spilled(v)
-            };
-            let inst = ctx.new_instance(adt, fields);
-            wr!(regs, dst, Val::Instance(inst));
-        }
-        OpCode::Panic => return Err(RtErr::MatchPanicReached),
-        OpCode::IsInstance => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let adt = code.u32();
-            let matches = matches!(
-                rd!(regs, src),
-                Val::Instance(i) if i.0.borrow().struct_id == adt,
-            );
-            wr!(regs, dst, Val::Bool(matches));
-        }
-        OpCode::NewClosure => {
-            let dst = Reg::decode(code);
-            let body = BodyId::decode(code);
-            let len = code.u8() as usize;
-            let mut captures = Vec::with_capacity(len);
-            for _ in 0..len {
-                let reg = Reg::decode(code);
-                captures.push(rd!(regs, reg));
-            }
-            let closure = ctx.new_closure(body, captures);
-            wr!(regs, dst, Val::Closure(closure));
-        }
-        OpCode::Raise => {
-            let src = Reg::decode(code);
-            let Val::Str(err) = rd!(regs, src) else {
-                unreachable!("raise on a non-str value")
-            };
-            return Ok(Flow::Return(Val::Raised(err)));
-        }
-        OpCode::IsRaised => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let v = rd!(regs, src);
-            wr!(regs, dst, Val::Bool(matches!(v, Val::Raised(_))));
-        }
-        OpCode::UnwrapRaised => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let Val::Raised(err) = rd!(regs, src) else {
-                unreachable!("UnwrapRaised on non-raised value")
-            };
-            wr!(regs, dst, Val::Str(err));
-        }
-        _ => unreachable!("failed to find cold op"),
-    }
-
     Ok(Flow::Next)
 }
 
