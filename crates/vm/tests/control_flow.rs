@@ -118,7 +118,7 @@ test_vm!(
 test_vm!(
     if_let_option_zero,
     "let x: int? = 0;",
-    "if let v = x { v } else { -1 }" => Int(0),
+    "if let v? = x { v } else { -1 }" => Int(0),
 );
 
 // let else -- hosted in fns so the divergent `else` (return/break/continue) has somewhere to go.
@@ -238,7 +238,25 @@ test_vm!(
     "let n = 0;
      fn next(i: int) -> int? { if i < 3 { i } else { null } }
      let sum = 0;
-     while let v = next(n) { sum += v; n += 1; }",
+     while let v? = next(n) { sum += v; n += 1; }",
+    "sum" => Int(3),
+);
+
+test_vm!(
+    while_let_variant,
+    "enum Step {
+         Next(int),
+         Done,
+     }
+     fn step(i: int) -> Step {
+         if i < 3 { Step::Next(i) } else { Step::Done }
+     }
+     let n = 0;
+     let sum = 0;
+     while let Step::Next(v) = step(n) {
+         sum += v;
+         n += 1;
+     }",
     "sum" => Int(3),
 );
 
@@ -246,7 +264,7 @@ test_vm!(
     while_let_null_stops,
     "let x: int? = null;
      let ran = 0;
-     while let v = x { ran += 1; }",
+     while let v? = x { ran += 1; }",
     "ran" => Int(0),
 );
 

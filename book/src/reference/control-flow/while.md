@@ -28,7 +28,7 @@ let found: int? = while has_next() {
 `while let` is to `while` what [`if let`](./if-else.md#if-let) is to `if`: instead of a `bool`, it evaluates an expression each pass and keeps looping as long as the result is **not `null`**, binding the unwrapped value in the body.
 
 ```mimas
-while let job = next_job() {
+while let job? = next_job() {
     // runs as long as `next_job()` returns a value;
     // stops the first time it returns null
     process(job);

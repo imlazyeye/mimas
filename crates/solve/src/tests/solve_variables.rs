@@ -185,6 +185,13 @@ test_fail!(
     "let a: int? = 0; let b? = a;"
 );
 test_fail!(
+    let_else_bare_option,
+    "let a: int? = 0;
+     let b = a else {
+         loop {}
+     };",
+);
+test_fail!(
     let_else_binding_absent_in_else,
     "let a: int? = 0; let b? = a else { let _c = b + 1; loop {} };"
 );

@@ -1330,11 +1330,9 @@ impl Solve for Ident {
 impl Solve for If {
     fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
         if let Some(binding) = self.binding.as_ref() {
-            let scrut_ty = self.condition.query(solver)?.normalized(solver);
+            let scrut_ty = self.condition.query(solver)?;
             solver.ribs.push_block();
-            // `if let` over an option binds the unwrapped value (implicit null test). an explicit
-            // `?` pattern does its own unwrapping, so leave the option intact for it.
-            solver.solve_match_pat(binding, scrut_ty, false)?;
+            solver.solve_refutable_pat(binding, scrut_ty)?;
         } else {
             self.condition.fulfill_ty(Ty::Bool, solver)?;
         }
@@ -2012,12 +2010,7 @@ impl Solve for While {
             solver.ribs.push_block();
             pushed_rib = true;
             let header_ty = self.header.query(solver)?;
-            let binding_ty = if let Ty::Option(ty) = header_ty {
-                *ty
-            } else {
-                header_ty
-            };
-            solver.solve_pat(binding, binding_ty)?;
+            solver.solve_refutable_pat(binding, header_ty)?;
         } else {
             self.header.fulfill_ty(Ty::Bool, solver)?;
         };
