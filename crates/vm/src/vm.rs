@@ -202,7 +202,7 @@ impl<T: 'static> std::ops::Deref for FixtureRef<T> {
     }
 }
 
-/// What `step_one` hands back to the dispatch loop: keep going, or a frame transition that has
+/// What a handler hands back to the dispatch loop: keep going, or a frame transition that has
 /// to touch `thread` -- and so can only run once the register window borrow has been dropped.
 enum Flow<'gc> {
     Next,
@@ -467,7 +467,7 @@ fn run_dispatch<'gc>(
         // refreshes touches thread.regs, so the pointer stays valid and this is the only live
         // reference into the window.
         let regs = unsafe { std::slice::from_raw_parts_mut(regs_ptr, regs_len) };
-        match step_one(regs, code, ctx, strs) {
+        match HANDLERS[OpCode::decode(code) as usize](regs, code, ctx, strs) {
             Ok(Flow::Next) => {}
             Ok(Flow::Call { target, dst, args }) => {
                 let (body, captures): (BodyId, &[Val<'gc>]) = match &target {
@@ -525,368 +525,384 @@ fn window<'gc>(
     (unsafe { thread.regs.as_mut_ptr().add(base) }, count)
 }
 
-/// Run one op against the current frame's register window. This is the main guy!
+type Handler =
+    for<'gc> fn(&mut [Val<'gc>], &mut Decoder, Ctx<'gc>, &StrInterner) -> RtResult<Flow<'gc>>;
+
+/// Defines `HANDLERS`, one function per op, indexed by opcode. This is the main guy!
 ///
-/// What goes in the direct hot match below and what gets placed in cold matters a _lot_. The
-/// stack frame here is shared by every arm (sized by the fattest one) and set up on every
-/// dispatched op, so one fat arm taxes all of them. Use the op-count feature
-/// (`--features op-count`) to identify how much an op is being used within a given run. For any
-/// change you make, you should check the prologue:
+/// Each handler runs one op against the current frame's register window. They're separate functions
+/// on purpose (as arms of one big match, adding a single arm could reshuffle the code of every
+/// other op and swing unrelated benchmarks by 10% or more). Ops with no handler fall back to
+/// `cold_dispatch`. Use the op-count feature (`--features op-count`) to identify how much an op is
+/// being used within a given run.
 ///
-/// ```text
-/// otool -tv -p (nm target/release/mimas | grep step_one | awk '{print $3}') target/release/mimas | head -4
-/// ```
-///
-/// The expected frame size is currently 96 bytes (0x60). Raising that is bad!
-///
-/// Additionally, avoid any (non-inlined) calls anywhere but the tail position, as to not force
-/// stack homes for values that don't otherwise need them.
-///
-/// Generally speaking, ops that just carry registers, do some basic operations, and perform
-/// reads/writes are safe for hot dispatch. Anything that allocates or needs variable-length
-/// scratch goes to `cold_dispatch` via the wildcard arm -- or, for a hot op with a rare slow
-/// path, a `#[cold]` tail-call helper like the `bin_cold` family. (The Call arms look like a
-/// violation but aren't: their SmallVec is built straight into the `Flow` return slot, which
-/// lives in the caller's frame, not this one.)
-#[inline(never)]
-fn step_one<'gc>(
-    regs: &mut [Val<'gc>],
-    code: &mut Decoder,
-    ctx: Ctx<'gc>,
-    strs: &StrInterner,
-) -> RtResult<Flow<'gc>> {
-    match OpCode::decode(code) {
-        OpCode::LoadConst => {
-            let reg = Reg::decode(code);
-            let con = Constant::decode(code);
-            let val = constant_to_val(con, ctx, strs);
-            wr!(regs, reg, val);
-        }
-        OpCode::Move => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            wr!(regs, dst, rd!(regs, src));
-        }
-        OpCode::Jump => {
-            code.ip = code.u32() as usize;
-        }
-        OpCode::JumpIf => {
-            let cond = Reg::decode(code);
-            let target = code.u32() as usize;
-            let is_true = code.u8();
-            if rd!(regs, cond) == Val::Bool(is_true != 0) {
-                code.ip = target;
-            }
-        }
-        OpCode::ForNext => {
-            let idx = Reg::decode(code);
-            let bound = Reg::decode(code);
-            let target = code.u32() as usize;
-            let Val::Int(i) = rd!(regs, idx) else {
-                unreachable!("for_next idx is statically int")
-            };
-            let Val::Int(b) = rd!(regs, bound) else {
-                unreachable!("for_next bound is statically int")
-            };
-            let i = i + 1;
-            wr!(regs, idx, Val::Int(i));
-            if i < b {
-                code.ip = target;
-            }
-        }
-        OpCode::GetIndex => {
-            let dst = Reg::decode(code);
-            let set = Reg::decode(code);
-            let index = Reg::decode(code);
-            let kind = AccessKind::decode(code);
-            let v = get_index(ctx, rd!(regs, set), rd!(regs, index), kind)?;
-            wr!(regs, dst, v);
-        }
-        OpCode::SetIndex => {
-            let set = Reg::decode(code);
-            let index = Reg::decode(code);
-            let value = Reg::decode(code);
-            set_index(ctx, rd!(regs, set), rd!(regs, index), rd!(regs, value))?;
-        }
-        OpCode::GetField => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let slot = code.u32() as usize;
-            let kind = AccessKind::decode(code);
-            let receiver = rd!(regs, src);
-            if kind == AccessKind::Option && receiver == Val::Null {
-                wr!(regs, dst, Val::Null);
-                return Ok(Flow::Next);
-            }
-            let v = match receiver {
-                Val::Instance(i) => i.0.borrow().fields[slot],
-                Val::Array(a) => a.0.borrow()[slot],
-                _ => todo!(),
-            };
-            wr!(regs, dst, v);
-        }
-        OpCode::GetFieldStruct => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let slot = code.u32() as usize;
-            let Val::Instance(i) = rd!(regs, src) else {
-                unreachable!("illegal get_field_struct receiver")
-            };
-            debug_assert!(i.0.try_borrow().is_ok());
-            // SAFETY: no borrow of an instance is alive while script code runs (ops drop theirs
-            // before returning, and natives can't call back into scripts)
-            let v = match unsafe { &(*i.0.as_ptr()).fields } {
-                Fields::Inline { data, .. } => data[slot],
-                Fields::Spilled(v) => v[slot],
-            };
-            wr!(regs, dst, v);
-        }
-        OpCode::SetField => {
-            let receiver_reg = Reg::decode(code);
-            let slot = code.u32() as usize;
-            let value_reg = Reg::decode(code);
-            let receiver = rd!(regs, receiver_reg);
-            let value = rd!(regs, value_reg);
-            match receiver {
-                Val::Instance(i) => i.0.borrow_mut(&ctx).fields[slot] = value,
-                Val::Array(a) => a.0.borrow_mut(&ctx)[slot] = value,
-                _ => todo!(),
-            }
-        }
-        OpCode::Push => {
-            let array_reg = Reg::decode(code);
-            let value_reg = Reg::decode(code);
-            let arr = rd!(regs, array_reg).as_array().unwrap();
-            let value = rd!(regs, value_reg);
-            arr.0.borrow_mut(&ctx).push(value);
-        }
-        OpCode::Len => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let len = match rd!(regs, src) {
-                Val::Array(a) => a.0.borrow().len(),
-                Val::Dict(d) => d.0.borrow().len(),
-                Val::Str(s) => s.as_str().chars().count(),
-                Val::Int(i) => i as usize,
-                _ => todo!(),
-            };
-            wr!(regs, dst, Val::Int(len as i64));
-        }
-        OpCode::ToFloat => {
-            let dst = Reg::decode(code);
-            let Val::Int(i) = rd!(regs, Reg::decode(code)) else {
-                unreachable!("to_float can only be placed on an int by the compiler!")
-            };
-            wr!(regs, dst, Val::Float(i as f64));
-        }
-        OpCode::Sqrt => {
-            let dst = Reg::decode(code);
-            let Val::Float(f) = rd!(regs, Reg::decode(code)) else {
-                unreachable!("to_float can only be placed on a float by the compiler!")
-            };
-            wr!(regs, dst, Val::Float(f.sqrt()));
-        }
-        OpCode::Unwrap => {
-            let dst = Reg::decode(code);
-            let src = Reg::decode(code);
-            let v = rd!(regs, src);
-            match v {
-                Val::Null => return Err(RtErr::UnwrappedNull),
-                Val::Raised(err) => {
-                    return Err(RtErr::UnwrappedRaised(err.as_str().to_string()));
+/// Inside a handler, avoid any (non-inlined) calls anywhere but the tail position, as to not force
+/// stack homes for values that don't otherwise need them. A hot op with a rare slow path should
+/// tail-call a `#[cold]` helper like the `bin_cold` family. (The Call handlers look like a
+/// violation but aren't: their SmallVec is built straight into the `Flow` return slot, which lives
+/// in the caller's frame.)
+macro_rules! handlers {
+    ($regs:ident, $code:ident, $ctx:ident, $strs:ident; $($op:ident => $body:expr,)*) => {
+        static HANDLERS: [Handler; OpCode::COUNT] = {
+            $(
+                #[allow(non_snake_case, unused_variables, unreachable_code)]
+                fn $op<'gc>(
+                    $regs: &mut [Val<'gc>],
+                    $code: &mut Decoder,
+                    $ctx: Ctx<'gc>,
+                    $strs: &StrInterner,
+                ) -> RtResult<Flow<'gc>> {
+                    $body;
+                    Ok(Flow::Next)
                 }
-                _ => wr!(regs, dst, v),
+            )*
+            fn cold<'gc>(
+                regs: &mut [Val<'gc>],
+                code: &mut Decoder,
+                ctx: Ctx<'gc>,
+                strs: &StrInterner,
+            ) -> RtResult<Flow<'gc>> {
+                code.ip -= 1;
+                let op = OpCode::decode(code);
+                cold_dispatch(code, regs, ctx, op, strs)
             }
+            let mut table = [cold as Handler; OpCode::COUNT];
+            $(table[OpCode::$op as usize] = $op;)*
+            table
+        };
+    };
+}
+
+handlers! {
+    regs, code, ctx, strs;
+    LoadConst => {
+        let reg = Reg::decode(code);
+        let con = Constant::decode(code);
+        let val = constant_to_val(con, ctx, strs);
+        wr!(regs, reg, val);
+    },
+    Move => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        wr!(regs, dst, rd!(regs, src));
+    },
+    Jump => {
+        code.ip = code.u32() as usize;
+    },
+    JumpIf => {
+        let cond = Reg::decode(code);
+        let target = code.u32() as usize;
+        let is_true = code.u8();
+        if rd!(regs, cond) == Val::Bool(is_true != 0) {
+            code.ip = target;
         }
-        OpCode::In => {
-            let dst = Reg::decode(code);
-            let needle = Reg::decode(code);
-            let haystack = Reg::decode(code);
-            let condition = bool::decode(code);
-            let v = contains(rd!(regs, needle), rd!(regs, haystack), condition);
-            wr!(regs, dst, v);
+    },
+    ForNext => {
+        let idx = Reg::decode(code);
+        let bound = Reg::decode(code);
+        let target = code.u32() as usize;
+        let Val::Int(i) = rd!(regs, idx) else {
+            unreachable!("for_next idx is statically int")
+        };
+        let Val::Int(b) = rd!(regs, bound) else {
+            unreachable!("for_next bound is statically int")
+        };
+        let i = i + 1;
+        wr!(regs, idx, Val::Int(i));
+        if i < b {
+            code.ip = target;
         }
-        OpCode::LoadBody => {
-            let dst = Reg::decode(code);
-            let body = BodyId::decode(code);
-            wr!(regs, dst, Val::Fn(body));
+    },
+    GetIndex => {
+        let dst = Reg::decode(code);
+        let set = Reg::decode(code);
+        let index = Reg::decode(code);
+        let kind = AccessKind::decode(code);
+        let v = get_index(ctx, rd!(regs, set), rd!(regs, index), kind)?;
+        wr!(regs, dst, v);
+    },
+    SetIndex => {
+        let set = Reg::decode(code);
+        let index = Reg::decode(code);
+        let value = Reg::decode(code);
+        set_index(ctx, rd!(regs, set), rd!(regs, index), rd!(regs, value))?;
+    },
+    GetField => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let slot = code.u32() as usize;
+        let kind = AccessKind::decode(code);
+        let receiver = rd!(regs, src);
+        if kind == AccessKind::Option && receiver == Val::Null {
+            wr!(regs, dst, Val::Null);
+            return Ok(Flow::Next);
         }
-        OpCode::Call => {
-            let dst = Reg::decode(code);
-            let callee = Reg::decode(code);
-            let len = code.u8() as usize;
-            let target = match rd!(regs, callee) {
-                Val::Fn(body) => CallTarget::Value(body),
-                Val::Closure(closure) => CallTarget::Closure(closure),
-                other => return Err(not_callable(other)),
-            };
-            let mut args = SmallVec::<[Val; 8]>::new();
-            for _ in 0..len {
-                let r = Reg::decode(code);
-                args.push(rd!(regs, r));
+        let v = match receiver {
+            Val::Instance(i) => i.0.borrow().fields[slot],
+            Val::Array(a) => a.0.borrow()[slot],
+            _ => todo!(),
+        };
+        wr!(regs, dst, v);
+    },
+    GetFieldStruct => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let slot = code.u32() as usize;
+        let Val::Instance(i) = rd!(regs, src) else {
+            unreachable!("illegal get_field_struct receiver")
+        };
+        debug_assert!(i.0.try_borrow().is_ok());
+        // SAFETY: no borrow of an instance is alive while script code runs (ops drop theirs
+        // before returning, and natives can't call back into scripts)
+        let v = match unsafe { &(*i.0.as_ptr()).fields } {
+            Fields::Inline { data, .. } => data[slot],
+            Fields::Spilled(v) => v[slot],
+        };
+        wr!(regs, dst, v);
+    },
+    SetField => {
+        let receiver_reg = Reg::decode(code);
+        let slot = code.u32() as usize;
+        let value_reg = Reg::decode(code);
+        let receiver = rd!(regs, receiver_reg);
+        let value = rd!(regs, value_reg);
+        match receiver {
+            Val::Instance(i) => i.0.borrow_mut(&ctx).fields[slot] = value,
+            Val::Array(a) => a.0.borrow_mut(&ctx)[slot] = value,
+            _ => todo!(),
+        }
+    },
+    Push => {
+        let array_reg = Reg::decode(code);
+        let value_reg = Reg::decode(code);
+        let arr = rd!(regs, array_reg).as_array().unwrap();
+        let value = rd!(regs, value_reg);
+        arr.0.borrow_mut(&ctx).push(value);
+    },
+    Len => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let len = match rd!(regs, src) {
+            Val::Array(a) => a.0.borrow().len(),
+            Val::Dict(d) => d.0.borrow().len(),
+            Val::Str(s) => s.as_str().chars().count(),
+            Val::Int(i) => i as usize,
+            _ => todo!(),
+        };
+        wr!(regs, dst, Val::Int(len as i64));
+    },
+    ToFloat => {
+        let dst = Reg::decode(code);
+        let Val::Int(i) = rd!(regs, Reg::decode(code)) else {
+            unreachable!("to_float can only be placed on an int by the compiler!")
+        };
+        wr!(regs, dst, Val::Float(i as f64));
+    },
+    Sqrt => {
+        let dst = Reg::decode(code);
+        let Val::Float(f) = rd!(regs, Reg::decode(code)) else {
+            unreachable!("to_float can only be placed on a float by the compiler!")
+        };
+        wr!(regs, dst, Val::Float(f.sqrt()));
+    },
+    Unwrap => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        let v = rd!(regs, src);
+        match v {
+            Val::Null => return Err(RtErr::UnwrappedNull),
+            Val::Raised(err) => {
+                return Err(RtErr::UnwrappedRaised(err.as_str().to_string()));
             }
-            return Ok(Flow::Call { target, dst, args });
+            _ => wr!(regs, dst, v),
         }
-        OpCode::CallDirect => {
-            let dst = Reg::decode(code);
-            let body = BodyId::decode(code);
-            let len = code.u8() as usize;
-            let mut args = SmallVec::<[Val; 8]>::new();
-            for _ in 0..len {
-                let r = Reg::decode(code);
-                args.push(rd!(regs, r));
-            }
-            return Ok(Flow::Call {
-                target: CallTarget::Fn(body),
-                dst,
-                args,
-            });
-        }
-        OpCode::Return => {
-            let reg = Reg::decode(code);
-            return Ok(Flow::Return(rd!(regs, reg)));
-        }
-        OpCode::CallNative => {
-            let dst = Reg::decode(code);
-            let id = api::NativeId::decode(code);
-            let len = code.u8() as usize;
-            let mut args = SmallVec::<[Val; 8]>::new();
-            for _ in 0..len {
-                let reg = Reg::decode(code);
-                args.push(rd!(regs, reg));
-            }
-            let native = {
-                let table = ctx.state().natives.borrow();
-                *table
-                    .get(id.index())
-                    .and_then(|o| o.as_ref())
-                    .expect("native id has no installed entry")
-            };
-            let v = native.call(ctx, &args)?;
-            wr!(regs, dst, v);
-        }
-        OpCode::BoolEq => {
-            let dst = Reg::decode(code);
-            let l = Reg::decode(code);
+    },
+    In => {
+        let dst = Reg::decode(code);
+        let needle = Reg::decode(code);
+        let haystack = Reg::decode(code);
+        let condition = bool::decode(code);
+        let v = contains(rd!(regs, needle), rd!(regs, haystack), condition);
+        wr!(regs, dst, v);
+    },
+    LoadBody => {
+        let dst = Reg::decode(code);
+        let body = BodyId::decode(code);
+        wr!(regs, dst, Val::Fn(body));
+    },
+    Call => {
+        let dst = Reg::decode(code);
+        let callee = Reg::decode(code);
+        let len = code.u8() as usize;
+        let target = match rd!(regs, callee) {
+            Val::Fn(body) => CallTarget::Value(body),
+            Val::Closure(closure) => CallTarget::Closure(closure),
+            other => return Err(not_callable(other)),
+        };
+        let mut args = SmallVec::<[Val; 8]>::new();
+        for _ in 0..len {
             let r = Reg::decode(code);
-            let Val::Bool(l) = rd!(regs, l) else {
-                unreachable!("illegal bool eq op")
-            };
-            let Val::Bool(r) = rd!(regs, r) else {
-                unreachable!("illegal bool eq op");
-            };
-            wr!(regs, dst, Val::Bool(l == r));
+            args.push(rd!(regs, r));
         }
-        OpCode::BoolNe => {
-            let dst = Reg::decode(code);
-            let l = Reg::decode(code);
+        return Ok(Flow::Call { target, dst, args });
+    },
+    CallDirect => {
+        let dst = Reg::decode(code);
+        let body = BodyId::decode(code);
+        let len = code.u8() as usize;
+        let mut args = SmallVec::<[Val; 8]>::new();
+        for _ in 0..len {
             let r = Reg::decode(code);
-            let Val::Bool(l) = rd!(regs, l) else {
-                unreachable!("illegal bool ne op")
-            };
-            let Val::Bool(r) = rd!(regs, r) else {
-                unreachable!("illegal bool ne op");
-            };
-            wr!(regs, dst, Val::Bool(l != r));
+            args.push(rd!(regs, r));
         }
-        OpCode::AddInt => int_arith!(regs, code, ctx, checked_add, BinOp::Add),
-        OpCode::ModInt => {
-            // unique since right now the None -> integer overflow, but this is mod by zero
-            // which is different, and annoying, and ugly
-            let dst = Reg::decode(code);
-            let left = Reg::decode(code);
-            let right = Reg::decode(code);
-            match (rd!(regs, left), rd!(regs, right)) {
-                (Val::Int(a), Val::Int(b)) => {
-                    if b == 0 {
-                        return Err(RtErr::ModByZero);
-                    }
-                    wr!(regs, dst, Val::Int(a % b));
+        return Ok(Flow::Call {
+            target: CallTarget::Fn(body),
+            dst,
+            args,
+        });
+    },
+    Return => {
+        let reg = Reg::decode(code);
+        return Ok(Flow::Return(rd!(regs, reg)));
+    },
+    CallNative => {
+        let dst = Reg::decode(code);
+        let id = api::NativeId::decode(code);
+        let len = code.u8() as usize;
+        let mut args = SmallVec::<[Val; 8]>::new();
+        for _ in 0..len {
+            let reg = Reg::decode(code);
+            args.push(rd!(regs, reg));
+        }
+        let native = {
+            let table = ctx.state().natives.borrow();
+            *table
+                .get(id.index())
+                .and_then(|o| o.as_ref())
+                .expect("native id has no installed entry")
+        };
+        let v = native.call(ctx, &args)?;
+        wr!(regs, dst, v);
+    },
+    BoolEq => {
+        let dst = Reg::decode(code);
+        let l = Reg::decode(code);
+        let r = Reg::decode(code);
+        let Val::Bool(l) = rd!(regs, l) else {
+            unreachable!("illegal bool eq op")
+        };
+        let Val::Bool(r) = rd!(regs, r) else {
+            unreachable!("illegal bool eq op");
+        };
+        wr!(regs, dst, Val::Bool(l == r));
+    },
+    BoolNe => {
+        let dst = Reg::decode(code);
+        let l = Reg::decode(code);
+        let r = Reg::decode(code);
+        let Val::Bool(l) = rd!(regs, l) else {
+            unreachable!("illegal bool ne op")
+        };
+        let Val::Bool(r) = rd!(regs, r) else {
+            unreachable!("illegal bool ne op");
+        };
+        wr!(regs, dst, Val::Bool(l != r));
+    },
+    AddInt => int_arith!(regs, code, ctx, checked_add, BinOp::Add),
+    ModInt => {
+        // unique since right now the None -> integer overflow, but this is mod by zero
+        // which is different, and annoying, and ugly
+        let dst = Reg::decode(code);
+        let left = Reg::decode(code);
+        let right = Reg::decode(code);
+        match (rd!(regs, left), rd!(regs, right)) {
+            (Val::Int(a), Val::Int(b)) => {
+                if b == 0 {
+                    return Err(RtErr::ModByZero);
                 }
-                _ => return bin_cold(regs, dst, left, right, ctx, BinOp::Mod),
+                wr!(regs, dst, Val::Int(a % b));
             }
+            _ => return bin_cold(regs, dst, left, right, ctx, BinOp::Mod),
         }
-        OpCode::SubInt => int_arith!(regs, code, ctx, checked_sub, BinOp::Sub),
-        OpCode::MultInt => int_arith!(regs, code, ctx, checked_mul, BinOp::Mult),
-        OpCode::IntLt => int_eval!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::IntLe => int_eval!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::IntGt => int_eval!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::IntGe => int_eval!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::IntEq => int_eval!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::IntNe => int_eval!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::AddFloat => float_arith!(regs, code, ctx, +, BinOp::Add),
-        OpCode::SubFloat => float_arith!(regs, code, ctx, -, BinOp::Sub),
-        OpCode::MultFloat => float_arith!(regs, code, ctx, *, BinOp::Mult),
-        OpCode::DivFloat => float_arith!(regs, code, ctx, /, BinOp::Div),
-        OpCode::FloatLt => float_eval!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::FloatLe => float_eval!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::FloatGt => float_eval!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::FloatGe => float_eval!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::FloatEq => float_eval!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::FloatNe => float_eval!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::StrEq => str_eval!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::StrNe => str_eval!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::BIntLt => branch_int!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::BIntLe => branch_int!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::BIntGt => branch_int!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::BIntGe => branch_int!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::BIntEq => branch_int!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::BIntNe => branch_int!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::AddIntImm => int_arith_imm!(regs, code, ctx, checked_add, BinOp::Add),
-        OpCode::SubIntImm => int_arith_imm!(regs, code, ctx, checked_sub, BinOp::Sub),
-        OpCode::MultIntImm => int_arith_imm!(regs, code, ctx, checked_mul, BinOp::Mult),
-        OpCode::ModIntImm => {
-            // see above ModInt, still annoying, still ugly
-            let dst = Reg::decode(code);
-            let left = Reg::decode(code);
-            let val = code.i64();
-            match rd!(regs, left) {
-                Val::Int(a) => {
-                    if val == 0 {
-                        return Err(RtErr::ModByZero);
-                    }
-                    wr!(regs, dst, Val::Int(a % val));
+    },
+    SubInt => int_arith!(regs, code, ctx, checked_sub, BinOp::Sub),
+    MultInt => int_arith!(regs, code, ctx, checked_mul, BinOp::Mult),
+    IntLt => int_eval!(regs, code, ctx, <, BinOp::LessThan),
+    IntLe => int_eval!(regs, code, ctx, <=, BinOp::LessEqual),
+    IntGt => int_eval!(regs, code, ctx, >, BinOp::GreaterThan),
+    IntGe => int_eval!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    IntEq => int_eval!(regs, code, ctx, ==, BinOp::Identity),
+    IntNe => int_eval!(regs, code, ctx, !=, BinOp::NotEqual),
+    AddFloat => float_arith!(regs, code, ctx, +, BinOp::Add),
+    SubFloat => float_arith!(regs, code, ctx, -, BinOp::Sub),
+    MultFloat => float_arith!(regs, code, ctx, *, BinOp::Mult),
+    DivFloat => float_arith!(regs, code, ctx, /, BinOp::Div),
+    FloatLt => float_eval!(regs, code, ctx, <, BinOp::LessThan),
+    FloatLe => float_eval!(regs, code, ctx, <=, BinOp::LessEqual),
+    FloatGt => float_eval!(regs, code, ctx, >, BinOp::GreaterThan),
+    FloatGe => float_eval!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    FloatEq => float_eval!(regs, code, ctx, ==, BinOp::Identity),
+    FloatNe => float_eval!(regs, code, ctx, !=, BinOp::NotEqual),
+    StrEq => str_eval!(regs, code, ctx, ==, BinOp::Identity),
+    StrNe => str_eval!(regs, code, ctx, !=, BinOp::NotEqual),
+    BIntLt => branch_int!(regs, code, ctx, <, BinOp::LessThan),
+    BIntLe => branch_int!(regs, code, ctx, <=, BinOp::LessEqual),
+    BIntGt => branch_int!(regs, code, ctx, >, BinOp::GreaterThan),
+    BIntGe => branch_int!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    BIntEq => branch_int!(regs, code, ctx, ==, BinOp::Identity),
+    BIntNe => branch_int!(regs, code, ctx, !=, BinOp::NotEqual),
+    AddIntImm => int_arith_imm!(regs, code, ctx, checked_add, BinOp::Add),
+    SubIntImm => int_arith_imm!(regs, code, ctx, checked_sub, BinOp::Sub),
+    MultIntImm => int_arith_imm!(regs, code, ctx, checked_mul, BinOp::Mult),
+    ModIntImm => {
+        // see above ModInt, still annoying, still ugly
+        let dst = Reg::decode(code);
+        let left = Reg::decode(code);
+        let val = code.i64();
+        match rd!(regs, left) {
+            Val::Int(a) => {
+                if val == 0 {
+                    return Err(RtErr::ModByZero);
                 }
-                _ => return bin_cold_imm_int(regs, dst, left, val, ctx, BinOp::Mod),
+                wr!(regs, dst, Val::Int(a % val));
             }
+            _ => return bin_cold_imm_int(regs, dst, left, val, ctx, BinOp::Mod),
         }
-        OpCode::IntLtImm => int_eval_imm!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::IntLeImm => int_eval_imm!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::IntGtImm => int_eval_imm!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::IntGeImm => int_eval_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::IntEqImm => int_eval_imm!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::IntNeImm => int_eval_imm!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::BIntLtImm => branch_int_imm!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::BIntLeImm => branch_int_imm!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::BIntGtImm => branch_int_imm!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::BIntGeImm => branch_int_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::BIntEqImm => branch_int_imm!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::BIntNeImm => branch_int_imm!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::BFloatLt => branch_float!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::BFloatLe => branch_float!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::BFloatGt => branch_float!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::BFloatGe => branch_float!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::BFloatEq => branch_float!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::BFloatNe => branch_float!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::AddFloatImm => float_arith_imm!(regs, code, ctx, +, BinOp::Add),
-        OpCode::SubFloatImm => float_arith_imm!(regs, code, ctx, -, BinOp::Sub),
-        OpCode::MultFloatImm => float_arith_imm!(regs, code, ctx, *, BinOp::Mult),
-        OpCode::ModFloatImm => float_arith_imm!(regs, code, ctx, %, BinOp::Mod),
-        OpCode::FloatLtImm => float_eval_imm!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::FloatLeImm => float_eval_imm!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::FloatGtImm => float_eval_imm!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::FloatGeImm => float_eval_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::FloatEqImm => float_eval_imm!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::FloatNeImm => float_eval_imm!(regs, code, ctx, !=, BinOp::NotEqual),
-        OpCode::BFloatLtImm => branch_float_imm!(regs, code, ctx, <, BinOp::LessThan),
-        OpCode::BFloatLeImm => branch_float_imm!(regs, code, ctx, <=, BinOp::LessEqual),
-        OpCode::BFloatGtImm => branch_float_imm!(regs, code, ctx, >, BinOp::GreaterThan),
-        OpCode::BFloatGeImm => branch_float_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
-        OpCode::BFloatEqImm => branch_float_imm!(regs, code, ctx, ==, BinOp::Identity),
-        OpCode::BFloatNeImm => branch_float_imm!(regs, code, ctx, !=, BinOp::NotEqual),
-        op => return cold_dispatch(code, regs, ctx, op, strs),
-    }
-    Ok(Flow::Next)
+    },
+    IntLtImm => int_eval_imm!(regs, code, ctx, <, BinOp::LessThan),
+    IntLeImm => int_eval_imm!(regs, code, ctx, <=, BinOp::LessEqual),
+    IntGtImm => int_eval_imm!(regs, code, ctx, >, BinOp::GreaterThan),
+    IntGeImm => int_eval_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    IntEqImm => int_eval_imm!(regs, code, ctx, ==, BinOp::Identity),
+    IntNeImm => int_eval_imm!(regs, code, ctx, !=, BinOp::NotEqual),
+    BIntLtImm => branch_int_imm!(regs, code, ctx, <, BinOp::LessThan),
+    BIntLeImm => branch_int_imm!(regs, code, ctx, <=, BinOp::LessEqual),
+    BIntGtImm => branch_int_imm!(regs, code, ctx, >, BinOp::GreaterThan),
+    BIntGeImm => branch_int_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    BIntEqImm => branch_int_imm!(regs, code, ctx, ==, BinOp::Identity),
+    BIntNeImm => branch_int_imm!(regs, code, ctx, !=, BinOp::NotEqual),
+    BFloatLt => branch_float!(regs, code, ctx, <, BinOp::LessThan),
+    BFloatLe => branch_float!(regs, code, ctx, <=, BinOp::LessEqual),
+    BFloatGt => branch_float!(regs, code, ctx, >, BinOp::GreaterThan),
+    BFloatGe => branch_float!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    BFloatEq => branch_float!(regs, code, ctx, ==, BinOp::Identity),
+    BFloatNe => branch_float!(regs, code, ctx, !=, BinOp::NotEqual),
+    AddFloatImm => float_arith_imm!(regs, code, ctx, +, BinOp::Add),
+    SubFloatImm => float_arith_imm!(regs, code, ctx, -, BinOp::Sub),
+    MultFloatImm => float_arith_imm!(regs, code, ctx, *, BinOp::Mult),
+    ModFloatImm => float_arith_imm!(regs, code, ctx, %, BinOp::Mod),
+    FloatLtImm => float_eval_imm!(regs, code, ctx, <, BinOp::LessThan),
+    FloatLeImm => float_eval_imm!(regs, code, ctx, <=, BinOp::LessEqual),
+    FloatGtImm => float_eval_imm!(regs, code, ctx, >, BinOp::GreaterThan),
+    FloatGeImm => float_eval_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    FloatEqImm => float_eval_imm!(regs, code, ctx, ==, BinOp::Identity),
+    FloatNeImm => float_eval_imm!(regs, code, ctx, !=, BinOp::NotEqual),
+    BFloatLtImm => branch_float_imm!(regs, code, ctx, <, BinOp::LessThan),
+    BFloatLeImm => branch_float_imm!(regs, code, ctx, <=, BinOp::LessEqual),
+    BFloatGtImm => branch_float_imm!(regs, code, ctx, >, BinOp::GreaterThan),
+    BFloatGeImm => branch_float_imm!(regs, code, ctx, >=, BinOp::GreaterEqual),
+    BFloatEqImm => branch_float_imm!(regs, code, ctx, ==, BinOp::Identity),
+    BFloatNeImm => branch_float_imm!(regs, code, ctx, !=, BinOp::NotEqual),
 }
 
 /// Push a new frame for `body`: grow `regs`, copy args into the param registers and captures into
@@ -1131,7 +1147,7 @@ fn contains<'gc>(needle: Val<'gc>, haystack: Val<'gc>, condition: bool) -> Val<'
 // so the arm forwards this result verbatim. That keeps the operands `Val`-by-value (never spilled
 // across the tag check in the hot arm) and collapses the per-arm error epilogues into one shared
 // tail. They MUST stay trivial past the `bin`/`unary` call: anything that takes the address of a
-// local in here reintroduces an escape (in this frame, harmless to `step_one`, but don't let these
+// local in here reintroduces an escape (in this frame, harmless to the handler, but don't let these
 // balloon and then get inlined).
 
 #[cold]
@@ -1248,9 +1264,8 @@ fn branch_cold_imm_float<'gc>(
     Ok(Flow::Next)
 }
 
-/// The genuinely-cold ops: ones that allocate, build collections, call out, or are otherwise rare
-/// enough that keeping their bodies (and their large per-op scratch) out of `step_one`'s frame is
-/// strictly a win. Reached via the wildcard arm with `return cold_dispatch(...)`.
+/// The genuinely-cold ops: ones that allocate, build collections, call out, or are otherwise rare.
+/// They share the `cold` fallback in `HANDLERS` instead of getting handlers of their own.
 #[cold]
 #[inline(never)]
 fn cold_dispatch<'gc>(
