@@ -23,7 +23,9 @@ mkdir -p "$RESULTS"
 
 # embedded runners (one bin each). mimas itself is embedded the same way now (path dep into the
 # main workspace). the koto/dyon/steel/boa/rustpython ones are other pure-Rust scripting languages
-# shown only on the home page; they only run the physics test below.
+# shown only on the home page; they only run the physics test below. each runner is its own cargo
+# workspace under benchmarks/runners/<language>, so no runtime's dependencies can change how another
+# one compiles (in one shared package, cargo unifies their features and versions).
 RUN="benchmarks/runners/target/release"
 MIMAS_RUN="$RUN/mimas-run"
 RHAI_RUN="$RUN/rhai-run"
@@ -41,24 +43,15 @@ GML_RUN="$RUN/gml-run"
 MERGE=0
 [ ${#REQUESTED[@]} -gt 0 ] && MERGE=1
 
-# build only the requested runner bins, so a luau-only run doesn't compile boa/rustpython
-if [ -f benchmarks/runners/Cargo.toml ]; then
-    runner_bins=()
-    if want mimas;      then runner_bins+=( --bin mimas-run ); fi
-    if want rhai;       then runner_bins+=( --bin rhai-run ); fi
-    if want rune;       then runner_bins+=( --bin rune-run ); fi
-    if want luau;       then runner_bins+=( --bin luau-run ); fi
-    if want koto;       then runner_bins+=( --bin koto-run ); fi
-    if want dyon;       then runner_bins+=( --bin dyon-run ); fi
-    if want steel;      then runner_bins+=( --bin steel-run ); fi
-    if want boa;        then runner_bins+=( --bin boa-run ); fi
-    if want rustpython; then runner_bins+=( --bin rustpython-run ); fi
-    if want fabricator; then runner_bins+=( --bin gml-run ); fi
-    if [ ${#runner_bins[@]} -gt 0 ]; then
-        echo "building embedded runners..."
-        ( cd benchmarks/runners && cargo build --release --quiet "${runner_bins[@]}" ) || echo "  runner build failed; skipping embedded runtimes"
+# build only the requested runners, so a luau-only run doesn't compile boa/rustpython. they share
+# one target dir to keep rebuilds down, which doesn't mix their features.
+echo "building embedded runners..."
+for lang in mimas rhai rune luau koto dyon steel boa rustpython fabricator; do
+    if want "$lang"; then
+        cargo build --release --quiet --manifest-path "benchmarks/runners/$lang/Cargo.toml" \
+            --target-dir benchmarks/runners/target || echo "  $lang runner build failed; skipping it"
     fi
-fi
+done
 
 # BENCHES=".." narrows which workloads run, so one language (or one repaired result) can be
 # re-measured without sitting through the whole suite. results merge per the MERGE logic above.
