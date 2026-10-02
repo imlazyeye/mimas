@@ -20,8 +20,6 @@ parse = { package = "mimas-parse", path = "../parse", version = "0.3.0" }
 api = { package = "mimas-api", path = "../api", version = "0.3.0" }
 macros = { package = "mimas-macros", path = "../macros", version = "0.3.0" }
 inventory = "0.3"
-itertools.workspace = true
-indexmap.workspace = true
 mutants.workspace = true
 gc-arena.workspace = true
 miette.workspace = true
