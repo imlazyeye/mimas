@@ -4,6 +4,15 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Added
+
+- The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
+
+### Changed
+
+- Scripts run faster. mimas's benchmarks take 16% to 41% less time, with the biggest gains on function calls, struct field access, array reads and float math.
+- Embedding mimas pulls in fewer crates: 98 instead of 101 with the default features, and 60 with only `export-api`.
+
 ## [0.3.0] - 2026-09-26
 
 This update focuses on usability for mimas, introducing a language server, [a full reference](https://mim.as/std.html) to the standard library, and the ability for users to generate their own documentation for their mimas projects, Rust types included. As always, please feel free to submit an issue if you have any issues or requests.
