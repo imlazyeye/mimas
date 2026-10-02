@@ -450,7 +450,7 @@ impl BlockWriter<'_> {
                 self.jump(ok_block);
                 self.ir.target(ok_block);
                 for (i, sub) in sub_pats.iter().enumerate() {
-                    let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, false);
+                    let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, true);
                     self.test_pattern(sub, elem, fail_block)?;
                 }
                 Some(())
@@ -469,7 +469,7 @@ impl BlockWriter<'_> {
                         .position(|f| f == name)
                         .expect("solver verified field exists")
                         as u32;
-                    let elem = self.get_field(scrut_val, slot, AccessKind::Direct, false);
+                    let elem = self.get_field(scrut_val, slot, AccessKind::Direct, true);
                     self.test_pattern(sub, elem, fail_block)?;
                 }
                 Some(())
@@ -526,7 +526,7 @@ impl BlockWriter<'_> {
             PatKind::Variant(_) => {}
             PatKind::TupleVariant(_, sub_pats) => {
                 for (i, sub) in sub_pats.iter().enumerate() {
-                    let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, false);
+                    let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, true);
                     self.bind_pattern(sub, elem);
                 }
             }
@@ -539,7 +539,7 @@ impl BlockWriter<'_> {
                         .position(|f| f == name)
                         .expect("solver verified field exists")
                         as u32;
-                    let elem = self.get_field(scrut_val, slot, AccessKind::Direct, false);
+                    let elem = self.get_field(scrut_val, slot, AccessKind::Direct, true);
                     self.bind_pattern(sub, elem);
                 }
             }
