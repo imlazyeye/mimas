@@ -3,9 +3,9 @@ use chompy::{
     lex::{Lex, Tok, Token},
     utils::Located as _,
 };
-use hashbrown::HashMap;
 use lex::{Lexer, TokKind, interp_end};
 use miette::NamedSource;
+use rustc_hash::FxHashMap;
 use shared::{FileId, Located, Location, Span};
 use std::{cell::Cell, sync::Arc};
 
@@ -15,7 +15,7 @@ pub struct Parser<'s> {
     /// Always ends with an `Eof`.
     tokens: Vec<Tok<TokKind<'s>>>,
     /// Each doc comment, keyed by the index of the token after it.
-    docs: HashMap<usize, &'s str>,
+    docs: FxHashMap<usize, &'s str>,
     /// Index of the next token in `tokens`.
     next: usize,
     /// Spent by looking at the next token and refilled by taking it. Running out means the

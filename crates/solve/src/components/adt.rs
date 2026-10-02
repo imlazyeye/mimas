@@ -359,6 +359,7 @@ impl DerefMut for Fields {
 }
 
 bitflags! {
+     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
      pub(crate) struct AdtFlags: u32 {
         const IS_ENUM = 1 << 0;
         const IS_MODULE = 1 << 1;

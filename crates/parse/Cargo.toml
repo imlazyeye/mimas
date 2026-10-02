@@ -16,7 +16,7 @@ path = "src/lib.rs"
 shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
 chompy.workspace = true
 itertools.workspace = true
-hashbrown.workspace = true
+rustc-hash.workspace = true
 mutants.workspace = true
 miette.workspace = true
 thiserror.workspace = true

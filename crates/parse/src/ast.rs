@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use hashbrown::HashMap;
 use miette::NamedSource;
+use rustc_hash::FxHashMap;
 use shared::{Located, Result, Span};
 
 use crate::{
@@ -18,7 +18,7 @@ pub struct Ast {
     src: NamedSource<Arc<str>>,
     stmts: Vec<Stmt>,
     /// Doc comments without their slashes, keyed by where the name each is for starts.
-    docs: HashMap<usize, String>,
+    docs: FxHashMap<usize, String>,
 }
 impl Ast {
     /// Creates a new Ast with the given statements.
@@ -26,7 +26,7 @@ impl Ast {
         name: String,
         src: NamedSource<Arc<str>>,
         stmts: Vec<Stmt>,
-        docs: HashMap<usize, String>,
+        docs: FxHashMap<usize, String>,
     ) -> Self {
         Self {
             name,
