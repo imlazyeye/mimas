@@ -30,7 +30,8 @@ mimas-bevy = { path = "../bevy", version = "0.3.0", optional = true }
 op-count = ["vm/op-count"]
 bevy = ["dep:mimas-bevy"]
 export-api = ["vm/export-api"]
-default = ["export-api"]
+fancy = ["shared/fancy"]
+default = ["export-api", "fancy"]
 
 [dev-dependencies]
 criterion = "0.5"
