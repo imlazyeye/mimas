@@ -585,7 +585,7 @@ fn roundtrip(op: Op) -> u8 {
     );
 
     let mut d = Decoder {
-        bytes: bytes.clone(),
+        bytes: &bytes,
         ip: 0,
     };
     let decoded = decode_op(&mut d);
@@ -851,7 +851,10 @@ fn special_floats_roundtrip_bitexact() {
         dst: r(0),
         constant: Constant::Float(f64::NAN),
     });
-    let mut d = Decoder { bytes, ip: 0 };
+    let mut d = Decoder {
+        bytes: &bytes,
+        ip: 0,
+    };
     let Op::LoadConst {
         constant: Constant::Float(got),
         ..

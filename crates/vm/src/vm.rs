@@ -46,7 +46,8 @@ mod op_count {
 
 pub struct Vm {
     pub(crate) entry: BodyId,
-    pub(crate) code: Decoder,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) ip: usize,
     pub(crate) chunks: IdVec<BodyId, Chunk>,
     pub(crate) signatures: Rc<IdVec<BodyId, Option<Function>>>,
     /// as in, strings from the compiler, not "c string". i know this is dumb and yet here I am
@@ -65,10 +66,8 @@ impl Vm {
         let arena = Arena::new(|mc| State::new(mc));
         Self {
             entry: BodyId::ZERO,
-            code: Decoder {
-                bytes: Vec::new(),
-                ip: 0,
-            },
+            bytes: Vec::new(),
+            ip: 0,
             chunks: IdVec::new(),
             signatures: Rc::default(),
             c_strs: StrInterner::new(),
@@ -90,7 +89,8 @@ impl Vm {
             root,
         } = program;
         self.entry = entry;
-        self.code = Decoder { bytes, ip: 0 };
+        self.bytes = bytes;
+        self.ip = 0;
         self.chunks = chunks;
         self.c_strs = strs;
         self.root = Rc::new(root);
@@ -146,7 +146,8 @@ impl Vm {
     pub fn run(&mut self) -> Result<(), Error> {
         loop {
             let Vm {
-                code,
+                bytes,
+                ip,
                 chunks,
                 signatures,
                 c_strs: strs,
@@ -157,9 +158,13 @@ impl Vm {
             let done = arena.mutate(|mc, state| {
                 let ctx = state.ctx(mc);
                 let mut thread = state.thread.borrow_mut(mc);
-                run_dispatch(
+                let mut code = Decoder {
+                    bytes: bytes.as_slice(),
+                    ip: *ip,
+                };
+                let done = run_dispatch(
                     ctx,
-                    code,
+                    &mut code,
                     chunks,
                     signatures,
                     strs,
@@ -167,7 +172,9 @@ impl Vm {
                     &mut thread,
                     FUEL,
                     1,
-                )
+                );
+                *ip = code.ip;
+                done
             })?;
             if done {
                 #[cfg(feature = "op-count")]
@@ -212,6 +219,7 @@ enum Flow<'gc> {
         args: SmallVec<[Val<'gc>; 8]>,
     },
     Return(Val<'gc>),
+    Jump(usize),
 }
 
 enum CallTarget<'gc> {
@@ -321,7 +329,7 @@ macro_rules! branch_int {
         let is_true = bool::decode($code);
         let hit = match (rd!($regs, left), rd!($regs, right)) {
             (Val::Int(a), Val::Int(b)) => a $rust_op b,
-            _ => return branch_cold($regs, $code, target, is_true, left, right, $ctx, $op),
+            _ => return branch_cold($regs, target, is_true, left, right, $ctx, $op),
         };
         if hit == is_true {
             $code.ip = target;
@@ -337,7 +345,7 @@ macro_rules! branch_float {
         let is_true = bool::decode($code);
         let hit = match (rd!($regs, left), rd!($regs, right)) {
             (Val::Float(a), Val::Float(b)) => a $rust_op b,
-            _ => return branch_cold($regs, $code, target, is_true, left, right, $ctx, $op),
+            _ => return branch_cold($regs, target, is_true, left, right, $ctx, $op),
         };
         if hit == is_true {
             $code.ip = target;
@@ -382,7 +390,7 @@ macro_rules! branch_int_imm {
         let is_true = bool::decode($code);
         let hit = match rd!($regs, left) {
             Val::Int(a) => a $rust_op val,
-            _ => return branch_cold_imm_int($regs, $code, target, is_true, left, val, $ctx, $op),
+            _ => return branch_cold_imm_int($regs, target, is_true, left, val, $ctx, $op),
         };
         if hit == is_true {
             $code.ip = target;
@@ -423,7 +431,7 @@ macro_rules! branch_float_imm {
         let is_true = bool::decode($code);
         let hit = match rd!($regs, left) {
             Val::Float(l) => l $rust_op val,
-            _ => return branch_cold_imm_float($regs, $code, target, is_true, left, val, $ctx, $op),
+            _ => return branch_cold_imm_float($regs, target, is_true, left, val, $ctx, $op),
         };
         if hit == is_true {
             $code.ip = target;
@@ -453,25 +461,43 @@ fn run_dispatch<'gc>(
     stop_depth: usize,
 ) -> Result<bool, Error> {
     let (mut regs_ptr, mut regs_len) = window(thread, chunks);
+    let bytes = code.bytes;
+    let mut ip = code.ip;
+    let mut exit = Ok(Flow::Next);
     loop {
         if fuel == 0 {
+            code.ip = ip;
             return Ok(false);
         }
         fuel -= 1;
-        let op_ip = code.ip;
+        let op_ip = ip;
         #[cfg(feature = "op-count")]
-        op_count::COUNTS[code.bytes[op_ip] as usize]
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        op_count::COUNTS[bytes[op_ip] as usize].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // SAFETY: regs_ptr/regs_len describe the current top frame's window
         // (regs[base..base+count]), refreshed after every resize/truncate below. No op between
         // refreshes touches thread.regs, so the pointer stays valid and this is the only live
         // reference into the window.
         let regs = unsafe { std::slice::from_raw_parts_mut(regs_ptr, regs_len) };
-        // only peek at the opcode (writing ip back here for the handler to reload put a store->load
-        // round trip on every op, which cost up to 27% depending on layout)
-        match HANDLERS[code.bytes[op_ip] as usize](regs, code, ctx, strs) {
-            Ok(Flow::Next) => {}
-            Ok(Flow::Call { target, dst, args }) => {
+        // ip goes to the handler and comes back in registers
+        ip = HANDLERS[bytes[op_ip] as usize](op_ip, bytes, regs, &mut exit, ctx, strs);
+        if ip & EXIT == 0 {
+            continue;
+        }
+        code.ip = ip & !EXIT;
+        let flow = match &exit {
+            Ok(flow) => flow,
+            Err(_) => {
+                let Err(kind) = std::mem::replace(&mut exit, Ok(Flow::Next)) else {
+                    unreachable!()
+                };
+                return Err(locate(kind, op_ip, thread, chunks, sources));
+            }
+        };
+        match flow {
+            Flow::Next | Flow::Jump(_) => {
+                unreachable!("handlers only exit with a call, return or fault")
+            }
+            Flow::Call { target, dst, args } => {
                 let (body, captures): (BodyId, &[Val<'gc>]) = match &target {
                     CallTarget::Fn(b) => (*b, &[]),
                     CallTarget::Value(b) => {
@@ -486,12 +512,12 @@ fn run_dispatch<'gc>(
                         (data.function, &data.captures)
                     }
                 };
-                if let Err(kind) = enter_call(thread, code, chunks, body, dst, &args, captures) {
+                if let Err(kind) = enter_call(thread, code, chunks, body, *dst, args, captures) {
                     return Err(locate(kind, op_ip, thread, chunks, sources));
                 }
                 (regs_ptr, regs_len) = window(thread, chunks);
             }
-            Ok(Flow::Return(value)) => {
+            Flow::Return(value) => {
                 if thread.frames.len() == 1 {
                     thread.frames.last_mut().unwrap().ip = code.ip;
                     return Ok(true);
@@ -501,14 +527,14 @@ fn run_dispatch<'gc>(
                 let caller = thread.frames.last().unwrap();
                 code.ip = caller.ip;
                 let caller_base = caller.base;
-                thread.regs[caller_base + popped.return_reg as usize] = value;
+                thread.regs[caller_base + popped.return_reg as usize] = *value;
                 if thread.frames.len() < stop_depth {
                     return Ok(true);
                 }
                 (regs_ptr, regs_len) = window(thread, chunks);
             }
-            Err(kind) => return Err(locate(kind, op_ip, thread, chunks, sources)),
         }
+        ip = code.ip;
     }
 }
 
@@ -527,8 +553,17 @@ fn window<'gc>(
     (unsafe { thread.regs.as_mut_ptr().add(base) }, count)
 }
 
-type Handler =
-    for<'gc> fn(&mut [Val<'gc>], &mut Decoder, Ctx<'gc>, &StrInterner) -> RtResult<Flow<'gc>>;
+type Handler = for<'gc> fn(
+    usize,
+    &[u8],
+    &mut [Val<'gc>],
+    &mut RtResult<Flow<'gc>>,
+    Ctx<'gc>,
+    &StrInterner,
+) -> usize;
+
+/// Set on the ip a handler returns when it left a call, a return or a fault in `exit`.
+const EXIT: usize = 1 << (usize::BITS - 1);
 
 /// Defines `HANDLERS`, one function per op, indexed by opcode. This is the main guy!
 ///
@@ -538,25 +573,45 @@ type Handler =
 /// without fails to compile. Use the op-count feature (`--features op-count`) to identify how much
 /// an op is being used within a given run.
 ///
+/// A handler takes the ip of its op and returns the ip of the next one, so the ip never touches
+/// memory between ops. A call, a return or a fault goes into `exit` instead, with `EXIT` set on the
+/// returned ip.
+///
 /// Inside a handler, avoid any (non-inlined) calls anywhere but the tail position, as to not force
 /// stack homes for values that don't otherwise need them. A hot op with a rare slow path should
-/// tail-call a `#[cold]` helper like the `bin_cold` family. (The Call handlers look like a
-/// violation but aren't: their SmallVec is built straight into the `Flow` return slot, which lives
-/// in the caller's frame.)
+/// tail-call a `#[cold]` helper like the `bin_cold` family.
 macro_rules! handlers {
     ($regs:ident, $code:ident, $ctx:ident, $strs:ident; $($op:ident => $body:expr,)*) => {
         static HANDLERS: [Handler; OpCode::COUNT] = {
             $(
-                #[allow(non_snake_case, unused_variables, unreachable_code)]
+                #[allow(
+                    non_snake_case,
+                    unused_variables,
+                    unreachable_code,
+                    clippy::redundant_closure_call
+                )]
                 fn $op<'gc>(
+                    ip: usize,
+                    bytes: &[u8],
                     $regs: &mut [Val<'gc>],
-                    $code: &mut Decoder,
+                    exit: &mut RtResult<Flow<'gc>>,
                     $ctx: Ctx<'gc>,
                     $strs: &StrInterner,
-                ) -> RtResult<Flow<'gc>> {
-                    $code.ip += 1; // past the opcode
-                    $body;
-                    Ok(Flow::Next)
+                ) -> usize {
+                    let mut decoder = Decoder { bytes, ip: ip + 1 }; // past the opcode
+                    let $code = &mut decoder;
+                    let flow = (|| -> RtResult<Flow<'gc>> {
+                        $body;
+                        Ok(Flow::Next)
+                    })();
+                    match flow {
+                        Ok(Flow::Next) => decoder.ip,
+                        Ok(Flow::Jump(target)) => target,
+                        flow => {
+                            *exit = flow;
+                            decoder.ip | EXIT
+                        }
+                    }
                 }
             )*
             const fn handler(op: OpCode) -> Handler {
@@ -1373,7 +1428,6 @@ fn bin_cold_imm_float<'gc>(
 #[allow(clippy::too_many_arguments)]
 fn branch_cold<'gc>(
     regs: &mut [Val<'gc>],
-    code: &mut Decoder,
     target: usize,
     is_true: bool,
     left: Reg,
@@ -1386,7 +1440,7 @@ fn branch_cold<'gc>(
         Val::Bool(true)
     );
     if hit == is_true {
-        code.ip = target;
+        return Ok(Flow::Jump(target));
     }
     Ok(Flow::Next)
 }
@@ -1396,7 +1450,6 @@ fn branch_cold<'gc>(
 #[allow(clippy::too_many_arguments)]
 fn branch_cold_imm_int<'gc>(
     regs: &mut [Val<'gc>],
-    code: &mut Decoder,
     target: usize,
     is_true: bool,
     left: Reg,
@@ -1409,7 +1462,7 @@ fn branch_cold_imm_int<'gc>(
         Val::Bool(true)
     );
     if hit == is_true {
-        code.ip = target;
+        return Ok(Flow::Jump(target));
     }
     Ok(Flow::Next)
 }
@@ -1419,7 +1472,6 @@ fn branch_cold_imm_int<'gc>(
 #[allow(clippy::too_many_arguments)]
 fn branch_cold_imm_float<'gc>(
     regs: &mut [Val<'gc>],
-    code: &mut Decoder,
     target: usize,
     is_true: bool,
     left: Reg,
@@ -1432,7 +1484,7 @@ fn branch_cold_imm_float<'gc>(
         Val::Bool(true)
     );
     if hit == is_true {
-        code.ip = target;
+        return Ok(Flow::Jump(target));
     }
     Ok(Flow::Next)
 }
@@ -1550,7 +1602,8 @@ impl Vm {
         R: for<'gc> MimasType<'gc>,
     {
         let Vm {
-            code,
+            bytes,
+            ip,
             chunks,
             signatures,
             c_strs: strs,
@@ -1561,9 +1614,13 @@ impl Vm {
         let result = arena.mutate(|mc, state| {
             let ctx = state.ctx(mc);
             let values = call_args(ctx, strs, f, args);
+            let mut code = Decoder {
+                bytes: bytes.as_slice(),
+                ip: *ip,
+            };
             let value = inject_call(
                 ctx,
-                code,
+                &mut code,
                 chunks,
                 signatures,
                 strs,
@@ -1572,6 +1629,7 @@ impl Vm {
                 &values,
                 &[],
             )?;
+            *ip = code.ip;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))
         });
@@ -1604,7 +1662,8 @@ impl Vm {
         R: for<'gc> MimasType<'gc>,
     {
         let Vm {
-            code,
+            bytes,
+            ip,
             chunks,
             c_strs: strs,
             arena,
@@ -1645,9 +1704,14 @@ impl Vm {
             };
             // `enter_call` is what rejects a wrong argument count, for the host and script alike
             let values = call_args(ctx, strs, signature, args);
+            let mut code = Decoder {
+                bytes: bytes.as_slice(),
+                ip: *ip,
+            };
             let value = inject_call(
-                ctx, code, chunks, signatures, strs, sources, body, &values, captures,
+                ctx, &mut code, chunks, signatures, strs, sources, body, &values, captures,
             )?;
+            *ip = code.ip;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))
         });
