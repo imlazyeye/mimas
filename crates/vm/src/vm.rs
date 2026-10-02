@@ -216,7 +216,7 @@ enum Flow<'gc> {
     Call {
         target: CallTarget<'gc>,
         dst: Reg,
-        args: SmallVec<[Val<'gc>; 8]>,
+        args_at: usize,
     },
     Return(Val<'gc>),
     Jump(usize),
@@ -490,14 +490,25 @@ fn run_dispatch<'gc>(
                 let Err(kind) = std::mem::replace(&mut exit, Ok(Flow::Next)) else {
                     unreachable!()
                 };
-                return Err(locate(kind, op_ip, thread, chunks, sources));
+                return Err(locate(*kind, op_ip, thread, chunks, sources));
             }
         };
         match flow {
             Flow::Next | Flow::Jump(_) => {
                 unreachable!("handlers only exit with a call, return or fault")
             }
-            Flow::Call { target, dst, args } => {
+            Flow::Call {
+                target,
+                dst,
+                args_at,
+            } => {
+                let args = CallArgs::Regs {
+                    list: Decoder {
+                        bytes,
+                        ip: *args_at,
+                    },
+                    caller_base: thread.frames.last().unwrap().base,
+                };
                 let (body, captures): (BodyId, &[Val<'gc>]) = match &target {
                     CallTarget::Fn(b) => (*b, &[]),
                     CallTarget::Value(b) => {
@@ -553,17 +564,34 @@ fn window<'gc>(
     (unsafe { thread.regs.as_mut_ptr().add(base) }, count)
 }
 
-type Handler = for<'gc> fn(
-    usize,
-    &[u8],
-    &mut [Val<'gc>],
-    &mut RtResult<Flow<'gc>>,
-    Ctx<'gc>,
-    &StrInterner,
-) -> usize;
+type Handler =
+    for<'gc> fn(usize, &[u8], &mut [Val<'gc>], &mut Exit<'gc>, Ctx<'gc>, &StrInterner) -> usize;
+
+/// What a handler leaves for the dispatch loop when it doesn't just move on to the next op. The
+/// error is boxed to keep it from setting the size of every call and return.
+type Exit<'gc> = Result<Flow<'gc>, Box<RtErr>>;
 
 /// Set on the ip a handler returns when it left a call, a return or a fault in `exit`.
 const EXIT: usize = 1 << (usize::BITS - 1);
+
+/// Boxes a handler's fault into `exit`. It's out of line and reached by a tail call, which keeps
+/// the allocation from costing every handler's fast path a saved register.
+#[cold]
+#[inline(never)]
+fn fault(exit: &mut Exit<'_>, kind: RtErr, ip: usize) -> usize {
+    *exit = Err(Box::new(kind));
+    ip | EXIT
+}
+
+// sizes the dispatch path relies on (`Val` moves on every op, `Exit` on every call and return). a
+// bigger copy can turn into a `memcpy` call in some host builds, which once cost calls up to 38%
+const _: () = {
+    assert!(size_of::<Val<'static>>() == 16, "`Val` must stay 16 bytes");
+    assert!(
+        size_of::<Exit<'static>>() <= 32,
+        "`Exit` must stay within 32 bytes"
+    );
+};
 
 /// Defines `HANDLERS`, one function per op, indexed by opcode. This is the main guy!
 ///
@@ -594,7 +622,7 @@ macro_rules! handlers {
                     ip: usize,
                     bytes: &[u8],
                     $regs: &mut [Val<'gc>],
-                    exit: &mut RtResult<Flow<'gc>>,
+                    exit: &mut Exit<'gc>,
                     $ctx: Ctx<'gc>,
                     $strs: &StrInterner,
                 ) -> usize {
@@ -607,10 +635,12 @@ macro_rules! handlers {
                     match flow {
                         Ok(Flow::Next) => decoder.ip,
                         Ok(Flow::Jump(target)) => target,
-                        flow => {
-                            *exit = flow;
+                        Ok(flow) => {
+                            // never an old fault here to drop (the loop takes them out first)
+                            std::mem::forget(std::mem::replace(exit, Ok(flow)));
                             decoder.ip | EXIT
                         }
+                        Err(kind) => fault(exit, kind, decoder.ip),
                     }
                 }
             )*
@@ -821,32 +851,34 @@ handlers! {
     Call => {
         let dst = Reg::decode(code);
         let callee = Reg::decode(code);
+        let args_at = code.ip;
         let len = code.u8() as usize;
         let target = match rd!(regs, callee) {
             Val::Fn(body) => CallTarget::Value(body),
             Val::Closure(closure) => CallTarget::Closure(closure),
             other => return Err(not_callable(other)),
         };
-        let mut args = SmallVec::<[Val; 8]>::new();
         for _ in 0..len {
-            let r = Reg::decode(code);
-            args.push(rd!(regs, r));
+            Reg::decode(code);
         }
-        return Ok(Flow::Call { target, dst, args });
+        return Ok(Flow::Call {
+            target,
+            dst,
+            args_at,
+        });
     },
     CallDirect => {
         let dst = Reg::decode(code);
         let body = BodyId::decode(code);
+        let args_at = code.ip;
         let len = code.u8() as usize;
-        let mut args = SmallVec::<[Val; 8]>::new();
         for _ in 0..len {
-            let r = Reg::decode(code);
-            args.push(rd!(regs, r));
+            Reg::decode(code);
         }
         return Ok(Flow::Call {
             target: CallTarget::Fn(body),
             dst,
-            args,
+            args_at,
         });
     },
     Return => {
@@ -1133,6 +1165,17 @@ handlers! {
     },
 }
 
+/// Where a call's arguments come from.
+enum CallArgs<'a, 'gc> {
+    /// A script call's argument list in the bytecode, read straight out of the caller's registers.
+    Regs {
+        list: Decoder<'a>,
+        caller_base: usize,
+    },
+    /// Values a host passed in.
+    Values(&'a [Val<'gc>]),
+}
+
 /// Push a new frame for `body`: grow `regs`, copy args into the param registers and captures into
 /// the capture registers, save the caller's ip, and jump. The window pointer in `run_dispatch` is
 /// stale after the `resize` here, which is why the driver re-derives it on the next `'frame` pass.
@@ -1142,16 +1185,20 @@ fn enter_call<'gc>(
     chunks: &IdVec<BodyId, Chunk>,
     body: BodyId,
     dst: Reg,
-    args: &[Val<'gc>],
+    args: CallArgs<'_, 'gc>,
     captures: &[Val<'gc>],
 ) -> Result<(), RtErr> {
     let chunk = &chunks[body];
+    let got = match &args {
+        CallArgs::Regs { list, .. } => list.bytes[list.ip] as usize,
+        CallArgs::Values(values) => values.len(),
+    };
     // a dynamic call reaches here with whatever the script had in hand, so this is a real check
     // rather than an invariant -- entering with the wrong count would read foreign registers
-    if args.len() != chunk.args as usize {
+    if got != chunk.args as usize {
         return Err(RtErr::WrongArity {
             wanted: chunk.args as usize,
-            got: args.len(),
+            got,
         });
     }
     debug_assert_eq!(captures.len(), chunk.captures.len());
@@ -1160,8 +1207,22 @@ fn enter_call<'gc>(
     thread
         .regs
         .resize(new_base + chunk.regs as usize, Val::Null);
-    for (param_reg, &arg) in chunk.params.iter().zip(args) {
-        thread.regs[new_base + param_reg.index()] = arg;
+    match args {
+        CallArgs::Regs {
+            mut list,
+            caller_base,
+        } => {
+            list.u8(); // the count, checked above
+            for param_reg in &chunk.params {
+                let arg = Reg::decode(&mut list);
+                thread.regs[new_base + param_reg.index()] = thread.regs[caller_base + arg.index()];
+            }
+        }
+        CallArgs::Values(values) => {
+            for (param_reg, &arg) in chunk.params.iter().zip(values) {
+                thread.regs[new_base + param_reg.index()] = arg;
+            }
+        }
     }
     for (cap_reg, &cap) in chunk.captures.iter().zip(captures) {
         thread.regs[new_base + cap_reg.index()] = cap;
@@ -1222,7 +1283,8 @@ fn inject_call<'gc>(
     // the callee returns into r0 of the entry body, which still needs its own value
     let r0 = thread.regs[base];
     // nothing is mutated before this fails, so the thread is untouched and needs no unwinding
-    enter_call(&mut thread, code, chunks, body, Reg::ZERO, values, captures).map_err(Error::msg)?;
+    let args = CallArgs::Values(values);
+    enter_call(&mut thread, code, chunks, body, Reg::ZERO, args, captures).map_err(Error::msg)?;
     let ran = run_dispatch(
         ctx,
         code,
