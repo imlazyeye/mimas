@@ -1,0 +1,15 @@
+[package]
+name = "boa-run"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+boa_engine = "=0.22.0"
+boa_runtime = "=0.22.0"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[workspace]

@@ -10,7 +10,7 @@ const LANGUAGES = [
     "luau",
 ];
 
-// (bench key, display name, repo, crate name in the runners' Cargo.lock)
+// (bench key, display name, repo, crate name in that runner's Cargo.lock)
 const LANG_META = [
     ("mimas", "mimas", "https://github.com/imlazyeye/mimas", "mimas"),
     ("luau", "Luau (mlua)", "https://github.com/luau-lang/luau", "mlua"),
@@ -114,16 +114,16 @@ fn build_chart(name: str, description: str, langs: [str], full_range: bool) -> [
     out
 }
 
-// each entry is a repo link + the version pinned in the runners' lockfile, so the
+// each entry is a repo link + the version pinned in that runner's lockfile, so the
 // legend can never drift from what was actually measured
 fn build_legend(langs: [str]) -> str {
-    let lock = std::fs::read("benchmarks/runners/Cargo.lock")!;
     let parts = [];
     for lang in langs {
         for (key, display, repo, crate_name) in LANG_META {
             if key != lang {
                 continue;
             }
+            let lock = std::fs::read(f"benchmarks/runners/{key}/Cargo.lock")!;
             let block = lock.split(f"name = \"{crate_name}\"\n")[1].split("[[package]]")[0];
             let version = if let rev? = block.find("#([0-9a-f]{7})") {
                 f"git {rev[1]}"
