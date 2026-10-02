@@ -27,7 +27,7 @@ library = { package = "mimas-library", path = "../library", version = "0.3.0" }
 api = { package = "mimas-api", path = "../api", version = "0.3.0", features = ["serde"] }
 shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
 colored.workspace = true
-miette.workspace = true
+miette = { workspace = true, features = ["fancy"] }
 clap = { version = "3.2.23", features = ["derive", "cargo", "unicode"] }
 num-format = "0.4"
 backtrace = "0.3"

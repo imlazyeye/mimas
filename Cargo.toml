@@ -36,7 +36,7 @@ chompy = "0.5"
 indexmap = "2.14.0"
 mutants = "0.0.4"
 gc-arena = "0.7"
-miette = { version = "7.6", features = ["fancy"] }
+miette = "7.6"
 thiserror = "1"
 walkdir = "2"
 serde = { version = "1", features = ["derive"] }
