@@ -186,12 +186,12 @@ impl Encoder {
     }
 }
 
-pub struct Decoder {
-    pub bytes: Vec<u8>,
+pub struct Decoder<'a> {
+    pub bytes: &'a [u8],
     pub ip: usize,
 }
 
-impl Decoder {
+impl Decoder<'_> {
     #[inline(always)]
     pub fn u8(&mut self) -> u8 {
         debug_assert!(
