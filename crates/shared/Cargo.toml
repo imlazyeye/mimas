@@ -22,3 +22,4 @@ serde = { workspace = true, optional = true }
 
 [features]
 serde = ["dep:serde"]
+fancy = ["miette/fancy"]
