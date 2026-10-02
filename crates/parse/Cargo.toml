@@ -15,12 +15,11 @@ path = "src/lib.rs"
 [dependencies]
 shared = { package = "mimas-shared", path = "../shared", version = "0.3.0" }
 chompy.workspace = true
-pretty_assertions.workspace = true
 itertools.workspace = true
 hashbrown.workspace = true
 mutants.workspace = true
 miette.workspace = true
 thiserror.workspace = true
 
-[package.metadata.cargo-udeps.ignore]
-normal = ["pretty_assertions"]
+[dev-dependencies]
+pretty_assertions.workspace = true
