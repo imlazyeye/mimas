@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
-use hashbrown::HashMap;
 use itertools::Itertools;
+use rustc_hash::FxHashMap;
 use shared::{Located, Location};
 
 use crate::{
@@ -58,7 +58,7 @@ impl Display for Pat {
 pub enum PatKind {
     Ident(Ident),
     Tuple(Vec<Pat>),
-    Struct(Box<Expr>, HashMap<String, Pat>),
+    Struct(Box<Expr>, FxHashMap<String, Pat>),
     TupleVariant(Box<Expr>, Vec<Pat>),
     Variant(Box<Expr>),
     Or(Vec<Pat>),
