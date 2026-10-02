@@ -45,6 +45,22 @@ test_vm!(
 );
 
 test_vm!(
+    set_spilled_instance_field,
+    "struct Foo { a: int, b: int, c: int, d: int, e: int }
+     let foo = Foo { a = 1, b = 2, c = 3, d = 4, e = 5 };
+     foo.e = 9;",
+    "foo.e" => Int(9)
+);
+
+test_vm!(
+    set_tuple_struct_field,
+    "struct Wrap(float);
+     let w = Wrap(1.0);
+     w.0 += 2.0;",
+    "w.0" => Float(3.0)
+);
+
+test_vm!(
     instance_option_field,
     "struct Foo { a: int }
     let foo: Foo? = null;",

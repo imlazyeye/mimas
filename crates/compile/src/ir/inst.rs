@@ -69,6 +69,7 @@ pub enum Inst {
         receiver: InstId,
         slot: u32,
         value: InstId,
+        is_scalar: bool,
     },
     Push {
         array: InstId,
@@ -312,6 +313,7 @@ impl IrDisplay for Inst {
                 receiver,
                 slot,
                 value,
+                ..
             } => {
                 format!("set_field {receiver} .{slot}: {value}")
             }
@@ -687,11 +689,18 @@ impl BlockWriter<'_> {
         })
     }
 
-    pub(crate) fn set_field(&mut self, receiver: InstId, slot: u32, value: InstId) -> InstId {
+    pub(crate) fn set_field(
+        &mut self,
+        receiver: InstId,
+        slot: u32,
+        value: InstId,
+        is_scalar: bool,
+    ) -> InstId {
         self.instruct(Inst::SetField {
             receiver,
             slot,
             value,
+            is_scalar,
         })
     }
 

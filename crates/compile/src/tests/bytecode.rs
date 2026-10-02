@@ -68,6 +68,11 @@ fn decode_op(d: &mut Decoder) -> Op {
             slot: d.u32(),
             value: Reg::decode(d),
         },
+        OpCode::SetFieldScalar => Op::SetFieldScalar {
+            receiver: Reg::decode(d),
+            slot: d.u32(),
+            value: Reg::decode(d),
+        },
         OpCode::LoadBody => Op::LoadBody {
             dst: Reg::decode(d),
             body: BodyId::decode(d),
@@ -1014,6 +1019,36 @@ test_lowering!(
          }
      }
      let _ = sum(Msg::Move { x = 1, y = 2 });",
+    Op::GetFieldStruct { .. }
+);
+test_lowering!(
+    scalar_field_store_lowers_to_set_field_scalar,
+    "struct P { x: float }
+     fn bump(p: P) -> float {
+         p.x = 2.0;
+         p.x
+     }
+     let _ = bump(P { x = 1.0 });",
+    Op::SetFieldScalar { .. }
+);
+test_lowering!(
+    str_field_store_lowers_to_set_field,
+    r#"struct P { name: str }
+       fn rename(p: P) -> str {
+           p.name = "b";
+           p.name
+       }
+       let _ = rename(P { name = "a" });"#,
+    Op::SetField { .. }
+);
+test_lowering!(
+    compound_field_assign_reads_with_get_field_struct,
+    "struct P { x: int }
+     fn bump(p: P) -> int {
+         p.x += 1;
+         0
+     }
+     let _ = bump(P { x = 1 });",
     Op::GetFieldStruct { .. }
 );
 test_lowering!(

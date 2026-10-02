@@ -1,5 +1,6 @@
 use crate::ir::{InstId, Ir, Local, Lower};
 use parse::{Access, AccessKind, Expr, ExprKind};
+use solve::components::Ty;
 
 pub(crate) trait Place {
     fn place(&self, ir: &mut Ir) -> Option<PlaceTarget>;
@@ -8,8 +9,15 @@ pub(crate) trait Place {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaceTarget {
     Variable(Local),
-    Index { array: InstId, index: InstId },
-    Field { receiver: InstId, slot: u32 },
+    Index {
+        array: InstId,
+        index: InstId,
+    },
+    Field {
+        receiver: InstId,
+        slot: u32,
+        is_struct: bool,
+    },
 }
 
 impl PlaceTarget {
@@ -20,18 +28,27 @@ impl PlaceTarget {
                 ir.current()
                     .get_index(array, index, AccessKind::Direct, false)
             }
-            PlaceTarget::Field { receiver, slot } => {
-                ir.current()
-                    .get_field(receiver, slot, AccessKind::Direct, false)
-            }
+            PlaceTarget::Field {
+                receiver,
+                slot,
+                is_struct,
+            } => ir
+                .current()
+                .get_field(receiver, slot, AccessKind::Direct, is_struct),
         }
     }
 
-    pub(crate) fn store(self, ir: &mut Ir, value: InstId) -> InstId {
+    pub(crate) fn store(self, ir: &mut Ir, value: InstId, is_scalar: bool) -> InstId {
         match self {
             PlaceTarget::Variable(variable) => ir.current().set_local(variable, value),
             PlaceTarget::Index { array, index } => ir.current().set_index(array, index, value),
-            PlaceTarget::Field { receiver, slot } => ir.current().set_field(receiver, slot, value),
+            PlaceTarget::Field {
+                receiver,
+                slot,
+                is_struct,
+            } => ir
+                .current()
+                .set_field(receiver, slot, value, is_struct && is_scalar),
         }
     }
 }
@@ -46,6 +63,10 @@ impl Place for Access {
                 kind: _,
             } => {
                 let recv = left.id();
+                let is_struct = matches!(
+                    ir.resolutions.node_tys.get(&recv),
+                    Some(Ty::Adt(_) | Ty::Identity(_))
+                );
                 let receiver = left.lower(ir)?;
                 let slot = match right.kind() {
                     ExprKind::Literal(parse::Literal::Int(i)) => u32::try_from(*i).unwrap(),
@@ -55,7 +76,11 @@ impl Place for Access {
                     _ => unreachable!(),
                 };
 
-                Some(PlaceTarget::Field { receiver, slot })
+                Some(PlaceTarget::Field {
+                    receiver,
+                    slot,
+                    is_struct,
+                })
             }
             Access::DoubleColon { left: _, right: _ } => todo!(),
             Access::Square { left, key, kind: _ } => {

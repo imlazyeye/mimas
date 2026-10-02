@@ -30,6 +30,7 @@ macro_rules! for_each_op {
             Insert       [ (dict, Reg, reg) (key, StrId, u32) (value, Reg, reg) ];
             SetIndex     [ (set, Reg, reg) (index, Reg, reg) (value, Reg, reg) ];
             SetField     [ (receiver, Reg, reg) (slot, u32, u32) (value, Reg, reg) ];
+            SetFieldScalar [ (receiver, Reg, reg) (slot, u32, u32) (value, Reg, reg) ];
             LoadBody     [ (dst, Reg, reg) (body, BodyId, u32) ];
             LoadConst    [ (dst, Reg, reg) (constant, Constant, konst) ];
 
@@ -572,6 +573,17 @@ impl Op {
                 receiver,
                 slot,
                 value,
+                is_scalar: true,
+            } => Op::SetFieldScalar {
+                receiver: ctx.i2r(receiver),
+                slot: *slot,
+                value: ctx.i2r(value),
+            },
+            Inst::SetField {
+                receiver,
+                slot,
+                value,
+                ..
             } => Op::SetField {
                 receiver: ctx.i2r(receiver),
                 slot: *slot,
