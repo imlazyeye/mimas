@@ -1002,6 +1002,21 @@ test_lowering!(
     Op::GetFieldStruct { .. }
 );
 test_lowering!(
+    struct_pattern_lowers_to_get_field_struct,
+    "enum Msg {
+         Quit,
+         Move { x: int, y: int },
+     }
+     fn sum(m: Msg) -> int {
+         match m {
+             Msg::Quit => 0,
+             Msg::Move { x, y } => x + y,
+         }
+     }
+     let _ = sum(Msg::Move { x = 1, y = 2 });",
+    Op::GetFieldStruct { .. }
+);
+test_lowering!(
     optional_field_access_lowers_to_get_field,
     "struct P { x: int }
      fn get(p: P?) -> int? { p?.x }
