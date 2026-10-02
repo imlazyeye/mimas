@@ -691,6 +691,20 @@ handlers! {
             _ => todo!(),
         }
     },
+    SetFieldScalar => {
+        let receiver = Reg::decode(code);
+        let slot = code.u32() as usize;
+        let value = rd!(regs, Reg::decode(code));
+        let Val::Instance(i) = rd!(regs, receiver) else {
+            unreachable!("illegal set_field_scalar receiver")
+        };
+        // SAFETY: a scalar holds no `Gc` pointer, so storing one needs no write barrier
+        let mut inst = unsafe { i.0.as_ref_cell() }.try_borrow_mut().expect("already borrowed");
+        match &mut inst.fields {
+            Fields::Inline { data, .. } => data[slot] = value,
+            Fields::Spilled(values) => values[slot] = value,
+        }
+    },
     Push => {
         let array_reg = Reg::decode(code);
         let value_reg = Reg::decode(code);

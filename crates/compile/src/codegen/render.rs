@@ -254,6 +254,18 @@ impl std::fmt::Display for Op {
                 value,
             } => write!(f, "{}{}.{slot}{}", OpName("set_field"), receiver, value),
 
+            Op::SetFieldScalar {
+                receiver,
+                slot,
+                value,
+            } => write!(
+                f,
+                "{}{}.{slot}{}",
+                OpName("set_field_scalar"),
+                receiver,
+                value
+            ),
+
             Op::CallNative { dst, id, args } => {
                 write!(f, "{}{}#{}", OpName("call_native"), dst, id.index())?;
                 for arg in args {

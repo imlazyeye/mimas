@@ -104,7 +104,11 @@ impl Ir {
                         ir.current().bin(op, lhs, rhs, kind)
                     }
                 };
-                place.store(ir, value);
+                let is_scalar = matches!(
+                    ir.resolutions.node_tys.get(&ass.left.id()),
+                    Some(Ty::Int | Ty::Float | Ty::Bool)
+                );
+                place.store(ir, value, is_scalar);
 
                 Some(())
             }
