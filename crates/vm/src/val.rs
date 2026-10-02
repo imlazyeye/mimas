@@ -527,8 +527,6 @@ pub fn bin<'gc>(this: Val<'gc>, ctx: Ctx<'gc>, other: Val<'gc>, op: BinOp) -> Rt
         (BinOp::LessEqual, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() <= b.as_str()),
         (BinOp::GreaterThan, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() > b.as_str()),
         (BinOp::GreaterEqual, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() >= b.as_str()),
-        (BinOp::Coalesce, Val::Null, other) => other,
-        (BinOp::Coalesce, this, _) => this,
         (BinOp::NotEqual, left, right) => Val::Bool(left != right),
         (op, Val::Bool(a), Val::Bool(b)) => bool_bin(op, a, b)?,
         (op, Val::Float(a), Val::Float(b)) => float_bin(op, a, b)?,

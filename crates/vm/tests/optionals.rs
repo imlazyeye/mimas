@@ -38,6 +38,26 @@ test_vm!(
     "r + 1" => Int(8),
 );
 
+test_vm!(
+    coalesce_assign_short_circuits,
+    "fn bump(runs: [int]) -> int {
+         runs[0] += 1;
+         1
+     }
+     let runs = [0];
+     let a: int? = 5;
+     a ??= bump(runs);
+     let b: int? = null;
+     b ??= bump(runs);
+     let xs: [int?] = [null, 2];
+     xs[0] ??= bump(runs);
+     xs[1] ??= bump(runs);",
+    "a" => Int(5),
+    "b" => Int(1),
+    "xs" => array!(Int(1), Int(2)),
+    "runs[0]" => Int(2),
+);
+
 // T? assigned-through stays T?, no nesting
 test_vm!(
     option_assign_through_flattens,
