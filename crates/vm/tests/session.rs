@@ -233,7 +233,16 @@ fn unfinished_inputs() {
     assert!(Session::unfinished("fn f() {"));
     assert!(Session::unfinished("let a = [1,"));
     assert!(Session::unfinished("if true {"));
+    assert!(Session::unfinished(
+        "fn f() {
+             1"
+    ));
     assert!(!Session::unfinished("let a = 1"));
     assert!(!Session::unfinished("let a = 1;"));
     assert!(!Session::unfinished("let = ;"));
+    assert!(!Session::unfinished(
+        "fn f() {
+             1
+         }"
+    ));
 }

@@ -45,11 +45,15 @@ impl Session {
     /// Whether `input` stops before its code does (an open brace, an unfinished statement). A repl
     /// reads another line before running such an input.
     pub fn unfinished(input: &str) -> bool {
-        let (_, errors) = parse(input);
-        !errors.is_empty()
-            && errors
-                .iter()
-                .all(|error| error.downcast_ref::<UnexpectedEnd>().is_some())
+        // a block that ends in a bare expression reports its missing `;` and drops the missing `}`
+        // (one error per token), which the `;` that `run` appends anyway brings back
+        [input.to_string(), format!("{input};")].iter().any(|text| {
+            let (_, errors) = parse(text);
+            !errors.is_empty()
+                && errors
+                    .iter()
+                    .all(|error| error.downcast_ref::<UnexpectedEnd>().is_some())
+        })
     }
 
     /// Solves, compiles and runs `input` on top of the inputs before it. A trailing expression
