@@ -7,7 +7,6 @@ use std::path::PathBuf;
     version,
     about = "The mimas compiler and runtime: check, build, and run .mim scripts."
 )]
-#[clap(setting(clap::AppSettings::ArgRequiredElseHelp))]
 pub struct Cli {
     /// Force color output instead of deferring.
     #[clap(long, global = true)]
@@ -47,6 +46,14 @@ pub enum Commands {
         /// Pass these after a `--` separator: `mimas run script.mim -- foo bar`.
         #[clap(last = true)]
         script_args: Vec<String>,
+    },
+    /// Opens an interactive session with the modules of a project. Each input runs on top of the
+    /// ones before it, and a trailing expression prints with its type.
+    Repl {
+        /// The path to the project directory to run on. Uses the current directory if not
+        /// provided.
+        #[clap(parse(from_os_str))]
+        path: Option<PathBuf>,
     },
     /// Builds but does not run. Scripts in a cargo package are checked against the API its host
     /// last wrote.
