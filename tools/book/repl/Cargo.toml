@@ -1,0 +1,28 @@
+[package]
+name = "web-repl"
+version = "0.3.0"
+edition = "2024"
+description = "The book's try-it-out terminal: a mimas `Session` behind wasm-bindgen."
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vm = { package = "mimas-vm", path = "../../../crates/vm" }
+library = { package = "mimas-library", path = "../../../crates/library" }
+solve = { package = "mimas-solve", path = "../../../crates/solve" }
+# the graphical renderer without the terminal probing that doesn't exist on the web
+miette = { version = "7.6", features = ["fancy-no-syscall"] }
+# the same version examples/bevy locks, since deploy.yml installs one wasm-bindgen cli for both
+wasm-bindgen = "=0.2.128"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
+# the repl ships in the book, where the download is what matters
+[profile.release]
+opt-level = "z"
+strip = true
