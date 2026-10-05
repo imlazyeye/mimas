@@ -142,13 +142,8 @@ impl Ir {
             .collect();
         self.current_body_mut().params = params;
 
-        // check termination *before* synthesizing a null -- a return-terminated body already
-        // emitted its return; don't add a dead const + second ret
         let body_value = body.lower(self);
-        if !self.is_terminated() {
-            let value = body_value.unwrap_or_else(|| self.current().constant(Constant::Null));
-            self.current().ret(value);
-        }
+        self.finish(body_value);
     }
 
     pub(crate) fn pattern(&mut self, pat: &Pat, value: Option<InstId>) -> Option<()> {
@@ -395,7 +390,8 @@ impl Emit for Call {
         }
 
         // pact-typed receiver dispatch: a runtime IsInstance chain over implementors of the bound,
-        // each arm CallDirect-ing that adt's body for the method. one implementor => skip the test.
+        // each arm CallDirect-ing that adt's body for the method. a lone implementor is tested too,
+        // since a session can add another after this call site is compiled
         fn emit_pact_dispatch(
             ir: &mut Ir,
             fn_ty: &FnHeader,
@@ -421,10 +417,6 @@ impl Emit for Call {
                 .map(|(dec, ids)| (ir.item_body_for(dec), ids))
                 .collect();
 
-            if let [(body, _)] = candidates.as_slice() {
-                return Some(ir.current().call_direct(*body, args));
-            }
-
             let merge = ir.push_block("pact_merge");
             let mut branches = Vec::new();
             for (body, ids) in candidates {
@@ -444,8 +436,8 @@ impl Emit for Call {
                     ir.target(next);
                 }
             }
-            // unreachable: the receiver's pact type guarantees one arm matches.
-            ir.current().panic();
+            // only an implementor added after this call site was compiled gets here
+            ir.current().no_impl();
             merge_branches(ir, merge, branches)
         }
 

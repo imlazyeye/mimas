@@ -26,8 +26,9 @@ shared::id!(pub Reg);
 
 #[derive(Debug)]
 pub struct Compiler {
-    pub(crate) ops: Vec<Op>,
     pub(crate) chunks: IdVec<BodyId, Chunk>,
+    bytes: Encoder,
+    signatures: IdVec<BodyId, Option<Function>>,
     disasm: bool,
     srcs: HashMap<FileId, Arc<str>>,
 }
@@ -49,8 +50,9 @@ macro_rules! fuse_branch {
 impl Compiler {
     pub fn new() -> Self {
         Self {
-            ops: Vec::new(),
             chunks: IdVec::new(),
+            bytes: Encoder::new(),
+            signatures: IdVec::new(),
             disasm: false,
             srcs: HashMap::new(),
         }
@@ -67,8 +69,8 @@ impl Compiler {
         self
     }
 
-    pub fn compile(&mut self, mut ir: Ir) -> Program {
-        let mut bytes = Encoder::new();
+    pub fn compile(&mut self, ir: &mut Ir) -> Program {
+        let first_new = self.chunks.len();
 
         // body -> source name, for the --disasm dump only
         let names: HashMap<BodyId, String> = if self.disasm {
@@ -148,7 +150,9 @@ impl Compiler {
         // every body's own signature keyed by body rather than by dec so a function value can be
         // called from a `BodyId` alone. a closure's defaults are never reachable from a call site
         // that only has the value, so it reports none -- same as what a dynamic call lowers to.
-        let mut signatures: IdVec<BodyId, Option<Function>> = vec![None; ir.bodies.len()].into();
+        while self.signatures.len() < ir.bodies.len() {
+            self.signatures.push(None);
+        }
         // read rather than drained -- `export` still needs `item_bodies` to find each dec's body
         let item_bodies: Vec<(DecId, BodyId)> = ir
             .item_bodies
@@ -166,9 +170,9 @@ impl Compiler {
             let vis = ir.resolutions.decs[dec].vis;
             let defaults = defaults
                 .into_iter()
-                .map(|d| d.map(|lit| Constant::from_literal(&mut ir, lit)))
+                .map(|d| d.map(|lit| Constant::from_literal(ir, lit)))
                 .collect();
-            signatures[body] = Some(Function {
+            self.signatures[body] = Some(Function {
                 body,
                 vis,
                 header,
@@ -180,7 +184,7 @@ impl Compiler {
                 continue;
             };
             let defaults = vec![None; header.parameters.len()];
-            signatures[body] = Some(Function {
+            self.signatures[body] = Some(Function {
                 body,
                 vis: Vis::Private,
                 header,
@@ -189,9 +193,9 @@ impl Compiler {
         }
 
         let root = std::mem::take(&mut ir.resolutions.root);
-        let root = export(&mut ir, &signatures, root);
+        let root = export(ir, &self.signatures, root);
 
-        for (body_id, mut body) in ir.bodies {
+        for (body_id, body) in ir.bodies.iter_mut().skip(first_new) {
             // body compilation happens in 9 stages
             //
             // 1. clean      -- dce, phi threading, etc
@@ -205,7 +209,7 @@ impl Compiler {
             // 9. emit       -- walk over it all and write the ops
             //
             // stage 1: clean
-            clean::clean(&mut body);
+            clean::clean(body);
 
             // stage 2: allocate a register for every single local. these go first so that the
             // register of a local is always aligned with 0..bodies.locals.len(). we use this at the
@@ -236,7 +240,7 @@ impl Compiler {
                 }
             }
 
-            let chunk_offset = bytes.len();
+            let chunk_offset = self.bytes.len();
             let mut byte_offset = chunk_offset;
             let mut body_ops = Vec::new();
             // used only for --dump-bytes, screw your compile times
@@ -259,7 +263,7 @@ impl Compiler {
                 for (_, block) in body.blocks.iter() {
                     for &iid in &block.stream {
                         let inst = &body.instructions[iid];
-                        let absorbs = imm_binop(&body, inst).map(|(_, con, _, _, _)| con);
+                        let absorbs = imm_binop(body, inst).map(|(_, con, _, _, _)| con);
                         for u in uses(inst) {
                             if matches!(
                                 body.instructions[u],
@@ -649,7 +653,7 @@ impl Compiler {
 
                     // fuse an int arith/comparison op with a constant operand into its immediate
                     // form, inlining the value instead of reading it from a register.
-                    if let Some((non_const, _con, val, op, kind)) = imm_binop(&body, inst) {
+                    if let Some((non_const, _con, val, op, kind)) = imm_binop(body, inst) {
                         let (left, dst) = {
                             let mut ctx = Ctx {
                                 inst_to_reg: &inst_to_reg,
@@ -762,10 +766,11 @@ impl Compiler {
                 .iter()
                 .map(|local| local_to_reg[*local])
                 .collect();
+            // the latest binding of a shadowed name wins
             let locals = body
-                .artifacts
+                .locals
                 .iter()
-                .map(|(local, name)| (name.clone(), local_to_reg[*local]))
+                .map(|(local, _)| (body.artifacts[&local].clone(), local_to_reg[local]))
                 .collect();
             let args = u16::try_from(body.params.len()).unwrap();
             let regs = u16::try_from(regs.len()).unwrap();
@@ -825,19 +830,19 @@ impl Compiler {
                 locs,
             });
 
-            for op in body_ops.iter().cloned() {
-                op.encode(&mut bytes);
+            for op in body_ops {
+                op.encode(&mut self.bytes);
             }
-            self.ops.extend(body_ops);
         }
 
         Program {
-            entry: BodyId::ZERO,
+            // the body top-level code lowered into (`BodyId::ZERO`, or a repl's latest `new_entry`)
+            entry: ir.current_body,
             root,
-            chunks: std::mem::replace(&mut self.chunks, IdVec::new()),
-            signatures,
-            strs: ir.str_interner,
-            bytes: bytes.finish(),
+            chunks: self.chunks.clone(),
+            signatures: self.signatures.clone(),
+            strs: ir.str_interner.clone(),
+            bytes: self.bytes.clone().finish(),
         }
     }
 }

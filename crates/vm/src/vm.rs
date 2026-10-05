@@ -1120,6 +1120,7 @@ handlers! {
         wr!(regs, dst, Val::Instance(inst));
     },
     Panic        => return Err(RtErr::MatchPanicReached),
+    NoImpl       => return Err(RtErr::NoImpl),
     IsInstance => {
         let dst = Reg::decode(code);
         let src = Reg::decode(code);
@@ -1874,7 +1875,7 @@ impl Vm {
             library.intrinsics().iter().map(|(a, b)| (*a, *b)).collect(),
         );
         ir.lower(&stmts);
-        Ok((compile::Compiler::new().compile(ir), sources))
+        Ok((compile::Compiler::new().compile(&mut ir), sources))
     }
 }
 

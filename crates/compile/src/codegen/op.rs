@@ -46,6 +46,7 @@ macro_rules! for_each_op {
 
             // -- Errors/Termination -- //
             Panic        [ ];
+            NoImpl       [ ];
             Raise        [ (val, Reg, reg) ];
             IsRaised     [ (dst, Reg, reg) (src, Reg, reg) ];
             UnwrapRaised [ (dst, Reg, reg) (src, Reg, reg) ];
@@ -603,6 +604,7 @@ impl Op {
                 args: args.iter().map(|arg| ctx.i2r(arg)).collect(),
             },
             Inst::Panic => Op::Panic {},
+            Inst::NoImpl => Op::NoImpl {},
             Inst::IsInstance { src, adt } => Op::IsInstance {
                 dst: ctx.reg(),
                 src: ctx.i2r(src),
