@@ -53,6 +53,7 @@ mod tests {
     pub mod solve_test_utils;
 
     mod directory;
+    mod layers;
     mod reduce_exprs;
     mod solve_enums;
     mod solve_exprs;
