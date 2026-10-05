@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use macros::native;
 use vm::{
     Ctx, RtErr, Val,
@@ -23,7 +25,7 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
 /// ```
 #[native]
 fn print<'gc>(ctx: Ctx<'gc>, value: Val<'gc>) {
-    println!("{}", ctx.to_string(value));
+    ctx.fixture::<Output>().write(&ctx.to_string(value));
 }
 
 /// Stops the script with a runtime error. The error reads `panic: ` followed by `msg`, or
@@ -77,6 +79,28 @@ fn todo<'gc>(ctx: Ctx<'gc>, msg: Option<anon::T<'gc>>) -> Result<NeverReturn, Rt
 /// ```
 #[native]
 fn dbg<'gc>(ctx: Ctx<'gc>, value: anon::T<'gc>) -> anon::T<'gc> {
-    println!("dbg value: {}", ctx.display(value.0));
+    ctx.fixture::<Output>()
+        .write(&format!("dbg value: {}", ctx.display(value.0)));
     value
+}
+
+type Sink = Box<dyn FnMut(&str)>;
+
+/// Where `print` and `dbg` write. Standard output unless the host sets a sink, which a console
+/// inside a game or the book's web repl does to show the output itself, with
+/// `vm.fixture::<Output>().set(sink)`. A sink gets each line without its newline.
+#[derive(Default)]
+pub struct Output(RefCell<Option<Sink>>);
+
+impl Output {
+    pub fn set(&self, sink: impl FnMut(&str) + 'static) {
+        *self.0.borrow_mut() = Some(Box::new(sink));
+    }
+
+    fn write(&self, line: &str) {
+        match &mut *self.0.borrow_mut() {
+            Some(sink) => sink(line),
+            None => println!("{line}"),
+        }
+    }
 }
