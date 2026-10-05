@@ -26,6 +26,7 @@ mod std_lib {
 
 mod prelude;
 
+pub use prelude::Output;
 pub use std_lib::{parse::Value, sys::ScriptArgs};
 
 use vm::api::Api;
