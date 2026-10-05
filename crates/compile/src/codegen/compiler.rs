@@ -2,15 +2,12 @@ use shared::IdVec;
 
 use colored::Colorize;
 use parse::Literal;
-use shared::{FileId, Location, Ty};
+use shared::{Location, Ty};
 use solve::{
     ResolvedDeclKind, ResolvedModule,
     components::{DecId, Vis},
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     BinOp, BlockId, BlockTarget, BodyId, Constant, Function, Inst, InstId, Ir, Local, Module, Op,
@@ -30,7 +27,6 @@ pub struct Compiler {
     bytes: Encoder,
     signatures: IdVec<BodyId, Option<Function>>,
     disasm: bool,
-    srcs: HashMap<FileId, Arc<str>>,
 }
 
 // fuse a comparison op + JumpIfFalse into its `B`-prefixed branch form. reg-reg comparisons carry
@@ -54,18 +50,11 @@ impl Compiler {
             bytes: Encoder::new(),
             signatures: IdVec::new(),
             disasm: false,
-            srcs: HashMap::new(),
         }
     }
 
     pub fn with_disasm(mut self, on: bool) -> Self {
         self.disasm = on;
-        self
-    }
-
-    /// Source text per file, used only to interleave source lines into the `--dump-bytes` disasm.
-    pub fn with_sources(mut self, srcs: HashMap<FileId, Arc<str>>) -> Self {
-        self.srcs = srcs;
         self
     }
 
@@ -195,6 +184,8 @@ impl Compiler {
         let root = std::mem::take(&mut ir.resolutions.root);
         let root = export(ir, &self.signatures, root);
 
+        // for the --disasm dump only
+        let sources = &ir.resolutions.sources;
         for (body_id, body) in ir.bodies.iter_mut().skip(first_new) {
             // body compilation happens in 9 stages
             //
@@ -773,7 +764,9 @@ impl Compiler {
                 .map(|(local, _)| (body.artifacts[&local].clone(), local_to_reg[local]))
                 .collect();
             let args = u16::try_from(body.params.len()).unwrap();
-            let regs = u16::try_from(regs.len()).unwrap();
+            // a host call returns into r0 of the entry frame, which a body that never returns
+            // (`loop {}`) wouldn't otherwise have
+            let regs = u16::try_from(regs.len().max(1)).unwrap();
 
             if self.disasm {
                 let name = names.get(&body_id).map(String::as_str).unwrap_or("<anon>");
@@ -796,7 +789,7 @@ impl Compiler {
                         .map(|i| locs[i].1);
                     if let Some(loc) = loc
                         && !loc.is_synthetic()
-                        && let Some(src) = self.srcs.get(&loc.file_id)
+                        && let Some(src) = sources.get(&loc.file_id).map(|src| src.inner())
                     {
                         let upto = loc.span.start.min(src.len());
                         let line = src[..upto].bytes().filter(|&b| b == b'\n').count();
@@ -843,6 +836,7 @@ impl Compiler {
             signatures: self.signatures.clone(),
             strs: ir.str_interner.clone(),
             bytes: self.bytes.clone().finish(),
+            sources: ir.resolutions.sources.clone(),
         }
     }
 }
