@@ -347,6 +347,9 @@ impl std::fmt::Display for FnHeader {
 pub trait TyNames {
     fn adt(&self, id: AdtId) -> Option<String>;
     fn pact(&self, id: PactId) -> Option<String>;
+    fn unresolved(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// The names the solver registered on this thread.
@@ -408,8 +411,14 @@ impl Ty {
             // both vids and anons mark "an internal type slot that should have been resolved
             // before reaching a user-visible message". the shared `?mimas<...>` prefix lets the
             // diag emitter recognize either as a leak and attach an explanatory note.
-            Ty::Vid(vid) => format!("{INTERNAL_VID_MARKER}{}", vid.index()),
-            Ty::Anon(n) => format!("{INTERNAL_ANON_MARKER}{n}"),
+            Ty::Vid(vid) => names
+                .unresolved()
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{INTERNAL_VID_MARKER}{}", vid.index())),
+            Ty::Anon(n) => names
+                .unresolved()
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{INTERNAL_ANON_MARKER}{n}")),
             Ty::Identity(_) | Ty::Skolem(_) => "Self".into(),
             Ty::Adt(id) => match names.adt(*id) {
                 // module adts are spelled `<module:foo>` internally

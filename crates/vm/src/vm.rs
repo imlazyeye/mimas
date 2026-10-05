@@ -1867,40 +1867,30 @@ impl Vm {
                 );
             }
         }
-        let program = Self::build_program(files, &library)?;
-        vm.load_program(program);
-        vm.registry = library.into_registry();
+        let mut modules = solve::Modules::from_files(files.iter().copied(), &library);
+        // todo: only the first error makes it out
+        if !modules.errors.is_empty() {
+            return Err(modules.errors.swap_remove(0).into());
+        }
+        vm.load_modules(library, &modules);
         Ok(vm)
     }
 
-    /// The entire compilation process -- parse, solve and compile `files` against `library`, which
-    /// is the set of natives the resulting program is built to line up with.
-    fn build_program(
-        files: &[(&str, &str)],
-        library: &::api::Library<()>,
-    ) -> std::result::Result<Program, ExecuteError> {
-        use solve::Resolutions;
-
-        let mut loaded = solve::Modules::from_files(files.iter().copied(), library);
-        // todo: only the first error makes it out
-        if !loaded.errors.is_empty() {
-            return Err(loaded.errors.swap_remove(0).into());
-        }
-
-        let stmts: Vec<_> = loaded
-            .asts
-            .into_iter()
-            .flat_map(|ast| ast.unpack())
-            .collect();
-        let resolutions = Resolutions::from(loaded.solver);
-        // todo: there's zero reason to clone this here, im just trying to get a working version --
-        // there's probably a much smoother way to get the intrinsics over here
-        let mut ir = compile::Ir::new(
-            resolutions,
-            library.intrinsics().iter().map(|(a, b)| (*a, *b)).collect(),
-        );
-        ir.lower(&stmts);
-        Ok(compile::Compiler::new().compile(&mut ir))
+    /// Lowers and compiles `modules`, which solved cleanly against `library`, the natives the
+    /// program is built to line up with, and loads the program. The ir and compiler come back for
+    /// a session to build on.
+    pub(crate) fn load_modules(
+        &mut self,
+        library: ::api::Library<()>,
+        modules: &solve::Modules,
+    ) -> (compile::Ir, compile::Compiler) {
+        let resolutions = solve::Resolutions::from(modules.solver.clone());
+        let mut ir = compile::Ir::new(resolutions, library.intrinsics().clone());
+        ir.lower(modules.asts.iter().flat_map(parse::Ast::stmts));
+        let mut compiler = compile::Compiler::new();
+        self.load_program(compiler.compile(&mut ir));
+        self.registry = library.into_registry();
+        (ir, compiler)
     }
 }
 

@@ -59,6 +59,10 @@ impl TyNames for Resolutions {
     fn pact(&self, id: PactId) -> Option<String> {
         self.pact_names.get(id).cloned()
     }
+
+    fn unresolved(&self) -> Option<&str> {
+        Some("_")
+    }
 }
 
 /// Everything a file or module declares, in declaration order.

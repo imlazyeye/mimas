@@ -1,6 +1,8 @@
+mod session;
 mod utils;
 mod vm;
 
+pub use session::*;
 pub use utils::*;
 pub use vm::*;
 
