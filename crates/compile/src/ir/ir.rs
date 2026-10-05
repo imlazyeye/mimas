@@ -1,7 +1,7 @@
 use api::{Intrinsic, NativeId};
 use itertools::Itertools;
 use parse::NodeId;
-use shared::{IdVec, Location, StrId, StrInterner};
+use shared::{IdVec, Located, Location, StrId, StrInterner};
 use solve::{
     Resolutions,
     components::{DecId, Ty},
@@ -13,7 +13,7 @@ use crate::{
     ir::{Block, BlockId, BlockWriter},
 };
 
-use super::{Body, BodyId, Inst, InstId, Local};
+use super::{Body, BodyId, Inst, InstId, Local, Lower};
 
 pub struct Ir {
     pub bodies: IdVec<BodyId, Body>,
@@ -46,6 +46,18 @@ impl Ir {
         }
     }
 
+    pub fn new_entry(&mut self, from: BodyId, resolutions: Resolutions) -> BodyId {
+        self.resolutions = resolutions;
+        let mut body = Body::new();
+        let from = &self.bodies[from];
+        body.locals = from.locals.clone();
+        body.dec_to_local = from.dec_to_local.clone();
+        body.artifacts = from.artifacts.clone();
+        let id = self.bodies.push(body);
+        self.current_body = id;
+        id
+    }
+
     pub(crate) fn with_loc<R>(&mut self, loc: Location, f: impl FnOnce(&mut Self) -> R) -> R {
         let prev = std::mem::replace(&mut self.current_loc, loc);
         let r = f(self);
@@ -57,11 +69,33 @@ impl Ir {
         for stmt in stmts {
             self.stmt(stmt);
         }
-        // the entry body implicitly returns null; emit it explicitly so its final block ends in a
-        // terminator like every other body -- codegen no longer synthesizes one.
+        self.finish(None);
+    }
+
+    pub fn lower_echo(&mut self, stmts: &[parse::Stmt]) {
+        let Some((last, rest)) = stmts.split_last() else {
+            return self.finish(None);
+        };
+        for stmt in rest {
+            self.stmt(stmt);
+        }
+        match last.kind() {
+            parse::StmtKind::Expr(expr) => {
+                let value = self.with_loc(last.location(), |ir| expr.lower(ir));
+                self.finish(value);
+            }
+            _ => {
+                self.stmt(last);
+                self.finish(None);
+            }
+        }
+    }
+
+    // a body returns the value it was given, or null, unless its code already ended in a terminator
+    pub(crate) fn finish(&mut self, value: Option<InstId>) {
         if !self.is_terminated() {
-            let null = self.current().constant(crate::Constant::Null);
-            self.current().ret(null);
+            let value = value.unwrap_or_else(|| self.current().constant(crate::Constant::Null));
+            self.current().ret(value);
         }
     }
 

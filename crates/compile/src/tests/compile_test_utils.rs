@@ -21,9 +21,16 @@ pub(crate) fn compile_ops(src: &str) -> Vec<crate::Op> {
     let resolutions = solver.into();
     let mut ir = crate::Ir::new(resolutions, Default::default());
     ir.lower(&ast.unpack());
-    let mut compiler = crate::Compiler::new();
-    let _ = compiler.compile(ir);
-    compiler.ops
+    let program = crate::Compiler::new().compile(&mut ir);
+    let mut decoder = crate::Decoder {
+        bytes: &program.bytes,
+        ip: 0,
+    };
+    let mut ops = Vec::new();
+    while decoder.ip < program.bytes.len() {
+        ops.push(super::bytecode::decode_op(&mut decoder));
+    }
+    ops
 }
 
 #[macro_export]

@@ -1,28 +1,12 @@
 use colored::Colorize;
-use itertools::Itertools;
 use parse::AccessKind;
 use shared::StrId;
 use solve::components::AdtId;
 
-use crate::{BlockTarget, BodyId, Compiler, Constant, Op, OpFormatPart, Reg};
+use crate::{BlockTarget, BodyId, Constant, Op, OpFormatPart, Reg};
 
 const OP_WIDTH: usize = 18;
 const ARG_WIDTH: usize = 10;
-
-#[mutants::skip]
-impl std::fmt::Display for Compiler {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.ops
-                .iter()
-                .enumerate()
-                .map(|(offset, op)| format!("{}    {op}", Offset(offset)))
-                .join("\n")
-        )
-    }
-}
 
 macro_rules! cmp {
     ($f:ident, $name:literal, $target:expr, $left:expr, $rhs:expr) => {
@@ -275,6 +259,7 @@ impl std::fmt::Display for Op {
             }
 
             Op::Panic {} => write!(f, "panic"),
+            Op::NoImpl {} => write!(f, "no_impl"),
             Op::IsInstance { dst, src, adt } => {
                 write!(f, "is_instance {dst} = {src} @{}", adt.index())
             }
@@ -717,20 +702,12 @@ impl std::fmt::Display for BlockTarget {
     }
 }
 
-struct Offset(usize);
 struct OpName(&'static str);
 struct OpKind<'a>(&'static str, &'a str);
 struct ConstantFmt<'a>(&'a Constant);
 struct Field(StrId);
 struct Body(BodyId);
 struct Adt(AdtId);
-
-#[mutants::skip]
-impl std::fmt::Display for Offset {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{:04}", self.0).bright_black().bold())
-    }
-}
 
 #[mutants::skip]
 impl std::fmt::Display for OpName {

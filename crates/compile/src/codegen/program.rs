@@ -147,6 +147,7 @@ impl Chunk {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct Encoder(Vec<u8>);
 impl Encoder {
     pub fn new() -> Self {

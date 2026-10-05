@@ -34,6 +34,9 @@ pub enum RtErr {
     #[error("match did not match on any provided patterns")]
     MatchPanicReached,
 
+    #[error("the receiver's type implemented the pact after this call was compiled")]
+    NoImpl,
+
     #[error("divided by zero")]
     DivByZero,
 
@@ -96,6 +99,7 @@ impl RtErr {
                 format!("`{set}` cannot be indexed with `{index}`")
             }
             Self::MatchPanicReached => "no arm matched this value".to_string(),
+            Self::NoImpl => "no impl was known here".to_string(),
             Self::DivByZero => "the divisor is zero".to_string(),
             Self::ModByZero => "the right-hand side is zero".to_string(),
             Self::InvalidShift => "shifts take an unsigned 32 bit integer".to_string(),

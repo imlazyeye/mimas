@@ -113,6 +113,7 @@ pub enum Inst {
         adt: AdtId,
     },
     Panic,
+    NoImpl,
     Raise(InstId),
     IsRaised(InstId),
     UnwrapRaised(InstId),
@@ -161,6 +162,7 @@ impl Inst {
             | Inst::Return(..)
             | Inst::Raise(..)
             | Inst::Panic
+            | Inst::NoImpl
             | Inst::Jump { .. }
             | Inst::JumpIfFalse { .. }
             | Inst::ForNext { .. }
@@ -209,7 +211,8 @@ impl Inst {
             | Inst::Call { .. }
             | Inst::CallDirect { .. }
             | Inst::CallNative { .. }
-            | Inst::Panic => true,
+            | Inst::Panic
+            | Inst::NoImpl => true,
             // never faults. field access is slot-checked by the solver; `raise` produces a
             // recoverable Raised value, not a fault.
             Inst::Constant(..)
@@ -378,6 +381,7 @@ impl IrDisplay for Inst {
                 format!("switch {scrut} [{arms}] else {}", default.ir_display(ir))
             }
             Inst::Panic => "panic".into(),
+            Inst::NoImpl => "no_impl".into(),
         }
     }
 }
@@ -771,6 +775,10 @@ impl BlockWriter<'_> {
 
     pub(crate) fn panic(&mut self) -> InstId {
         self.instruct(Inst::Panic)
+    }
+
+    pub(crate) fn no_impl(&mut self) -> InstId {
+        self.instruct(Inst::NoImpl)
     }
 
     pub(crate) fn is_instance(&mut self, src: InstId, adt: AdtId) -> InstId {

@@ -23,7 +23,7 @@ fn encode_bytes(op: &Op) -> Vec<u8> {
 // exactly, and rebuild an equivalent `Op`. field decoders are the same `Decode` impls the VM
 // dispatch uses, so this exercises the real decode path. i64/regs/jumptable/fparts have no `Decode`
 // impl (they're length-prefixed or primitive) so we read them directly off the decoder.
-fn decode_op(d: &mut Decoder) -> Op {
+pub(crate) fn decode_op(d: &mut Decoder) -> Op {
     let regs = |d: &mut Decoder| -> Vec<Reg> {
         let n = d.u8() as usize;
         (0..n).map(|_| Reg::decode(d)).collect()
@@ -126,6 +126,7 @@ fn decode_op(d: &mut Decoder) -> Op {
             val: Reg::decode(d),
         },
         OpCode::Panic => Op::Panic {},
+        OpCode::NoImpl => Op::NoImpl {},
         OpCode::Raise => Op::Raise {
             val: Reg::decode(d),
         },

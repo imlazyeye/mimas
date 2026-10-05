@@ -375,7 +375,7 @@ fn compile(
         compile::Compiler::new()
             .with_disasm(disasm)
             .with_sources(srcs)
-            .compile(ir)
+            .compile(&mut ir)
     })
     .map_err(|report| {
         report.emit();

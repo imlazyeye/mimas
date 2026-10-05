@@ -1,11 +1,8 @@
-/target
+**/target
 **/__pycache__
 mutants/
 /book/book
 benchmarks/results
-benchmarks/runners/target
-examples/bevy/target
-crates/bevy/target
 temp/
 .cargo/*
 !.cargo/mutants.toml

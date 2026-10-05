@@ -42,5 +42,6 @@ mod tests {
     mod compile_test_utils;
 
     mod bytecode;
+    mod incremental;
     mod ir_tests;
 }
