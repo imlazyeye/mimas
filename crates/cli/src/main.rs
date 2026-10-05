@@ -37,13 +37,14 @@ fn main() {
             input.dump_ir,
             input.time,
         ),
+        Some(Commands::Repl { path }) => repl(path, input.color),
         Some(Commands::Docs {
             output_path,
             manifest_path,
             include_std: std,
             mdbook,
         }) => docs(output_path, manifest_path, std, mdbook, input.color),
-        None => 0,
+        None => repl(None, input.color),
     };
     std::process::exit(status_code);
 }
@@ -215,6 +216,67 @@ fn run(
     }
 }
 
+fn repl(path: Option<PathBuf>, color: bool) -> i32 {
+    use rustyline::error::ReadlineError;
+    use std::sync::atomic::Ordering;
+
+    let unit = Unit::new(&resolve_path(path));
+    let mut vm = vm::Vm::new();
+    let library = vm.install_library(library::std);
+    let directory = match load(&unit, &library, color) {
+        Ok((directory, 0)) => directory,
+        Ok(_) => return 1,
+        Err(code) => return code,
+    };
+    let mut session = vm::Session::new(vm, library, directory.modules);
+    let error = "error".bright_red().bold();
+    let interrupt = session.interrupt();
+    if let Err(e) = ctrlc::set_handler(move || interrupt.store(true, Ordering::Relaxed)) {
+        eprintln!("{error}: can't listen for ctrl-c: {e}");
+        return 1;
+    }
+    let mut editor = match rustyline::DefaultEditor::new() {
+        Ok(editor) => editor,
+        Err(e) => {
+            eprintln!("{error}: {e}");
+            return 1;
+        }
+    };
+    let mut input = String::new();
+    loop {
+        let prompt = if input.is_empty() { "> " } else { ". " };
+        match editor.readline(prompt) {
+            Ok(line) => {
+                input.push_str(&line);
+                input.push('\n');
+                if vm::Session::unfinished(&input) {
+                    continue;
+                }
+                let text = std::mem::take(&mut input);
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let _ = editor.add_history_entry(text.trim_end());
+                match ice::catch("repl", || session.run(&text)) {
+                    Err(report) => {
+                        report.emit();
+                        return ICE_EXIT_CODE;
+                    }
+                    Ok(Ok(Some(echo))) => println!("{echo}"),
+                    Ok(Ok(None)) => {}
+                    Ok(Err(report)) => render::emit(report.as_ref(), color),
+                }
+            }
+            Err(ReadlineError::Interrupted) => input.clear(),
+            Err(ReadlineError::Eof) => return 0,
+            Err(e) => {
+                eprintln!("{error}: {e}");
+                return 1;
+            }
+        }
+    }
+}
+
 fn docs(
     output_path: Option<PathBuf>,
     manifest_path: Option<PathBuf>,
@@ -368,9 +430,9 @@ fn compile(
 }
 
 // bare `mimas foo.mim` means `mimas run foo.mim`; inject `run` when the first
-// positional isn't already a subcommand. `mimas` alone still falls through to help.
+// positional isn't already a subcommand. `mimas` alone opens the repl.
 fn massage_args(mut args: Vec<String>) -> Vec<String> {
-    const SUBCOMMANDS: [&str; 5] = ["check", "build", "run", "help", "docs"];
+    const SUBCOMMANDS: [&str; 6] = ["check", "build", "run", "repl", "help", "docs"];
     if let Some(idx) = args.iter().skip(1).position(|a| !a.starts_with('-')) {
         let idx = idx + 1;
         if !SUBCOMMANDS.contains(&args[idx].as_str()) {
