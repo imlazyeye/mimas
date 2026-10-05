@@ -1,19 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use compile::BinOp;
 use miette::{Diagnostic, NamedSource, SourceSpan};
-use shared::FileId;
 use thiserror::Error;
 
 use crate::{Captured, Val};
 
-pub use shared::{Error, Result};
+pub use shared::{Error, Result, Sources};
 
 pub type RtResult<T> = std::result::Result<T, RtErr>;
-
-/// Per-file source map. Built once at vm setup; the dispatch loop looks up the active file's
-/// `NamedSource` here when constructing a [`RuntimeError`].
-pub type Sources = HashMap<FileId, NamedSource<Arc<str>>>;
 
 /// Span-attached runtime diagnostic. The active bytecode chunk supplies the span at the
 /// dispatch boundary; the kind carries the data needed to format the label text.
@@ -74,6 +69,9 @@ pub enum RtErr {
     #[error("user-triggered panic")]
     UserPanic,
 
+    #[error("the script was interrupted")]
+    Interrupted,
+
     #[error("called a value that isn't a function")]
     NotCallable { callee: Captured },
 
@@ -109,6 +107,7 @@ impl RtErr {
             Self::InvalidUnaryOperand => "this operand does not support the operator".to_string(),
             Self::IntegerOverflow => "this arithmetic overflows a 64 bit integer".to_string(),
             Self::UserPanic => "panicked here".to_string(),
+            Self::Interrupted => "interrupted here".to_string(),
             Self::NotCallable { callee } => format!("`{callee}` cannot be called"),
             Self::WrongArity { got, .. } => format!("this call passes {got}"),
             Self::InvalidArgument(_) | Self::Custom(_) => "here".to_string(),

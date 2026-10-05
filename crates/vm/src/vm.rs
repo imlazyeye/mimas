@@ -1,4 +1,10 @@
-use std::{rc::Rc, sync::Arc};
+use std::{
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use api::Registry;
 use compile::{
@@ -45,9 +51,7 @@ mod op_count {
 }
 
 pub struct Vm {
-    pub(crate) entry: BodyId,
     pub(crate) bytes: Vec<u8>,
-    pub(crate) ip: usize,
     pub(crate) chunks: IdVec<BodyId, Chunk>,
     pub(crate) signatures: Rc<IdVec<BodyId, Option<Function>>>,
     /// as in, strings from the compiler, not "c string". i know this is dumb and yet here I am
@@ -65,9 +69,7 @@ impl Vm {
         #[allow(clippy::redundant_closure)]
         let arena = Arena::new(|mc| State::new(mc));
         Self {
-            entry: BodyId::ZERO,
             bytes: Vec::new(),
-            ip: 0,
             chunks: IdVec::new(),
             signatures: Rc::default(),
             c_strs: StrInterner::new(),
@@ -80,6 +82,16 @@ impl Vm {
 
     /// Load `program`, replacing whatever this Vm was running.
     pub fn load_program(&mut self, program: Program) {
+        self.arena.mutate(|mc, state| {
+            // a stashed handle names a body in the program it was taken against (see `reset_roots`)
+            state.ctx(mc).reset_roots();
+            state.thread.borrow_mut(mc).regs.clear();
+        });
+        self.extend(program);
+    }
+
+    /// Loads a program that continues the loaded one.
+    pub fn extend(&mut self, program: Program) {
         let Program {
             entry,
             chunks,
@@ -87,28 +99,23 @@ impl Vm {
             strs,
             bytes,
             root,
+            sources,
         } = program;
-        self.entry = entry;
         self.bytes = bytes;
-        self.ip = 0;
         self.chunks = chunks;
         self.c_strs = strs;
         self.root = Rc::new(root);
+        self.sources = sources;
         self.install_signatures(signatures);
-        let entry_chunk = &self.chunks[self.entry];
-        let regs_count = entry_chunk.regs as usize;
-        let entry_offset = entry_chunk.offset;
-        let entry_body = self.entry;
+        let chunk = &self.chunks[entry];
+        let (regs, offset) = (chunk.regs as usize, chunk.offset);
         self.arena.mutate(|mc, state| {
-            let ctx = state.ctx(mc);
-            ctx.reset_roots();
-            let mut t = state.thread.borrow_mut(mc);
-            t.regs.clear();
-            t.regs.resize(regs_count, Val::Null);
-            t.frames.clear();
-            t.frames.push(Frame {
-                chunk: entry_body,
-                ip: entry_offset,
+            let mut thread = state.thread.borrow_mut(mc);
+            thread.regs.resize(regs, Val::Null);
+            thread.frames.clear();
+            thread.frames.push(Frame {
+                chunk: entry,
+                ip: offset,
                 return_reg: 0,
                 base: 0,
             });
@@ -128,10 +135,6 @@ impl Vm {
         });
     }
 
-    pub fn set_sources(&mut self, sources: Sources) {
-        self.sources = sources;
-    }
-
     /// Get a stable handle to a per-Vm fixture (e.g. a `FreezeCell`). The handle has no
     /// lifetime ties to `&self`, so it can be held across later `&mut self` calls like
     /// `run`. The caller must ensure the handle is dropped before the Vm itself. See the
@@ -144,10 +147,23 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
+        self.run_then(&AtomicBool::new(false), |_, _| ())
+    }
+
+    /// Runs the program to the end of its entry body, then `then` with the arena still open and
+    /// the value the body returned. `stop` is read between batches of ops, and a script that finds
+    /// it set faults where it is. A fault unwinds to the entry frame so the Vm stays usable.
+    pub fn run_then<T>(
+        &mut self,
+        stop: &AtomicBool,
+        then: impl for<'gc> FnOnce(Ctx<'gc>, Val<'gc>) -> T,
+    ) -> Result<T, Error> {
+        let mut then = Some(then);
+        // a press that landed between runs would otherwise stop the next one
+        stop.store(false, Ordering::Relaxed);
         loop {
             let Vm {
                 bytes,
-                ip,
                 chunks,
                 signatures,
                 c_strs: strs,
@@ -155,14 +171,14 @@ impl Vm {
                 sources,
                 ..
             } = self;
-            let done = arena.mutate(|mc, state| {
+            let done = arena.mutate(|mc, state| -> Result<Option<T>, Error> {
                 let ctx = state.ctx(mc);
                 let mut thread = state.thread.borrow_mut(mc);
                 let mut code = Decoder {
                     bytes: bytes.as_slice(),
-                    ip: *ip,
+                    ip: thread.frames.last().unwrap().ip,
                 };
-                let done = run_dispatch(
+                let ran = run_dispatch(
                     ctx,
                     &mut code,
                     chunks,
@@ -173,13 +189,23 @@ impl Vm {
                     FUEL,
                     1,
                 );
-                *ip = code.ip;
-                done
+                let value = match ran {
+                    Ok(None) if stop.swap(false, Ordering::Relaxed) => Err(locate(
+                        RtErr::Interrupted,
+                        code.ip,
+                        &mut thread,
+                        chunks,
+                        sources,
+                    )),
+                    ran => ran,
+                }?;
+                drop(thread);
+                Ok(value.map(|value| then.take().unwrap()(ctx, value)))
             })?;
-            if done {
+            if let Some(out) = done {
                 #[cfg(feature = "op-count")]
                 op_count::report();
-                return Ok(());
+                return Ok(out);
             }
             self.arena.collect_debt();
         }
@@ -444,10 +470,11 @@ macro_rules! branch_float_imm {
 /// hot loop, and building from a raw pointer (rather than borrowing `thread.regs`) lets call/return
 /// resize `thread.regs` *inline* without a borrow conflict. The window is refreshed after every
 /// `thread.regs` mutation so the pointer never dangles and never overlaps another live borrow.
-/// `stop_depth` is the frame floor: returning out of frame `stop_depth` ends the dispatch.
-/// `Vm::run` passes 1 (the entry frame's own return is the end of the program); `Vm::call`
-/// passes the pre-call depth + 1 so dispatch stops -- result written, entry ip untouched --
-/// when the injected call returns, instead of running off the end of the entry's bytecode.
+/// `stop_depth` is the frame floor: returning out of frame `stop_depth` ends the dispatch and hands
+/// back the returned value. `Vm::run_then` passes 1 (the entry frame's own return is the end of the
+/// program); `Vm::call` passes the pre-call depth + 1 so dispatch stops -- result written, entry ip
+/// untouched -- when the injected call returns, instead of running off the end of the entry's
+/// bytecode.
 #[allow(clippy::too_many_arguments)]
 fn run_dispatch<'gc>(
     ctx: Ctx<'gc>,
@@ -459,7 +486,7 @@ fn run_dispatch<'gc>(
     thread: &mut ThreadState<'gc>,
     mut fuel: usize,
     stop_depth: usize,
-) -> Result<bool, Error> {
+) -> Result<Option<Val<'gc>>, Error> {
     let (mut regs_ptr, mut regs_len) = window(thread, chunks);
     let bytes = code.bytes;
     let mut ip = code.ip;
@@ -467,7 +494,8 @@ fn run_dispatch<'gc>(
     loop {
         if fuel == 0 {
             code.ip = ip;
-            return Ok(false);
+            thread.frames.last_mut().unwrap().ip = ip;
+            return Ok(None);
         }
         fuel -= 1;
         let op_ip = ip;
@@ -531,7 +559,7 @@ fn run_dispatch<'gc>(
             Flow::Return(value) => {
                 if thread.frames.len() == 1 {
                     thread.frames.last_mut().unwrap().ip = code.ip;
-                    return Ok(true);
+                    return Ok(Some(*value));
                 }
                 let popped = thread.frames.pop().unwrap();
                 thread.regs.truncate(popped.base);
@@ -540,7 +568,7 @@ fn run_dispatch<'gc>(
                 let caller_base = caller.base;
                 thread.regs[caller_base + popped.return_reg as usize] = *value;
                 if thread.frames.len() < stop_depth {
-                    return Ok(true);
+                    return Ok(Some(*value));
                 }
                 (regs_ptr, regs_len) = window(thread, chunks);
             }
@@ -1265,11 +1293,11 @@ fn call_args<'gc>(
 }
 
 /// Run `body` to its return as if the entry frame had called it and hand back what it returned.
-/// A fault unwinds to the pre-call depth so the Vm is still usable afterwards.
+/// A fault unwinds to the entry frame (see `locate`) so the Vm is still usable afterwards.
 #[allow(clippy::too_many_arguments)]
 fn inject_call<'gc>(
     ctx: Ctx<'gc>,
-    code: &mut Decoder,
+    bytes: &[u8],
     chunks: &IdVec<BodyId, Chunk>,
     signatures: &IdVec<BodyId, Option<Function>>,
     strs: &StrInterner,
@@ -1279,16 +1307,30 @@ fn inject_call<'gc>(
     captures: &[Val<'gc>],
 ) -> Result<Val<'gc>, Error> {
     let mut thread = ctx.thread().borrow_mut(&ctx);
-    let base = thread.frames.last().unwrap().base;
-    let (depth, regs, ip) = (thread.frames.len(), thread.regs.len(), code.ip);
+    let entry = thread.frames.last().unwrap();
+    let base = entry.base;
+    let mut code = Decoder {
+        bytes,
+        ip: entry.ip,
+    };
+    let depth = thread.frames.len();
     // the callee returns into r0 of the entry body, which still needs its own value
     let r0 = thread.regs[base];
     // nothing is mutated before this fails, so the thread is untouched and needs no unwinding
     let args = CallArgs::Values(values);
-    enter_call(&mut thread, code, chunks, body, Reg::ZERO, args, captures).map_err(Error::msg)?;
+    enter_call(
+        &mut thread,
+        &mut code,
+        chunks,
+        body,
+        Reg::ZERO,
+        args,
+        captures,
+    )
+    .map_err(Error::msg)?;
     let ran = run_dispatch(
         ctx,
-        code,
+        &mut code,
         chunks,
         signatures,
         strs,
@@ -1297,25 +1339,20 @@ fn inject_call<'gc>(
         usize::MAX,
         depth + 1,
     );
-    // a fault returns without unwinding, so the callee's frames are still stacked
-    if ran.is_err() {
-        thread.frames.truncate(depth);
-        thread.regs.truncate(regs);
-        code.ip = ip;
-    }
     let value = std::mem::replace(&mut thread.regs[base], r0);
     drop(thread);
     ran?;
     Ok(value)
 }
 
-/// Attach a source location to a runtime fault. `op_ip` is the byte the faulting op was decoded
-/// from, the current top frame is still the one that faulted.
+/// Attach a source location to a runtime fault and unwind to the entry frame, which keeps the Vm
+/// usable. `op_ip` is the byte the faulting op was decoded from, and the top frame is still the
+/// one that faulted.
 #[cold]
 fn locate(
     kind: RtErr,
     op_ip: usize,
-    thread: &ThreadState<'_>,
+    thread: &mut ThreadState<'_>,
     chunks: &IdVec<BodyId, Chunk>,
     sources: &Sources,
 ) -> Error {
@@ -1323,6 +1360,10 @@ fn locate(
     let chunk = &chunks[frame_chunk];
     let rel = u32::try_from(op_ip - chunk.offset).unwrap();
     let loc = chunk.loc_at(rel);
+    thread.frames.truncate(1);
+    thread
+        .regs
+        .truncate(chunks[thread.frames[0].chunk].regs as usize);
     // synthetic locs (no real source) point at an empty stub source -- nothing meaningful to
     // highlight, but the kind's title still renders.
     let (src, at) = if loc.is_synthetic() {
@@ -1666,7 +1707,6 @@ impl Vm {
     {
         let Vm {
             bytes,
-            ip,
             chunks,
             signatures,
             c_strs: strs,
@@ -1677,13 +1717,9 @@ impl Vm {
         let result = arena.mutate(|mc, state| {
             let ctx = state.ctx(mc);
             let values = call_args(ctx, strs, f, args);
-            let mut code = Decoder {
-                bytes: bytes.as_slice(),
-                ip: *ip,
-            };
             let value = inject_call(
                 ctx,
-                &mut code,
+                bytes,
                 chunks,
                 signatures,
                 strs,
@@ -1692,7 +1728,6 @@ impl Vm {
                 &values,
                 &[],
             )?;
-            *ip = code.ip;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))
         });
@@ -1726,7 +1761,6 @@ impl Vm {
     {
         let Vm {
             bytes,
-            ip,
             chunks,
             c_strs: strs,
             arena,
@@ -1767,14 +1801,9 @@ impl Vm {
             };
             // `enter_call` is what rejects a wrong argument count, for the host and script alike
             let values = call_args(ctx, strs, signature, args);
-            let mut code = Decoder {
-                bytes: bytes.as_slice(),
-                ip: *ip,
-            };
             let value = inject_call(
-                ctx, &mut code, chunks, signatures, strs, sources, body, &values, captures,
+                ctx, bytes, chunks, signatures, strs, sources, body, &values, captures,
             )?;
-            *ip = code.ip;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))
         });
@@ -1825,7 +1854,6 @@ impl Vm {
         // the first library a host installs is its manifest, when it runs from its cargo target dir
         #[cfg(feature = "export-api")]
         {
-            use std::sync::atomic::{AtomicBool, Ordering};
             static WRITTEN: AtomicBool = AtomicBool::new(false);
             if !WRITTEN.swap(true, Ordering::Relaxed)
                 && let Some(path) = std::env::current_exe()
@@ -1839,10 +1867,8 @@ impl Vm {
                 );
             }
         }
-        let (program, sources) = Self::build_program(files, &library)?;
-
+        let program = Self::build_program(files, &library)?;
         vm.load_program(program);
-        vm.set_sources(sources);
         vm.registry = library.into_registry();
         Ok(vm)
     }
@@ -1852,7 +1878,7 @@ impl Vm {
     fn build_program(
         files: &[(&str, &str)],
         library: &::api::Library<()>,
-    ) -> std::result::Result<(Program, Sources), ExecuteError> {
+    ) -> std::result::Result<Program, ExecuteError> {
         use solve::Resolutions;
 
         let mut loaded = solve::Modules::from_files(files.iter().copied(), library);
@@ -1866,7 +1892,6 @@ impl Vm {
             .into_iter()
             .flat_map(|ast| ast.unpack())
             .collect();
-        let sources = loaded.sources;
         let resolutions = Resolutions::from(loaded.solver);
         // todo: there's zero reason to clone this here, im just trying to get a working version --
         // there's probably a much smoother way to get the intrinsics over here
@@ -1875,7 +1900,7 @@ impl Vm {
             library.intrinsics().iter().map(|(a, b)| (*a, *b)).collect(),
         );
         ir.lower(&stmts);
-        Ok((compile::Compiler::new().compile(&mut ir), sources))
+        Ok(compile::Compiler::new().compile(&mut ir))
     }
 }
 

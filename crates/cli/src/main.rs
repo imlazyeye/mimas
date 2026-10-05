@@ -178,7 +178,6 @@ fn run(
         Ok(_) => return 1,
         Err(code) => return code,
     };
-    let sources = script.sources.clone();
     let compiled = match compile(&directory.modules, script, &library, disasm, dump_ir) {
         Ok(compiled) => compiled,
         Err(code) => return code,
@@ -191,7 +190,6 @@ fn run(
 
     let result = ice::catch("execution", move || {
         vm.load_program(compiled);
-        vm.set_sources(sources);
         vm.run()
     });
     match result {
@@ -351,20 +349,7 @@ fn compile(
     disasm: bool,
     dump_ir: bool,
 ) -> Result<compile::Program, i32> {
-    let Modules {
-        asts,
-        sources,
-        solver,
-        ..
-    } = script;
-    let srcs: std::collections::HashMap<usize, std::sync::Arc<str>> = if disasm {
-        sources
-            .iter()
-            .map(|(&id, ns)| (id, ns.inner().clone()))
-            .collect()
-    } else {
-        std::collections::HashMap::new()
-    };
+    let Modules { asts, solver, .. } = script;
     let intrinsics = library.intrinsics().clone();
     ice::catch("compilation", || {
         let mut ir = compile::Ir::new(solve::Resolutions::from(solver), intrinsics);
@@ -374,7 +359,6 @@ fn compile(
         }
         compile::Compiler::new()
             .with_disasm(disasm)
-            .with_sources(srcs)
             .compile(&mut ir)
     })
     .map_err(|report| {

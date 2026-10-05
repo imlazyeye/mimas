@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use api::NativeId;
 use indexmap::IndexMap;
 use parse::AccessKind;
-use shared::{Error, FnHeader, IdVec, Location, Result, StrId, StrInterner, Ty};
+use shared::{Error, FnHeader, IdVec, Location, Result, Sources, StrId, StrInterner, Ty};
 use solve::components::AdtId;
 pub use solve::components::Vis;
 
@@ -19,6 +19,7 @@ pub struct Program {
     pub strs: StrInterner,
     pub bytes: Vec<u8>,
     pub root: Module,
+    pub sources: Sources,
 }
 
 /// Everything a script declares, in declaration order: the fns, consts, types, and modules of
