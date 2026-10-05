@@ -7,6 +7,22 @@
 mimas is a statically typed, embeddable scripting language for Rust. It carries over much of Rust's syntax and ergonomics, reshaping the rest to deliver what a scripting layer is good for: fast iteration, logic you can change without a rebuild, and a runtime that ships anywhere your program runs.
 </p>
 
+<div class="terminal" id="repl">
+  <div class="terminal-bar">
+    <span class="terminal-title">mimas repl</span>
+    <button type="button">Reset</button>
+  </div>
+  <div class="terminal-screen">
+    <div class="terminal-output" aria-live="polite"></div>
+    <label class="terminal-input">
+      <span>&gt;</span>
+      <textarea rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="mimas input" placeholder="click here to try mimas out in a REPL"></textarea>
+    </label>
+  </div>
+</div>
+<p class="terminal-caption">Runs with the mimas standard library with certain elements removed (i.e.: <code>std::fs</code>)</p>
+<script type="module" src="home/terminal.js"></script>
+
 <p class="badges">
   <a href="https://github.com/imlazyeye/mimas"><img src="https://img.shields.io/badge/github-imlazyeye%2Fmimas-3d8ef7?style=flat-square&logo=github" alt="github" /></a>
   <a href="https://crates.io/crates/mimas"><img src="https://img.shields.io/badge/version-0.3.0-66e8ff?style=flat-square" alt="version" /></a>

@@ -250,6 +250,114 @@ a:hover {
     }
 }
 
+/* home page terminal. its colors come from the theme (the sidebar's and the popups') */
+.terminal {
+    margin: 1.5rem 0 0.5rem;
+    border: 1px solid var(--quote-border);
+    border-radius: 8px;
+    background: var(--sidebar-bg);
+    color: var(--fg);
+    font-family: var(--mono-font);
+    font-size: var(--code-font-size);
+    overflow: hidden;
+}
+
+.terminal-bar {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--quote-border);
+    background: var(--theme-popup-bg);
+}
+
+.terminal-bar::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ff5f57;
+    box-shadow: 16px 0 #febc2e, 32px 0 #28c840;
+    margin-right: 40px;
+}
+
+.terminal-title {
+    flex: 1;
+    text-align: center;
+    font-size: 0.85em;
+    color: var(--icons);
+}
+
+.terminal-bar button {
+    padding: 0 0.6rem;
+    border: 1px solid var(--scrollbar);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--icons);
+    font: inherit;
+    font-size: 0.85em;
+    line-height: 1.6;
+    cursor: pointer;
+}
+
+.terminal-bar button:hover {
+    border-color: #ff5252;
+    color: #ff5252;
+}
+
+/* the input row fills the rest of the screen, so a click anywhere under the output lands in it */
+.terminal-screen {
+    display: flex;
+    flex-direction: column;
+    min-height: 16rem;
+    max-height: 28rem;
+    padding: 14px 18px;
+    overflow-y: auto;
+    line-height: 1.5;
+}
+
+.terminal-output {
+    white-space: pre-wrap;
+}
+
+.terminal-output .input {
+    opacity: 0.6;
+}
+
+.terminal-output .echo {
+    color: var(--sidebar-active);
+}
+
+.terminal-output .error {
+    color: #ff5252;
+}
+
+.terminal-input {
+    display: flex;
+    flex: 1;
+    gap: 1ch;
+}
+
+.terminal-input textarea {
+    flex: 1;
+    padding: 0;
+    border: 0;
+    outline: none;
+    resize: none;
+    field-sizing: content;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    caret-color: var(--sidebar-active);
+}
+
+.terminal-caption {
+    margin: 0;
+    font-size: 1.2rem;
+    text-align: center;
+    opacity: 0.7;
+}
+
 .hljs.language-mimas {
     display: block;
     padding: 1rem;
