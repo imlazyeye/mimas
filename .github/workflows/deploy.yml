@@ -33,10 +33,11 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          # the breakout demo is its own workspace, and misses the cache without this
+          # the breakout demo and web repl are their own workspaces, and miss the cache without this
           workspaces: |
             . -> target
             examples/bevy -> target
+            tools/book/repl -> target
 
       - name: Install mdBook
         run: |
@@ -61,18 +62,9 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build
-        run: mdbook build book
-
-      # after the book, because `mdbook build` empties `book/book`
-      - name: Build the breakout demo
         run: |
-          out=book/book/extension/breakout
-          cargo build --release --target wasm32-unknown-unknown \
-            --manifest-path examples/bevy/Cargo.toml
-          wasm-bindgen --target web --no-typescript \
-            --out-dir "$out" --out-name breakout \
-            examples/bevy/target/wasm32-unknown-unknown/release/bevy.wasm
-          cp -r examples/bevy/assets "$out/assets"
+          book/wasm.sh
+          mdbook build book
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

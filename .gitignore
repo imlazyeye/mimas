@@ -2,6 +2,8 @@
 **/__pycache__
 mutants/
 /book/book
+/book/src/extension/breakout
+/book/src/home/repl*
 benchmarks/results
 temp/
 .cargo/*
