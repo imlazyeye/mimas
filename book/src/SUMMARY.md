@@ -37,6 +37,7 @@
   - [Memory](./reference/memory.md)
   - [Notable Exclusions](./reference/notable-exclusions.md)
 - [Library Reference](./std.md)
+  - [bevy](./std/bevy.md)
 - [Extension with Rust](./extension-with-rust.md)
   - [Basics](./extension/basics.md)
   - [Working With Types](./extension/working-with-types.md)

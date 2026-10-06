@@ -81,7 +81,8 @@ pub enum Commands {
         include_std: bool,
 
         /// Runs as an mdBook preprocessor instead, adding the pages under the chapter at this path
-        /// (i.e. `api.md`) along with a table of them. The manifest is always the default one.
+        /// (i.e. `api.md`), ahead of any it already lists, along with a table of them. The
+        /// manifest is always the default one.
         #[clap(long, value_name = "CHAPTER")]
         mdbook: Option<String>,
     },

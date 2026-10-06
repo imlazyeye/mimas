@@ -146,14 +146,13 @@ fn markdown(api: Value, folder: str) {
 }
 
 /// Runs as an mdBook preprocessor, adding a page for every module and type in `api` under the
-/// chapter at `chapter`, in a folder named after it. mdbook passes `[context, book]` through stdin
-/// and takes the book back through stdout.
+/// chapter at `chapter`, in a folder named after it (ahead of any pages the book already lists
+/// there). mdbook passes `[context, book]` through stdin and takes the book back through stdout.
 fn preprocess(api: Value, chapter: str) {
     let book = MdBook::from_value(std::parse::from_json(std::sys::stdin()!)!.as_array()![1])!;
     let parent? = find_chapter(book.sections, chapter) else { panic(f"the book has no {chapter}") };
     let folder = chapter.find("^(.*)\\.md$")![1];
 
-    let rows = [];
     let items = [];
     for (title, page, types) in pages(api) {
         let file = f"{folder}/{file_of(title)}";
@@ -180,11 +179,23 @@ fn preprocess(api: Value, chapter: str) {
             parent_names = [parent.parent_names, [parent.name]].flat(),
             sub_items = children,
         }));
-
-        // module paths are lowercase, unlike the names of the other pages
-        let label = if title == title.to_lower() f"`{title}`" else title;
-        rows.push(f"| [{label}](./{folder.find("[^/]*$")![0]}/{file_of(title)}.md) |");
     }
+
+    // pages written by hand (like the bevy plugin's) go after the generated ones
+    for item in parent.sub_items {
+        if let BookItem::Chapter(page) = item {
+            page.number = numbered(parent.number, items.len() + 1);
+            items.push(item);
+        }
+    }
+    let rows = for item in items {
+        if let BookItem::Chapter(page) = item {
+            // module paths are lowercase, unlike the names of the other pages
+            let label = if page.name == page.name.to_lower() f"`{page.name}`" else page.name;
+            let file = page.path!.find(f"^{folder}/(.*)$")![1];
+            collect f"| [{label}](./{folder.find("[^/]*$")![0]}/{file}) |";
+        }
+    };
 
     parent.content += f"\n| Page |\n| :-- |\n{rows.join("\n")}\n";
     parent.sub_items = items;

@@ -152,6 +152,7 @@ A hook works on copies. Whatever it changes on a parameter, or on something it g
 | component `T` | `T::get(e) -> T?`, `T::insert(e, value)`, `T::remove(e) -> T?`, `T::entities() -> [bevy::Entity]` |
 | resource `T` | `T::get() -> T?`, `T::insert(value)` |
 | message `T` | `T::read() -> [T]`, `T::write(value)` |
+| any `T` with `#[reflect(Default)]` | `T::default() -> T` |
 
 Messages are the one thing you register, with `app.script_message::<T>()`, because Bevy can only read them through their concrete type. Each scripted entity reads every message once.
 
@@ -174,16 +175,9 @@ app.script_installer(|api| {
 
 ## Built in
 
-```admonish todo title="A temporary home"
-This list stands in for a proper reference. mimas doesn't have a pipeline for generating API reference docs yet, and once [it does](https://github.com/imlazyeye/mimas/issues/26), these natives will move there.
-```
+The plugin's own natives, like `bevy::ecs::me()`, `bevy::time::delta()`, and `bevy::input::pressed`, are listed in the [`bevy` reference](../std/bevy.md). Bevy's `Vec2`, `Vec3`, and `Quat` reach scripts as the types in [`std::math`](../std/math.md).
 
-- `bevy::Entity::spawn()`, `e.despawn()`, `e.exists()`, `bevy::ecs::me()`, and `bevy::ecs::attach_script(e, path)`
-- `T::default()` for any reflected type with `#[reflect(Default)]`, like `bevy::Transform::default()`
-- `std::math::{Vec2, Vec3, Quat}`, which are Bevy's own math types
-- `bevy::time::delta()` and `bevy::time::elapsed()`, which follow the fixed clock inside `fixed_update`
-- `bevy::input::pressed`, `bevy::input::just_pressed`, and `bevy::input::just_released` with a `bevy::KeyCode`, their `mouse_` versions with a `bevy::MouseButton`, and `bevy::input::cursor()` in world space
-- `bevy::log::info`, `bevy::log::warn`, and `bevy::log::error`
+## Errors
 
 Compile errors and runtime faults print to stderr as full diagnostics, log as one line, and arrive as `ScriptError` messages. Each registered function reports its first fault and none after it, however many entities or frames it faults on, until its script reloads.
 

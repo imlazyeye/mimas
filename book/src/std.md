@@ -7,3 +7,5 @@ The standard library comes in three parts:
 - **The prelude**: functions like `print` and `panic` that are in scope in every script.
 - **Methods on the built-in types**: `len` on arrays, `to_upper` on strings, and so on. These are always available through dot syntax.
 - **Modules under `std`**: everything else, like file access and JSON parsing. Bring these in with `use`, such as `use std::fs;`.
+
+The [`bevy`](./std/bevy.md) page is separate from the standard library. It covers what the [Bevy plugin](./extension/bevy.md) adds for scripts in a Bevy app.
