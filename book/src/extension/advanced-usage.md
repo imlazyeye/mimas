@@ -47,6 +47,7 @@ fn main() {
 A few things worth noticing:
 
 - The standard library only arrives if you ask for it -- that's the `mimas::library::std(api)` line, and you almost always want it first. (`mimas::compile_source` is nothing more than `Vm::compile` with `library::std` alone as the installer.)
+- A host that runs scripts it didn't write can install `mimas::library::sandboxed(api)` in its place. It leaves out the `fs`, `process` and `sys` modules, so scripts can't touch files, start programs or end the host's process. Note that this is only a basic measure and doesn't offer any sort of security guarantee.
 - Going manual doesn't turn the magic off. Any `mimas`-tagged items that made it into your binary still install themselves, interleaved with your installer: tagged types first, then your installer, then tagged functions. That ordering means your installer can reference `#[mimas]` types, and `#[mimas]` functions can reference yours -- the two styles mix freely.
 
 ## The `Api` surface
