@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use api::Library;
 use miette::NamedSource;
@@ -68,37 +64,5 @@ impl Modules {
             errors,
             solver,
         }
-    }
-}
-
-/// A directory as a library: its modules, solved together once, and its scripts, each solved on
-/// top of them with [`Modules::load`] like every script is solved on top of the std library.
-///
-/// - my_project
-///   - module_a.mim
-///   - script_a.mim
-///   - enemies
-///     - module_b.mim
-///     - script_b.mim
-///
-/// `my_project` is one library of `module_a` and `module_b`. `script_a` and `script_b` each see
-/// all of it and nothing of each other.
-pub struct Directory<'a> {
-    pub modules: Modules,
-    pub scripts: Vec<&'a (PathBuf, String)>,
-}
-
-impl<'a> Directory<'a> {
-    /// Sorts a project's files (each a path and its text) into modules and scripts, and solves the
-    /// modules against `library`.
-    pub fn load(files: &'a [(PathBuf, String)], library: &Library<()>) -> Self {
-        let (modules, scripts): (Vec<_>, Vec<_>) = files
-            .iter()
-            .partition(|file| parse::lex::is_module(&file.1));
-        let modules = Modules::from_files(
-            modules.iter().map(|(path, text)| (path, text.as_str())),
-            library,
-        );
-        Self { modules, scripts }
     }
 }

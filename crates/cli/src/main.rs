@@ -3,7 +3,7 @@ use clap::Parser;
 use colored::Colorize;
 use num_format::{Locale, ToFormattedString};
 use parse::Ast;
-use solve::{Directory, Modules};
+use solve::Modules;
 use std::{path::PathBuf, time::Duration};
 use vm::conversion::Raisable;
 
@@ -15,6 +15,7 @@ pub use input::*;
 use unit::Unit;
 
 const ICE_EXIT_CODE: i32 = 101;
+type Scripts<'a> = Vec<&'a (PathBuf, String)>;
 const DOCS_SCRIPT: &str = include_str!("../scripts/docs.mim");
 const MDBOOK_SCRIPT: &str = include_str!("../scripts/mdbook.mim");
 
@@ -53,12 +54,12 @@ fn check(path: Option<PathBuf>, color: bool) -> i32 {
     let timer = std::time::Instant::now();
     let unit = Unit::new(&resolve_path(path));
     let library = host_library(&unit);
-    let (directory, mut count) = match load(&unit, &library, color) {
+    let (modules, scripts, mut count) = match load(&unit, &library, color) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    for file in unit.scripts(&directory) {
-        match solve(&directory.modules, file, color) {
+    for file in scripts {
+        match solve(&modules, file, color) {
             Ok(script) => count += script.errors.len(),
             Err(code) => return code,
         }
@@ -95,13 +96,13 @@ fn build(path: Option<PathBuf>, color: bool, disasm: bool, dump_ir: bool) -> i32
     let timer = std::time::Instant::now();
     let unit = Unit::new(&resolve_path(path));
     let library = host_library(&unit);
-    let (directory, mut count) = match load(&unit, &library, color) {
+    let (modules, files, mut count) = match load(&unit, &library, color) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
     let mut scripts = vec![];
-    for file in unit.scripts(&directory) {
-        match solve(&directory.modules, file, color) {
+    for file in files {
+        match solve(&modules, file, color) {
             Ok(script) => {
                 count += script.errors.len();
                 scripts.push(script);
@@ -113,7 +114,7 @@ fn build(path: Option<PathBuf>, color: bool, disasm: bool, dump_ir: bool) -> i32
         return 1;
     }
     for script in scripts {
-        if let Err(code) = compile(&directory.modules, script, &library, disasm, dump_ir) {
+        if let Err(code) = compile(&modules, script, &library, disasm, dump_ir) {
             return code;
         }
     }
@@ -147,12 +148,11 @@ fn run(
     let unit = Unit::new(&path);
     let mut vm = vm::Vm::new();
     let library = vm.install_library(library::std);
-    let directory = match load(&unit, &library, color) {
-        Ok((directory, 0)) => directory,
+    let (modules, scripts) = match load(&unit, &library, color) {
+        Ok((modules, scripts, 0)) => (modules, scripts),
         Ok(_) => return 1,
         Err(code) => return code,
     };
-    let scripts = unit.scripts(&directory);
     let file = match scripts[..] {
         [file] => file,
         [] => {
@@ -174,12 +174,12 @@ fn run(
             return 1;
         }
     };
-    let script = match solve(&directory.modules, file, color) {
+    let script = match solve(&modules, file, color) {
         Ok(script) if script.errors.is_empty() => script,
         Ok(_) => return 1,
         Err(code) => return code,
     };
-    let compiled = match compile(&directory.modules, script, &library, disasm, dump_ir) {
+    let compiled = match compile(&modules, script, &library, disasm, dump_ir) {
         Ok(compiled) => compiled,
         Err(code) => return code,
     };
@@ -223,12 +223,12 @@ fn repl(path: Option<PathBuf>, color: bool) -> i32 {
     let unit = Unit::new(&resolve_path(path));
     let mut vm = vm::Vm::new();
     let library = vm.install_library(library::std);
-    let directory = match load(&unit, &library, color) {
-        Ok((directory, 0)) => directory,
+    let modules = match load(&unit, &library, color) {
+        Ok((modules, _, 0)) => modules,
         Ok(_) => return 1,
         Err(code) => return code,
     };
-    let mut session = vm::Session::new(vm, library, directory.modules);
+    let mut session = vm::Session::new(vm, library, modules);
     let error = "error".bright_red().bold();
     let interrupt = session.interrupt();
     if let Err(e) = ctrlc::set_handler(move || interrupt.store(true, Ordering::Relaxed)) {
@@ -356,25 +356,40 @@ fn display_ty(value: library::Value) -> Raisable<String> {
         .into()
 }
 
-/// Loads the unit's project and prints the errors outside its scripts, counting them, or says
-/// with which exit code that crashed.
+/// Loads the unit's project: its modules solved together as one library, and the scripts the path
+/// names (the file itself, or every one in the directory), each of which is solved on top of the
+/// modules and sees nothing of the others. Prints the errors outside the scripts, counting them,
+/// or says with which exit code that crashed.
 fn load<'a>(
     unit: &'a Unit,
     library: &Library<()>,
     color: bool,
-) -> Result<(Directory<'a>, usize), i32> {
+) -> Result<(Modules, Scripts<'a>, usize), i32> {
     report_meta_errors(&unit.io_errors);
-    let directory =
-        ice::catch("check", || Directory::load(&unit.files, library)).map_err(|report| {
-            report.emit();
-            ICE_EXIT_CODE
-        })?;
+    let (modules, scripts): (Vec<_>, Scripts) = unit
+        .files
+        .iter()
+        .partition(|(_, text)| parse::lex::is_module(text));
+    let modules = ice::catch("check", || {
+        Modules::from_files(
+            modules.iter().map(|(path, text)| (path, text.as_str())),
+            library,
+        )
+    })
+    .map_err(|report| {
+        report.emit();
+        ICE_EXIT_CODE
+    })?;
 
-    for error in &directory.modules.errors {
+    for error in &modules.errors {
         render::emit(error.as_ref(), color);
     }
-    let count = unit.io_errors.len() + directory.modules.errors.len();
-    return Ok((directory, count));
+    let count = unit.io_errors.len() + modules.errors.len();
+    let scripts = scripts
+        .into_iter()
+        .filter(|(path, _)| unit.file.as_ref().is_none_or(|file| file == path))
+        .collect();
+    return Ok((modules, scripts, count));
 
     fn report_meta_errors(io_errors: &[std::io::Error]) {
         if !io_errors.is_empty() {
