@@ -34,13 +34,18 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
 /// Returns the number moved into the range from `low` to `high`, inclusive. A number already in
 /// the range comes back unchanged.
 ///
+/// A `low` greater than `high`, or either bound being `NaN`, is a runtime error.
+///
 /// ```mimas
 /// let a = 1.5.clamp(0.0, 1.0);    // 1.0
 /// let b = (-0.2).clamp(0.0, 1.0); // 0.0
 /// ```
 #[native]
-fn clamp(n: f64, low: f64, high: f64) -> f64 {
-    n.clamp(low, high) // todo: fault when low > high
+fn clamp(n: f64, low: f64, high: f64) -> Result<f64, RtErr> {
+    if (low..=high).is_empty() {
+        return Err(RtErr::InvalidArgument("clamp needs low <= high".into()));
+    }
+    Ok(n.clamp(low, high))
 }
 
 /// Returns the sign of the number as `1.0` or `-1.0`. Zero counts as positive (`0.0.signum()` is
@@ -297,7 +302,7 @@ fn to_str(n: f64) -> String {
 
 /// Returns a random `float` that is at least `0.0` and less than `len`.
 ///
-/// `len` must be greater than `0.0`.
+/// A `len` that isn't a finite number greater than `0.0` is a runtime error.
 ///
 /// ```mimas
 /// if float::random(1.0) < 0.25 {
@@ -305,6 +310,11 @@ fn to_str(n: f64) -> String {
 /// }
 /// ```
 #[native]
-fn random(len: f64) -> f64 {
-    rand::rng().random_range(0.0..len)
+fn random(len: f64) -> Result<f64, RtErr> {
+    if !len.is_finite() || len <= 0.0 {
+        return Err(RtErr::InvalidArgument(
+            "random len must be a finite number above 0.0".into(),
+        ));
+    }
+    Ok(rand::rng().random_range(0.0..len))
 }
