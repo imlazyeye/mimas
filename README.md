@@ -135,5 +135,3 @@ A single pipeline turns source into a running program, split across a handful of
 ## License
 
 Dual licensed under your choice of [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE).
-
-Built on the shoulders of [gc-arena](https://github.com/kyren/gc-arena), [miette](https://github.com/zkat/miette), and [chompy](https://github.com/imlazyeye/chompy); the `gc-arena` singleton and freeze patterns are adapted from [fabricator](https://github.com/kyren/fabricator).
