@@ -428,7 +428,9 @@ fn runtime_described_types_and_natives() {
                 |_, args| Ok(vm::Val::Int(args[0].as_int().unwrap_or_default() * 2)),
             );
             api.module("geo")
-                .add_described("origin_x", Vec::new(), Ty::Int, |_, _| Ok(vm::Val::Int(0)));
+                .add_described("origin_x", Vec::new(), Ty::Int, "", |_, _| {
+                    Ok(vm::Val::Int(0))
+                });
         },
         "use geo::Point; let TEST_VALUE = Point::double(Point { x = 21 }.x) + geo::origin_x();",
     );

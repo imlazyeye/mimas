@@ -338,12 +338,14 @@ impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
     }
 
     /// A module fn whose signature is only known at runtime, like [`Api::add_assoc_described`].
-    /// A `None` parameter takes any value, the way `print` does.
+    /// A `None` parameter takes any value, the way `print` does. `doc` is its markdown
+    /// documentation, which a `#[native]` fn gets from its doc comment.
     pub fn add_described(
         &mut self,
         name: impl Into<String>,
         parameters: Vec<(String, Option<Ty>)>,
         return_ty: Ty,
+        doc: impl Into<String>,
         call: impl for<'g> Fn(Ctx<'g>, &[Val<'g>]) -> RtResult<Val<'g>> + 'static,
     ) {
         let native = make_native(&self.parent.ctx, move |ctx, args| call(ctx, args));
@@ -352,7 +354,7 @@ impl<'b, 'a, 'gc> ModuleApi<'b, 'a, 'gc> {
             module: self.path.clone(),
             parameters,
             return_ty: Some(return_ty),
-            doc: String::new(),
+            doc: doc.into(),
             call: (),
         });
         self.parent.store_native(id, native);
