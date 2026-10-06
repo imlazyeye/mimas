@@ -32,7 +32,7 @@
       <stop offset="1" stop-color="#000" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="linear-gradient-3" x1="8683.61" y1="10455.53" x2="8683.61" y2="10176.24" xlink:href="#linear-gradient"/>
-    <linearGradient id="linear-gradient-4" x1="8609.91" y1="10380.85" x2="8782.19" y2="10242.46" gradientTransform="translate(-983.6666 13581.6121) rotate(-135)" gradientUnits="userSpaceOnUse">
+    <linearGradient id="linear-gradient-4" x1="268.58" y1="153.13" x2="77.84" y2="154.76" gradientUnits="userSpaceOnUse">
       <stop offset=".19" stop-color="#000"/>
       <stop offset=".27" stop-color="#000" stop-opacity=".76"/>
       <stop offset="1" stop-color="#000" stop-opacity="0"/>
