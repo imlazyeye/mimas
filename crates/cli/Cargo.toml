@@ -5,7 +5,6 @@ edition = "2024"
 description = "Command-line interface for mimas, a flexible, statically typed scripting language for Rust."
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 rust-version.workspace = true
 readme = "../../README.md"
 documentation = "https://mim.as"
