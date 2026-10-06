@@ -15,6 +15,8 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.mark_intrinsic(id, Intrinsic::Push);
     api.add_method(insert);
     api.add_method(pop);
+    api.add_method(remove);
+    api.add_method(first);
     api.add_method(shuffle);
     api.add_method(extend);
     api.add_method(enumerate);
@@ -125,6 +127,34 @@ fn insert(arr: &mut Vec<anon::T<'gc>>, index: usize, value: anon::T<'gc>) {
 #[native]
 fn pop(arr: &mut Vec<anon::T<'gc>>) -> Option<anon::T<'gc>> {
     arr.pop()
+}
+
+/// Removes the element at `index` and returns it, moving everything after it one place toward
+/// the start.
+///
+/// An `index` that is negative or not below the array's length is a runtime error.
+///
+/// ```mimas
+/// let xs = [1, 2, 3];
+/// let middle = xs.remove(1); // 2, and xs is now [1, 3]
+/// ```
+#[native]
+fn remove(arr: &mut Vec<anon::T<'gc>>, index: usize) -> Result<anon::T<'gc>, RtErr> {
+    if index >= arr.len() {
+        return Err(RtErr::IndexOutOfBounds);
+    }
+    Ok(arr.remove(index))
+}
+
+/// Returns the first element, or `null` if the array is empty.
+///
+/// ```mimas
+/// let xs = [1, 2];
+/// let a = xs.first(); // 1
+/// ```
+#[native]
+fn first(arr: &[Val<'gc>]) -> Option<anon::T<'gc>> {
+    arr.first().copied().map(anon::Anon)
 }
 
 /// Puts the elements in a random order.
