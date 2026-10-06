@@ -1,4 +1,11 @@
-use std::{sync::atomic::Ordering, thread, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Duration,
+};
 
 use solve::Modules;
 use vm::{Session, Vm};
@@ -168,11 +175,18 @@ fn fault_drops_its_items_and_frees_their_ids() {
 fn interrupt() {
     let mut session = session(&[]);
     let interrupt = session.interrupt();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(10));
-        interrupt.store(true, Ordering::Relaxed);
+    let done = Arc::new(AtomicBool::new(false));
+    let landed = Arc::clone(&done);
+    // a press that lands while the input compiles is dropped, so keep pressing
+    let presser = thread::spawn(move || {
+        while !landed.load(Ordering::Relaxed) {
+            interrupt.store(true, Ordering::Relaxed);
+            thread::sleep(Duration::from_millis(10));
+        }
     });
     let interrupted = session.run("loop {}").unwrap_err();
+    done.store(true, Ordering::Relaxed);
+    presser.join().unwrap();
     assert!(
         interrupted.to_string().contains("interrupted"),
         "{interrupted}"
