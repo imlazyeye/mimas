@@ -7,6 +7,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 ### Added
 
 - mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). Each input runs on top of the ones before it, and a trailing expression prints with its type.
+- `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel".
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
 
 ### Changed

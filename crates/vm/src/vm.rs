@@ -60,6 +60,7 @@ pub struct Vm {
     pub(crate) sources: Sources,
     pub(crate) root: Rc<Module>,
     pub(crate) registry: Registry,
+    pub(crate) fuel: Option<u64>,
 }
 
 impl Vm {
@@ -77,6 +78,7 @@ impl Vm {
             sources: Sources::new(),
             root: Rc::default(),
             registry: Registry::new(),
+            fuel: None,
         }
     }
 
@@ -146,13 +148,26 @@ impl Vm {
         FixtureRef { ptr }
     }
 
+    /// Limits how many ops this Vm can still run, shared by [`run`](Self::run) and every call
+    /// from the host. A script that spends it all faults with "ran out of fuel", and every op
+    /// after that faults the same way until the host sets more. `None`, the default, is no limit.
+    pub fn set_fuel(&mut self, fuel: Option<u64>) {
+        self.fuel = fuel;
+    }
+
+    /// The fuel left, or `None` if the Vm has no limit. See [`set_fuel`](Self::set_fuel).
+    pub fn fuel(&self) -> Option<u64> {
+        self.fuel
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         self.run_then(&AtomicBool::new(false), |_, _| ())
     }
 
     /// Runs the program to the end of its entry body, then `then` with the arena still open and
     /// the value the body returned. `stop` is read between batches of ops, and a script that finds
-    /// it set faults where it is. A fault unwinds to the entry frame so the Vm stays usable.
+    /// it set faults where it is. A script that runs out of [fuel](Self::set_fuel) faults the same
+    /// way. A fault unwinds to the entry frame so the Vm stays usable.
     pub fn run_then<T>(
         &mut self,
         stop: &AtomicBool,
@@ -169,6 +184,7 @@ impl Vm {
                 c_strs: strs,
                 arena,
                 sources,
+                fuel,
                 ..
             } = self;
             let done = arena.mutate(|mc, state| -> Result<Option<T>, Error> {
@@ -178,6 +194,8 @@ impl Vm {
                     bytes: bytes.as_slice(),
                     ip: thread.frames.last().unwrap().ip,
                 };
+                let batch = fuel.map_or(FUEL, |left| left.min(FUEL as u64) as usize);
+                let mut batch_left = batch;
                 let ran = run_dispatch(
                     ctx,
                     &mut code,
@@ -186,12 +204,22 @@ impl Vm {
                     strs,
                     sources,
                     &mut thread,
-                    FUEL,
+                    &mut batch_left,
                     1,
                 );
+                if let Some(left) = fuel {
+                    *left -= (batch - batch_left) as u64;
+                }
                 let value = match ran {
                     Ok(None) if stop.swap(false, Ordering::Relaxed) => Err(locate(
                         RtErr::Interrupted,
+                        code.ip,
+                        &mut thread,
+                        chunks,
+                        sources,
+                    )),
+                    Ok(None) if *fuel == Some(0) => Err(locate(
+                        RtErr::OutOfFuel,
                         code.ip,
                         &mut thread,
                         chunks,
@@ -474,7 +502,8 @@ macro_rules! branch_float_imm {
 /// back the returned value. `Vm::run_then` passes 1 (the entry frame's own return is the end of the
 /// program); `Vm::call` passes the pre-call depth + 1 so dispatch stops -- result written, entry ip
 /// untouched -- when the injected call returns, instead of running off the end of the entry's
-/// bytecode.
+/// bytecode. `budget` is the fuel to spend, and holds what's left once the dispatch exits (the fuel
+/// stays in a register while it runs).
 #[allow(clippy::too_many_arguments)]
 fn run_dispatch<'gc>(
     ctx: Ctx<'gc>,
@@ -484,18 +513,19 @@ fn run_dispatch<'gc>(
     strs: &StrInterner,
     sources: &Sources,
     thread: &mut ThreadState<'gc>,
-    mut fuel: usize,
+    budget: &mut usize,
     stop_depth: usize,
 ) -> Result<Option<Val<'gc>>, Error> {
+    let mut fuel = *budget;
     let (mut regs_ptr, mut regs_len) = window(thread, chunks);
     let bytes = code.bytes;
     let mut ip = code.ip;
     let mut exit = Ok(Flow::Next);
-    loop {
+    let ran = loop {
         if fuel == 0 {
             code.ip = ip;
             thread.frames.last_mut().unwrap().ip = ip;
-            return Ok(None);
+            break Ok(None);
         }
         fuel -= 1;
         let op_ip = ip;
@@ -518,7 +548,7 @@ fn run_dispatch<'gc>(
                 let Err(kind) = std::mem::replace(&mut exit, Ok(Flow::Next)) else {
                     unreachable!()
                 };
-                return Err(locate(*kind, op_ip, thread, chunks, sources));
+                break Err(locate(*kind, op_ip, thread, chunks, sources));
             }
         };
         match flow {
@@ -542,7 +572,7 @@ fn run_dispatch<'gc>(
                     CallTarget::Value(b) => {
                         if signatures.get(*b).and_then(Option::as_ref).is_none() {
                             let kind = not_callable(Val::Fn(*b));
-                            return Err(locate(kind, op_ip, thread, chunks, sources));
+                            break Err(locate(kind, op_ip, thread, chunks, sources));
                         }
                         (*b, &[])
                     }
@@ -552,14 +582,14 @@ fn run_dispatch<'gc>(
                     }
                 };
                 if let Err(kind) = enter_call(thread, code, chunks, body, *dst, args, captures) {
-                    return Err(locate(kind, op_ip, thread, chunks, sources));
+                    break Err(locate(kind, op_ip, thread, chunks, sources));
                 }
                 (regs_ptr, regs_len) = window(thread, chunks);
             }
             Flow::Return(value) => {
                 if thread.frames.len() == 1 {
                     thread.frames.last_mut().unwrap().ip = code.ip;
-                    return Ok(Some(*value));
+                    break Ok(Some(*value));
                 }
                 let popped = thread.frames.pop().unwrap();
                 thread.regs.truncate(popped.base);
@@ -568,13 +598,15 @@ fn run_dispatch<'gc>(
                 let caller_base = caller.base;
                 thread.regs[caller_base + popped.return_reg as usize] = *value;
                 if thread.frames.len() < stop_depth {
-                    return Ok(Some(*value));
+                    break Ok(Some(*value));
                 }
                 (regs_ptr, regs_len) = window(thread, chunks);
             }
         }
         ip = code.ip;
-    }
+    };
+    *budget = fuel;
+    ran
 }
 
 /// Raw `(ptr, len)` for the current top frame's register window. Must ALWAYS be recomputed after
@@ -1293,7 +1325,8 @@ fn call_args<'gc>(
 }
 
 /// Run `body` to its return as if the entry frame had called it and hand back what it returned.
-/// A fault unwinds to the entry frame (see `locate`) so the Vm is still usable afterwards.
+/// A fault, running out of `fuel` included, unwinds to the entry frame (see `locate`) so the Vm
+/// is still usable afterwards.
 #[allow(clippy::too_many_arguments)]
 fn inject_call<'gc>(
     ctx: Ctx<'gc>,
@@ -1305,6 +1338,7 @@ fn inject_call<'gc>(
     body: BodyId,
     values: &[Val<'gc>],
     captures: &[Val<'gc>],
+    fuel: &mut Option<u64>,
 ) -> Result<Val<'gc>, Error> {
     let mut thread = ctx.thread().borrow_mut(&ctx);
     let entry = thread.frames.last().unwrap();
@@ -1328,6 +1362,10 @@ fn inject_call<'gc>(
         captures,
     )
     .map_err(Error::msg)?;
+    let budget = fuel.map_or(usize::MAX, |left| {
+        usize::try_from(left).unwrap_or(usize::MAX)
+    });
+    let mut budget_left = budget;
     let ran = run_dispatch(
         ctx,
         &mut code,
@@ -1336,9 +1374,22 @@ fn inject_call<'gc>(
         strs,
         sources,
         &mut thread,
-        usize::MAX,
+        &mut budget_left,
         depth + 1,
     );
+    if let Some(left) = fuel {
+        *left -= (budget - budget_left) as u64;
+    }
+    let ran = match ran {
+        Ok(None) => Err(locate(
+            RtErr::OutOfFuel,
+            code.ip,
+            &mut thread,
+            chunks,
+            sources,
+        )),
+        ran => ran,
+    };
     let value = std::mem::replace(&mut thread.regs[base], r0);
     drop(thread);
     ran?;
@@ -1712,6 +1763,7 @@ impl Vm {
             c_strs: strs,
             arena,
             sources,
+            fuel,
             ..
         } = self;
         let result = arena.mutate(|mc, state| {
@@ -1727,6 +1779,7 @@ impl Vm {
                 f.body,
                 &values,
                 &[],
+                fuel,
             )?;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))
@@ -1766,6 +1819,7 @@ impl Vm {
             arena,
             sources,
             signatures,
+            fuel,
             ..
         } = self;
         let result = arena.mutate(|mc, state| {
@@ -1802,7 +1856,7 @@ impl Vm {
             // `enter_call` is what rejects a wrong argument count, for the host and script alike
             let values = call_args(ctx, strs, signature, args);
             let value = inject_call(
-                ctx, bytes, chunks, signatures, strs, sources, body, &values, captures,
+                ctx, bytes, chunks, signatures, strs, sources, body, &values, captures, fuel,
             )?;
             let value = R::from_value(ctx, value).map_err(|err| Error::msg(RtErr::from(err)))?;
             Ok((value, then(ctx)))

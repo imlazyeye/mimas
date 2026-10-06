@@ -72,6 +72,9 @@ pub enum RtErr {
     #[error("the script was interrupted")]
     Interrupted,
 
+    #[error("ran out of fuel")]
+    OutOfFuel,
+
     #[error("called a value that isn't a function")]
     NotCallable { callee: Captured },
 
@@ -108,6 +111,7 @@ impl RtErr {
             Self::IntegerOverflow => "this arithmetic overflows a 64 bit integer".to_string(),
             Self::UserPanic => "panicked here".to_string(),
             Self::Interrupted => "interrupted here".to_string(),
+            Self::OutOfFuel => "ran out of fuel here".to_string(),
             Self::NotCallable { callee } => format!("`{callee}` cannot be called"),
             Self::WrongArity { got, .. } => format!("this call passes {got}"),
             Self::InvalidArgument(_) | Self::Custom(_) => "here".to_string(),
