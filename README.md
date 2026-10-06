@@ -66,6 +66,8 @@ mimas check my_script.mim   # parse + type-check
 mimas run my_script.mim     # execute (or just `mimas my_script.mim`)
 mimas run my_project        # runs the project's one script, with its modules
 mimas my_project            # running with no subcommand defaults to `run`
+mimas repl                  # runs the repl
+mimas                       # also runs the repl
 ```
 
 **Embedded in a Rust project** -- add `mimas` and compile a script in two lines:

@@ -8,22 +8,13 @@ To use mimas independently you can install its CLI utility.
 
 ```sh
 cargo install mimas-cli
-```
 
-Mirroring cargo, you can use a `check`, `build`, and `run` command.
-
-```admonish note
-mimas doesn't "build" to any compiled files, it just runs off of scripts. The build command mostly exists for internal use to invoke the compiler!
-```
-
-```sh
-mimas check my_script.mim # runs a script through the parsers/type checker
-mimas check my_project    # checks every script in a directory, each with its modules
-
-mimas run my_script.mim   # executes a script
-mimas run my_project      # runs the directory's one script
-
-mimas my_script.mim       # you can also drop the "run" and just type "mimas"
+mimas check my_script.mim   # parse + type-check
+mimas run my_script.mim     # execute (or just `mimas my_script.mim`)
+mimas run my_project        # runs the project's one script, with its modules
+mimas my_project            # running with no subcommand defaults to `run`
+mimas repl                  # runs the repl
+mimas                       # also runs the repl
 ```
 
 ## Rust Projects
