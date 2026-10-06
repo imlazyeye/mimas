@@ -6,12 +6,14 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Added
 
+- mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). Each input runs on top of the ones before it, and a trailing expression prints with its type.
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
 
 ### Changed
 
 - Scripts run faster. mimas's benchmarks take 16% to 41% less time, with the biggest gains on function calls, struct field access, array reads and float math.
 - Embedding mimas pulls in fewer crates: 98 instead of 101 with the default features, and 60 with only `export-api`.
+- `print` and `dbg` now run through an `Output` fixture so hosts can redirect them.
 
 ## [0.3.0] - 2026-09-26
 
