@@ -31,13 +31,19 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     m.add_adt::<Quat>();
     api.add_assoc_of::<Vec2, _, _>("new", vec2_new);
     api.add_assoc_of::<Vec2, _, _>("from_angle", vec2_from_angle);
+    api.add_assoc_of::<Vec2, _, _>("zero", vec2_zero);
     api.add_method_named("length", vec2_length);
+    api.add_method_named("length_squared", vec2_length_squared);
     api.add_method_named("normalize", vec2_normalize);
     api.add_method_named("add", vec2_add);
     api.add_method_named("sub", vec2_sub);
     api.add_method_named("scale", vec2_scale);
     api.add_method_named("dot", vec2_dot);
     api.add_method_named("distance", vec2_distance);
+    api.add_method_named("distance_squared", vec2_distance_squared);
+    api.add_method_named("rotate", vec2_rotate);
+    api.add_method_named("perp", vec2_perp);
+    api.add_method_named("to_ints", vec2_to_ints);
     api.add_method_named("angle", vec2_angle);
     api.add_method_named("lerp", vec2_lerp);
     api.add_method_named("length", vec3_length);
@@ -74,9 +80,35 @@ fn vec2_from_angle(radians: f32) -> Vec2 {
     Vec2::from_angle(radians)
 }
 
+/// Creates the vector whose components are both `0.0`.
+///
+/// ```mimas
+/// use std::math::Vec2;
+///
+/// let velocity = Vec2::zero();
+/// let x = velocity.x; // 0.0
+/// ```
+#[native]
+fn vec2_zero() -> Vec2 {
+    Vec2::ZERO
+}
+
 #[native]
 fn vec2_length(v: Vec2) -> f32 {
     v.length()
+}
+
+/// Returns the vector's length multiplied by itself, which skips the square root that `length`
+/// takes. Comparing it against a squared distance tells which of two lengths is longer.
+///
+/// ```mimas
+/// use std::math::Vec2;
+///
+/// let n = Vec2::new(3.0, 4.0).length_squared(); // 25.0
+/// ```
+#[native]
+fn vec2_length_squared(v: Vec2) -> f32 {
+    v.length_squared()
 }
 
 #[native]
@@ -149,6 +181,62 @@ fn vec2_dot(v: Vec2, other: Vec2) -> f32 {
 #[native]
 fn vec2_distance(v: Vec2, other: Vec2) -> f32 {
     v.distance(other)
+}
+
+/// Returns the distance between the two points multiplied by itself, which skips the square root
+/// that `distance` takes.
+///
+/// ```mimas
+/// use std::math::Vec2;
+///
+/// let player = Vec2::new(0.0, 0.0);
+/// let enemy = Vec2::new(3.0, 4.0);
+/// let close = player.distance_squared(enemy) < 6.0 * 6.0; // true
+/// ```
+#[native]
+fn vec2_distance_squared(v: Vec2, other: Vec2) -> f32 {
+    v.distance_squared(other)
+}
+
+/// Returns the vector turned by `radians` around the origin, from the positive x axis toward the
+/// positive y axis. Its length doesn't change.
+///
+/// ```mimas
+/// use std::math::{PI, Vec2};
+///
+/// let up = Vec2::new(1.0, 0.0).rotate(PI / 2.0);
+/// let y = up.y; // 1.0
+/// ```
+#[native]
+fn vec2_rotate(v: Vec2, radians: f32) -> Vec2 {
+    Vec2::from_angle(radians).rotate(v)
+}
+
+/// Returns the vector turned a quarter turn, from the positive x axis toward the positive y axis.
+/// It's `Vec2::new(-y, x)`, which is perpendicular to the vector and as long.
+///
+/// ```mimas
+/// use std::math::Vec2;
+///
+/// let side = Vec2::new(1.0, 0.0).perp();
+/// let y = side.y; // 1.0
+/// ```
+#[native]
+fn vec2_perp(v: Vec2) -> Vec2 {
+    v.perp()
+}
+
+/// Returns the components as a pair of `int`s, each truncated toward zero the way `float.to_int`
+/// does. It's the step from a position to the pixel it's in.
+///
+/// ```mimas
+/// use std::math::Vec2;
+///
+/// let (x, y) = Vec2::new(3.7, -1.2).to_ints(); // (3, -1)
+/// ```
+#[native]
+fn vec2_to_ints(v: Vec2) -> (i64, i64) {
+    (v.x as i64, v.y as i64)
 }
 
 /// Returns the angle of the vector in radians, measured from the positive x axis toward the

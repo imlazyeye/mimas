@@ -67,6 +67,30 @@ test_run!(
 );
 
 test_run!(
+    remove_from_middle,
+    "let a = [1, 2, 3];
+     let x = a.remove(1);",
+    "x" => "2",
+    "a" => "[1, 3]",
+);
+
+test_fail!(
+    remove_past_end,
+    "let a = [1, 2];
+     a.remove(2);",
+    "let a = [1, 2];
+     a.remove(-1);",
+);
+
+test_run!(
+    first,
+    "let a = [1, 2];
+     let b: [int] = [];",
+    "a.first()" => "1",
+    "b.first()" => "null",
+);
+
+test_run!(
     contains,
     "let a = [1, 2, 3];",
     "a.contains(2)" => "true",
