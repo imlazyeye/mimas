@@ -1,5 +1,4 @@
 use api::Project;
-use solve::Directory;
 use std::path::{Path, PathBuf};
 
 /// The files of the project a path names: a directory, or a file with the rest of its project.
@@ -44,16 +43,6 @@ impl Unit {
             files,
             io_errors,
         }
-    }
-
-    /// The scripts the path names: the file itself, or every one in the directory.
-    pub fn scripts<'a>(&self, directory: &Directory<'a>) -> Vec<&'a (PathBuf, String)> {
-        directory
-            .scripts
-            .iter()
-            .copied()
-            .filter(|(path, _)| self.file.as_ref().is_none_or(|file| file == path))
-            .collect()
     }
 
     pub fn lines(&self) -> usize {

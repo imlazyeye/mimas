@@ -29,6 +29,51 @@ fn clean(modules: &Modules) {
 }
 
 #[test]
+fn layers_see_the_modules() {
+    let base = Modules::from_files(
+        [
+            (
+                "p/m.mim",
+                "module @;
+                 pub fn one() -> int { 1 }",
+            ),
+            (
+                "p/sub/n.mim",
+                "module @;
+                 pub fn two() -> int { 2 }",
+            ),
+        ],
+        &Library::new(),
+    );
+    clean(&base);
+    let script = layer(
+        &base,
+        "use m;
+         use n;
+         let x: int = m::one() + n::two();",
+    );
+    clean(&script);
+}
+
+#[test]
+fn layers_are_isolated() {
+    let base = empty();
+    clean(&layer(&base, "fn shared() -> int { 1 }"));
+    assert!(!layer(&base, "let x: int = shared();").errors.is_empty());
+}
+
+#[test]
+fn broken_modules_cut_off_the_layer() {
+    let base = with_module(
+        "m.mim",
+        r#"module @;
+           pub fn f() -> int { "no" }"#,
+    );
+    assert_eq!(base.errors.len(), 1);
+    assert!(layer(&base, "let x: str = 1;").errors.is_empty());
+}
+
+#[test]
 fn let_type_is_fixed() {
     let first = layer(&empty(), "let a = 1;");
     let second = layer(&first, r#"a = "x";"#);
