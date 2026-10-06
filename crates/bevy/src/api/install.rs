@@ -25,6 +25,7 @@ pub(crate) fn install(api: &mut Api, catalog: &Arc<Catalog>) {
             hook.name(),
             vec![("f".to_string(), None)],
             Ty::Unit,
+            format!("Registers `f` to run on bevy's `{}` schedule.", hook.name()),
             move |ctx, args| {
                 register(ctx, &catalog, hook, args[0])?;
                 Ok(Val::Null)

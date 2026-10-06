@@ -38,6 +38,7 @@ pub(crate) fn install(api: &mut Api) {
                 format!("{prefix}{name}"),
                 vec![("button".to_string(), Some(ty.clone()))],
                 Ty::Bool,
+                format!("Returns whether the button is {}.", name.replace('_', " ")),
                 move |ctx, args| {
                     let button = Convert::to_rust(ctx, args[0])
                         .ok_or_else(|| RtErr::InvalidArgument("that isn't a button".into()))?;
