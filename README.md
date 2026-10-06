@@ -11,7 +11,7 @@
 [![built with Rust](https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![license](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-8E9BFF?style=flat-square)](#license)
 [![ci](https://img.shields.io/github/actions/workflow/status/imlazyeye/mimas/test.yml?branch=main&style=flat-square&label=ci)](https://github.com/imlazyeye/mimas/actions/workflows/test.yml)
-[![tests](https://img.shields.io/badge/tests-1%2C900%2B_passing-5BD6B0?style=flat-square)](https://mim.as)
+[![tests](https://img.shields.io/badge/tests-2%2C200%2B_passing-5BD6B0?style=flat-square)](https://mim.as)
 
 [**Get started**](https://mim.as/introduction/getting-started.html) ·
 [Tour the language](https://mim.as/introduction/tour.html) ·
