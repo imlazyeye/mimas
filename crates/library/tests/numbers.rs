@@ -7,6 +7,13 @@ test_run!(
     "(0).abs()" => "0",
     "(-5).abs()" => "5",
     "(-1).abs()" => "1",
+    "(-9223372036854775807).abs()" => "9223372036854775807",
+);
+
+test_fail!(
+    int_abs_overflow,
+    "let min = -9223372036854775807 - 1;
+     print(min.abs());",
 );
 
 test_run!(
@@ -52,6 +59,36 @@ test_run!(
 );
 
 test_run!(
+    int_clamp_equal_bounds,
+    "(5).clamp(3, 3)" => "3",
+    "(3).clamp(3, 3)" => "3",
+    "(1).clamp(3, 3)" => "3",
+);
+
+test_fail!(
+    int_clamp_inverted_bounds,
+    "print((5).clamp(3, 1));",
+    "print((-5).clamp(1, 0));",
+);
+
+test_run!(
+    float_clamp,
+    "(0.5).clamp(0.0, 1.0)" => "0.5",
+    "(-0.5).clamp(0.0, 1.0)" => "0",
+    "(1.5).clamp(0.0, 1.0)" => "1",
+    "(2.0).clamp(2.0, 2.0)" => "2",
+);
+
+test_fail!(
+    float_clamp_bad_bounds,
+    "print((5.0).clamp(3.0, 1.0));",
+    "let nan = 0.0 / 0.0;
+     print((5.0).clamp(nan, 1.0));",
+    "let nan = 0.0 / 0.0;
+     print((5.0).clamp(1.0, nan));",
+);
+
+test_run!(
     int_to_str,
     "(42).to_str()" => r#""42""#,
     "(0).to_str()" => r#""0""#,
@@ -94,6 +131,12 @@ test_run!(
     int_random_small_range,
     "let n = int::random(2);",
     "n == 0 || n == 1" => "true",
+);
+
+test_fail!(
+    int_random_empty_range,
+    "print(int::random(0));",
+    "print(int::random(-4));",
 );
 
 test_run!(
@@ -211,6 +254,16 @@ test_run!(
     float_random_larger_range,
     "let n = float::random(10.0);",
     "n >= 0.0 && n < 10.0" => "true",
+);
+
+test_fail!(
+    float_random_bad_range,
+    "print(float::random(0.0));",
+    "print(float::random(-1.0));",
+    "let nan = 0.0 / 0.0;
+     print(float::random(nan));",
+    "let inf = 1.0 / 0.0;
+     print(float::random(inf));",
 );
 
 // bool::random() returns a bool; we can't pin the value, but it equals itself

@@ -55,16 +55,27 @@ fn new<'gc>() -> Vec<anon::T<'gc>> {
 /// Creates an array of `len` elements, each a copy of `value`. The copies are deep, so filling
 /// with an array gives each slot its own array.
 ///
+/// A `len` that is negative, or too large for an array to hold, is a runtime error.
+///
 /// ```mimas
 /// let grid = array::new_filled([0, 0], 2);
 /// grid[0].push(1);
 /// // grid is [[0, 0, 1], [0, 0]]
 /// ```
 #[native]
-fn new_filled<'gc>(ctx: Ctx<'gc>, value: anon::T<'gc>, len: i64) -> Vec<anon::T<'gc>> {
-    (0..len.max(0)) // todo: should be a fault
+fn new_filled<'gc>(
+    ctx: Ctx<'gc>,
+    value: anon::T<'gc>,
+    len: usize,
+) -> Result<Vec<anon::T<'gc>>, RtErr> {
+    if len > isize::MAX as usize / size_of::<Val>() {
+        return Err(RtErr::InvalidArgument(
+            "new_filled length is too large".into(),
+        ));
+    }
+    Ok((0..len)
         .map(|_| anon::Anon(ctx.deep_clone(value.0)))
-        .collect()
+        .collect())
 }
 
 /// Returns the number of elements.
@@ -114,8 +125,12 @@ fn push(_arr: &mut Vec<anon::T<'gc>>, value: anon::T<'gc>) {
 /// xs.insert(3, 4); // xs is now [1, 2, 3, 4]
 /// ```
 #[native]
-fn insert(arr: &mut Vec<anon::T<'gc>>, index: usize, value: anon::T<'gc>) {
-    arr.insert(index, value); // todo: should be a fault
+fn insert(arr: &mut Vec<anon::T<'gc>>, index: usize, value: anon::T<'gc>) -> Result<(), RtErr> {
+    if index > arr.len() {
+        return Err(RtErr::IndexOutOfBounds);
+    }
+    arr.insert(index, value);
+    Ok(())
 }
 
 /// Removes the last element and returns it, or returns `null` if the array is empty.
@@ -286,7 +301,7 @@ fn min_float(arr: &[f64]) -> Option<f64> {
     arr.iter().copied().min_by(f64::total_cmp)
 }
 
-/// Returns the sum of all values in the array.
+/// Returns the sum of all values in the array. A sum of `int`s that overflows is a runtime error.
 ///
 /// ```mimas
 /// let a: [int] = [0, 1, 2];
@@ -296,8 +311,10 @@ fn min_float(arr: &[f64]) -> Option<f64> {
 /// let float_sum = b.sum(); // 3.0
 /// ```
 #[native]
-fn sum_int(arr: &[i64]) -> i64 {
-    arr.iter().sum()
+fn sum_int(arr: &[i64]) -> Result<i64, RtErr> {
+    arr.iter()
+        .try_fold(0i64, |sum, &n| sum.checked_add(n))
+        .ok_or(RtErr::IntegerOverflow)
 }
 
 #[native]

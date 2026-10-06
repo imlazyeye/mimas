@@ -17,6 +17,11 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - `print` and `dbg` now run through an `Output` fixture so hosts can redirect them.
 - **Breaking**: `ModuleApi::add_described` takes the function's documentation, so a native described at runtime shows up in `mimas docs` like one with a doc comment.
 
+### Fixed
+
+- Some std methods panicked the host on bad arguments rather than raising a runtime error: `array.insert` past the end, `int.clamp` and `float.clamp` with `low` above `high`, `int::random` and `float::random` with an empty range, `array.sum` and `int.abs` overflowing, and `array::new_filled` with a length too large for an array.
+- `array::new_filled` with a negative length is now a runtime error. It used to give an empty array.
+
 ## [0.3.0] - 2026-09-26
 
 This update focuses on usability for mimas, introducing a language server, [a full reference](https://mim.as/std.html) to the standard library, and the ability for users to generate their own documentation for their mimas projects, Rust types included. As always, please feel free to submit an issue if you have any issues or requests.

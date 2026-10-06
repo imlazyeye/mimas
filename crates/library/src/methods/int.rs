@@ -2,7 +2,7 @@ use api::Intrinsic;
 use macros::native;
 use rand::RngExt;
 use shared::Ty;
-use vm::api::Api;
+use vm::{RtErr, api::Api};
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method(abs);
@@ -15,14 +15,15 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_assoc(Ty::Int, random);
 }
 
-/// Returns the absolute value.
+/// Returns the absolute value. The smallest `int`, `-9223372036854775808`, has no positive
+/// counterpart, and its absolute value is a runtime error.
 ///
 /// ```mimas
 /// let a = (-7).abs(); // 7
 /// ```
 #[native]
-fn abs<'gc>(n: i64) -> i64 {
-    n.abs()
+fn abs<'gc>(n: i64) -> Result<i64, RtErr> {
+    n.checked_abs().ok_or(RtErr::IntegerOverflow)
 }
 
 /// Returns the smaller of the number and `other`.
@@ -49,14 +50,19 @@ fn max<'gc>(n: i64, other: i64) -> i64 {
 /// Returns the number moved into the range from `low` to `high`, inclusive. A number already in
 /// the range comes back unchanged.
 ///
+/// A `low` greater than `high` is a runtime error.
+///
 /// ```mimas
 /// let a = 15.clamp(0, 10);   // 10
 /// let b = (-3).clamp(0, 10); // 0
 /// let c = 4.clamp(0, 10);    // 4
 /// ```
 #[native]
-fn clamp<'gc>(n: i64, low: i64, high: i64) -> i64 {
-    n.clamp(low, high) // todo: fault when low > high
+fn clamp<'gc>(n: i64, low: i64, high: i64) -> Result<i64, RtErr> {
+    if low > high {
+        return Err(RtErr::InvalidArgument("clamp needs low <= high".into()));
+    }
+    Ok(n.clamp(low, high))
 }
 
 /// Returns the number written out in base 10, with a leading `-` if it's negative. An f-string
@@ -74,14 +80,17 @@ fn to_str<'gc>(n: i64) -> String {
 /// Returns a random `int` that is at least `0` and less than `len`. That makes
 /// `int::random(xs.len())` a random index into `xs`.
 ///
-/// `len` must be greater than `0`.
+/// A `len` that isn't greater than `0` is a runtime error.
 ///
 /// ```mimas
 /// let roll = int::random(6) + 1; // 1 to 6
 /// ```
 #[native]
-fn random<'gc>(len: i64) -> i64 {
-    rand::rng().random_range(0..len)
+fn random<'gc>(len: i64) -> Result<i64, RtErr> {
+    if len <= 0 {
+        return Err(RtErr::InvalidArgument("random len must be above 0".into()));
+    }
+    Ok(rand::rng().random_range(0..len))
 }
 
 /// Returns the number as a `float`. Arithmetic that mixes `int` and `float` converts on its own,

@@ -36,6 +36,41 @@ test_run!(
 test_fail!(push_rejects_wrong_elem, "let a = [1, 2]; a.push(\"x\");");
 
 test_run!(
+    insert_in_middle,
+    "let a = [1, 3];
+     a.insert(1, 2);",
+    "a" => "[1, 2, 3]",
+);
+
+test_run!(
+    insert_at_len_appends,
+    "let a = [1, 2];
+     a.insert(2, 3);",
+    "a" => "[1, 2, 3]",
+);
+
+test_run!(
+    insert_into_empty,
+    "let a: [int] = [];
+     a.insert(0, 1);",
+    "a" => "[1]",
+);
+
+test_fail!(
+    insert_past_end,
+    "let a = [1, 2];
+     a.insert(3, 0);",
+    "let a: [int] = [];
+     a.insert(1, 0);",
+);
+
+test_fail!(
+    insert_negative,
+    "let a = [1, 2];
+     a.insert(-1, 0);",
+);
+
+test_run!(
     pop_returns_last,
     "let a = [1, 2, 3];
      let x = a.pop();",
@@ -361,6 +396,20 @@ test_run!(
 );
 
 test_run!(
+    sum_int_at_max,
+    "[9223372036854775806, 1].sum()" => "9223372036854775807",
+    "[-9223372036854775807, -1].sum()" => "-9223372036854775808",
+);
+
+test_fail!(
+    sum_int_overflow,
+    "let a = [9223372036854775807, 1];
+     print(a.sum());",
+    "let a = [-9223372036854775807, -2];
+     print(a.sum());",
+);
+
+test_run!(
     sum_float,
     "[1.0, 2.0, 3.0].sum()" => "6",
     "[1.5, 2.5].sum()" => "4",
@@ -570,9 +619,22 @@ test_run!(
 );
 
 test_run!(
-    array_new_filled_clamps_negative,
-    "let a = array::new_filled(0, -3);",
+    array_new_filled_empty,
+    "let a = array::new_filled(0, 0);",
     "a.len()" => "0",
+);
+
+test_fail!(
+    array_new_filled_negative,
+    "let a = array::new_filled(0, -3);",
+);
+
+test_fail!(
+    array_new_filled_too_large,
+    "let a = array::new_filled(0, 9223372036854775807);
+     print(a.len());",
+    "let a = array::new_filled([0], 576460752303423488);
+     print(a.len());",
 );
 
 // chaining / option propagation
