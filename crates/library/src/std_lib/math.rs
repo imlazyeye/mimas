@@ -1,8 +1,9 @@
 use macros::native;
 use shared::{Literal, Ty};
 use vm::{
+    RtErr,
     api::Api,
-    glam::{Quat, Vec2, Vec3},
+    glam::{I64Vec2, I64Vec3, Quat, Vec2, Vec3},
 };
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
@@ -29,6 +30,12 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     m.add_adt::<Vec2>();
     m.add_adt::<Vec3>();
     m.add_adt::<Quat>();
+    m.add_adt::<I64Vec2>();
+    m.add_adt::<I64Vec3>();
+    m.add(vec2);
+    m.add(vec3);
+    m.add(ivec2);
+    m.add(ivec3);
     api.add_assoc_of::<Vec2, _, _>("new", vec2_new);
     api.add_assoc_of::<Vec2, _, _>("from_angle", vec2_from_angle);
     api.add_assoc_of::<Vec2, _, _>("zero", vec2_zero);
@@ -43,13 +50,81 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method_named("distance_squared", vec2_distance_squared);
     api.add_method_named("rotate", vec2_rotate);
     api.add_method_named("perp", vec2_perp);
-    api.add_method_named("to_ints", vec2_to_ints);
+    api.add_method_named("to_ivec2", vec2_to_ivec2);
     api.add_method_named("angle", vec2_angle);
     api.add_method_named("lerp", vec2_lerp);
     api.add_method_named("length", vec3_length);
     api.add_method_named("normalize", vec3_normalize);
     api.add_assoc_of::<Quat, _, _>("from_rotation_z", quat_from_rotation_z);
     api.add_method_named("rotate_z", quat_rotate_z);
+    api.add_assoc_of::<I64Vec2, _, _>("new", ivec2_new);
+    api.add_assoc_of::<I64Vec2, _, _>("zero", ivec2_zero);
+    api.add_assoc_of::<I64Vec2, _, _>("from_index", ivec2_from_index);
+    api.add_method_named("add", ivec2_add);
+    api.add_method_named("sub", ivec2_sub);
+    api.add_method_named("scale", ivec2_scale);
+    api.add_method_named("dot", ivec2_dot);
+    api.add_method_named("length_squared", ivec2_length_squared);
+    api.add_method_named("distance_squared", ivec2_distance_squared);
+    api.add_method_named("to_vec2", ivec2_to_vec2);
+    api.add_method_named("to_index", ivec2_to_index);
+    api.add_assoc_of::<I64Vec3, _, _>("new", ivec3_new);
+    api.add_method_named("add", ivec3_add);
+    api.add_method_named("sub", ivec3_sub);
+    api.add_method_named("scale", ivec3_scale);
+}
+
+/// Creates a `Vec2` from its `x` and `y` components, as a shorter way to write `Vec2::new`.
+///
+/// ```mimas
+/// use std::math::vec2;
+///
+/// let v = vec2(3.0, 4.0);
+/// let y = v.y; // 4.0
+/// ```
+#[native]
+fn vec2(x: f32, y: f32) -> Vec2 {
+    Vec2::new(x, y)
+}
+
+/// Creates a `Vec3` from its `x`, `y` and `z` components.
+///
+/// ```mimas
+/// use std::math::vec3;
+///
+/// let v = vec3(2.0, 3.0, 6.0);
+/// let n = v.length(); // 7.0
+/// ```
+#[native]
+fn vec3(x: f32, y: f32, z: f32) -> Vec3 {
+    Vec3::new(x, y, z)
+}
+
+/// Creates an `IVec2` from its `x` and `y` components, as a shorter way to write `IVec2::new`.
+///
+/// ```mimas
+/// use std::math::ivec2;
+///
+/// let v = ivec2(3, 4);
+/// let y = v.y; // 4
+/// ```
+#[native]
+fn ivec2(x: i64, y: i64) -> I64Vec2 {
+    I64Vec2::new(x, y)
+}
+
+/// Creates an `IVec3` from its `x`, `y` and `z` components, as a shorter way to write
+/// `IVec3::new`.
+///
+/// ```mimas
+/// use std::math::ivec3;
+///
+/// let v = ivec3(1, 2, 3);
+/// let z = v.z; // 3
+/// ```
+#[native]
+fn ivec3(x: i64, y: i64, z: i64) -> I64Vec3 {
+    I64Vec3::new(x, y, z)
 }
 
 /// Creates a vector from its `x` and `y` components. A struct literal such as
@@ -226,17 +301,18 @@ fn vec2_perp(v: Vec2) -> Vec2 {
     v.perp()
 }
 
-/// Returns the components as a pair of `int`s, each truncated toward zero the way `float.to_int`
-/// does. It's the step from a position to the pixel it's in.
+/// Returns the vector as an `IVec2`, with each component truncated toward zero the way
+/// `float.to_int` does. It's the step from a position to the pixel it's in.
 ///
 /// ```mimas
 /// use std::math::Vec2;
 ///
-/// let (x, y) = Vec2::new(3.7, -1.2).to_ints(); // (3, -1)
+/// let pixel = Vec2::new(3.7, -1.2).to_ivec2();
+/// let y = pixel.y; // -1
 /// ```
 #[native]
-fn vec2_to_ints(v: Vec2) -> (i64, i64) {
-    (v.x as i64, v.y as i64)
+fn vec2_to_ivec2(v: Vec2) -> I64Vec2 {
+    v.as_i64vec2()
 }
 
 /// Returns the angle of the vector in radians, measured from the positive x axis toward the
@@ -303,4 +379,228 @@ fn quat_from_rotation_z(radians: f32) -> Quat {
 #[native]
 fn quat_rotate_z(q: Quat, radians: f32) -> Quat {
     q * Quat::from_rotation_z(radians)
+}
+
+/// Creates a vector from its `x` and `y` components. A struct literal such as
+/// `IVec2 { x = 3, y = 4 }` does the same.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let v = IVec2::new(3, 4);
+/// let y = v.y; // 4
+/// ```
+#[native]
+fn ivec2_new(x: i64, y: i64) -> I64Vec2 {
+    I64Vec2::new(x, y)
+}
+
+/// Creates the vector whose components are both `0`.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let origin = IVec2::zero();
+/// let x = origin.x; // 0
+/// ```
+#[native]
+fn ivec2_zero() -> I64Vec2 {
+    I64Vec2::ZERO
+}
+
+/// Returns the sum of the two vectors, adding them component by component. Like `int` math, a
+/// result too large for an `int` is a runtime error, and that holds for every `IVec2` and `IVec3`
+/// method.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let v = IVec2::new(3, 4).add(IVec2::new(1, 1));
+/// let x = v.x; // 4
+/// ```
+#[native]
+fn ivec2_add(v: I64Vec2, other: I64Vec2) -> Result<I64Vec2, RtErr> {
+    v.checked_add(other).ok_or(RtErr::IntegerOverflow)
+}
+
+/// Returns this vector minus `other`, component by component. `b.sub(a)` is the vector that
+/// points from `a` to `b`.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let player = IVec2::new(1, 1);
+/// let enemy = IVec2::new(4, 5);
+/// let offset = enemy.sub(player);
+/// let x = offset.x; // 3
+/// ```
+#[native]
+fn ivec2_sub(v: I64Vec2, other: I64Vec2) -> Result<I64Vec2, RtErr> {
+    v.checked_sub(other).ok_or(RtErr::IntegerOverflow)
+}
+
+/// Returns the vector with both components multiplied by `by`.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let cell = IVec2::new(3, 4).scale(8);
+/// let x = cell.x; // 24
+/// ```
+#[native]
+fn ivec2_scale(v: I64Vec2, by: i64) -> Result<I64Vec2, RtErr> {
+    v.checked_mul(I64Vec2::splat(by))
+        .ok_or(RtErr::IntegerOverflow)
+}
+
+/// Returns the dot product, `x * other.x + y * other.y`. A result of `0` means the two vectors
+/// are perpendicular.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let a = IVec2::new(3, 4).dot(IVec2::new(1, 0)); // 3
+/// ```
+#[native]
+fn ivec2_dot(v: I64Vec2, other: I64Vec2) -> Result<i64, RtErr> {
+    dot(v, other)
+}
+
+/// Returns the vector's length multiplied by itself. An `IVec2` has no `length`, since that's
+/// rarely a whole number, and comparing squared lengths tells which of two is longer.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let n = IVec2::new(3, 4).length_squared(); // 25
+/// ```
+#[native]
+fn ivec2_length_squared(v: I64Vec2) -> Result<i64, RtErr> {
+    dot(v, v)
+}
+
+/// Returns the distance between the two points multiplied by itself.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let player = IVec2::new(0, 0);
+/// let enemy = IVec2::new(3, 4);
+/// let close = player.distance_squared(enemy) < 6 * 6; // true
+/// ```
+#[native]
+fn ivec2_distance_squared(v: I64Vec2, other: I64Vec2) -> Result<i64, RtErr> {
+    let offset = v.checked_sub(other).ok_or(RtErr::IntegerOverflow)?;
+    dot(offset, offset)
+}
+
+/// Returns the vector as a `Vec2`. `Vec2.to_ivec2` goes the other way.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let half = IVec2::new(3, 4).to_vec2().scale(0.5);
+/// let x = half.x; // 1.5
+/// ```
+#[native]
+fn ivec2_to_vec2(v: I64Vec2) -> Vec2 {
+    v.as_vec2()
+}
+
+/// Creates the position of cell `index` in a grid that is `width` cells wide, counting across
+/// each row and then down. It's `ivec2(index % width, index ~/ width)`, and `to_index` goes the
+/// other way.
+///
+/// A `width` below `1` is a runtime error.
+///
+/// ```mimas
+/// use std::math::IVec2;
+///
+/// let cell = IVec2::from_index(7, 3);
+/// let x = cell.x; // 1
+/// let y = cell.y; // 2
+/// ```
+#[native]
+fn ivec2_from_index(index: i64, width: i64) -> Result<I64Vec2, RtErr> {
+    if width < 1 {
+        return Err(RtErr::InvalidArgument("from_index needs width >= 1".into()));
+    }
+    Ok(I64Vec2::new(index % width, index / width))
+}
+
+/// Returns the number of this cell in a grid that is `width` cells wide, counting across each row
+/// and then down. It's `y * width + x`, which lets a grid be one flat array, or a position be
+/// kept as a single `int`. `IVec2::from_index` goes the other way.
+///
+/// ```mimas
+/// use std::math::ivec2;
+///
+/// let cells = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+/// cells[ivec2(1, 2).to_index(3)] = 5; // cells[7]
+/// ```
+#[native]
+fn ivec2_to_index(v: I64Vec2, width: i64) -> Result<i64, RtErr> {
+    let row = v.y.checked_mul(width);
+    let index = row.and_then(|row| row.checked_add(v.x));
+    index.ok_or(RtErr::IntegerOverflow)
+}
+
+/// Creates a vector from its `x`, `y` and `z` components. A struct literal such as
+/// `IVec3 { x = 1, y = 2, z = 3 }` does the same.
+///
+/// ```mimas
+/// use std::math::IVec3;
+///
+/// let v = IVec3::new(1, 2, 3);
+/// let z = v.z; // 3
+/// ```
+#[native]
+fn ivec3_new(x: i64, y: i64, z: i64) -> I64Vec3 {
+    I64Vec3::new(x, y, z)
+}
+
+/// Returns the sum of the two vectors, adding them component by component.
+///
+/// ```mimas
+/// use std::math::IVec3;
+///
+/// let v = IVec3::new(1, 2, 3).add(IVec3::new(1, 1, 1));
+/// let z = v.z; // 4
+/// ```
+#[native]
+fn ivec3_add(v: I64Vec3, other: I64Vec3) -> Result<I64Vec3, RtErr> {
+    v.checked_add(other).ok_or(RtErr::IntegerOverflow)
+}
+
+/// Returns this vector minus `other`, component by component.
+///
+/// ```mimas
+/// use std::math::IVec3;
+///
+/// let v = IVec3::new(4, 5, 6).sub(IVec3::new(1, 1, 1));
+/// let z = v.z; // 5
+/// ```
+#[native]
+fn ivec3_sub(v: I64Vec3, other: I64Vec3) -> Result<I64Vec3, RtErr> {
+    v.checked_sub(other).ok_or(RtErr::IntegerOverflow)
+}
+
+/// Returns the vector with every component multiplied by `by`.
+///
+/// ```mimas
+/// use std::math::IVec3;
+///
+/// let v = IVec3::new(1, 2, 3).scale(2);
+/// let z = v.z; // 6
+/// ```
+#[native]
+fn ivec3_scale(v: I64Vec3, by: i64) -> Result<I64Vec3, RtErr> {
+    v.checked_mul(I64Vec3::splat(by))
+        .ok_or(RtErr::IntegerOverflow)
+}
+
+fn dot(a: I64Vec2, b: I64Vec2) -> Result<i64, RtErr> {
+    let products = a.checked_mul(b);
+    let sum = products.and_then(|p| p.x.checked_add(p.y));
+    sum.ok_or(RtErr::IntegerOverflow)
 }
