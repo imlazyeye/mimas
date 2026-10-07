@@ -281,9 +281,9 @@ impl Ctor {
                         .keys()
                         .map(|k| {
                             fields
-                                .get(k)
-                                .cloned()
-                                .unwrap_or_else(|| wildcard_pat(pat.location()))
+                                .iter()
+                                .find(|(name, _)| name.lexeme == *k)
+                                .map_or_else(|| wildcard_pat(pat.location()), |(_, p)| p.clone())
                         })
                         .collect(),
                     _ => vec![],

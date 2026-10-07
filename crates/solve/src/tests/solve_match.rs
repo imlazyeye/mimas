@@ -53,6 +53,15 @@ test_fail!(
     "let x = true; let _ = match x { 0 => 0, _ => 1 };",
     "let x = \"a\"; let _ = match x { true => 0, _ => 1 };",
 );
+test_fail!(
+    duplicate_struct_pattern_field,
+    "struct P { x: int, y: int }
+     let p = P { x = 1, y = 2 };
+     let n = match p {
+         P { x = 5, x = 1 } => 0,
+         _ => 1,
+     };",
+);
 
 // bool
 test_ty!(

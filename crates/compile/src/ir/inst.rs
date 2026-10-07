@@ -413,12 +413,13 @@ impl BlockWriter<'_> {
 
     /// Tests `pat` against `scrut_val`, jumping to `fail_block` on any mismatch (tag, literal,
     /// guard, etc). On success, falls through with any bindings emitted. Caller continues with
-    /// the arm body directly -- no separate bool to act on.
+    /// the arm body directly -- no separate bool to act on. Without a `fail_block` the pattern is
+    /// already known to match (a `let`, a `for`, a switch arm) and only its bindings are emitted.
     pub fn test_pattern(
         &mut self,
         pat: &Pat,
         scrut_val: InstId,
-        fail_block: BlockId,
+        fail_block: Option<BlockId>,
     ) -> Option<()> {
         match pat.kind() {
             PatKind::Poison(poison) => poison.escaped(),
@@ -429,20 +430,22 @@ impl BlockWriter<'_> {
                 Some(())
             }
             PatKind::Literal(lit) => {
-                let con = Constant::from_literal(self.ir, lit.clone());
-                let op_kind = match con {
-                    Constant::Bool(_) => OperandKind::Bool,
-                    Constant::Int(_) => OperandKind::Int,
-                    Constant::Float(_) => OperandKind::Float,
-                    Constant::Str(_) => OperandKind::Str,
-                    Constant::Array(_)
-                    | Constant::Dict(_)
-                    | Constant::Instance(_, _)
-                    | Constant::Null => OperandKind::Generic,
-                };
-                let this = self.constant(con);
-                let eq = self.bin(BinOp::Identity, scrut_val, this, op_kind);
-                self.jump_if_false(eq, fail_block);
+                if let Some(fail_block) = fail_block {
+                    let con = Constant::from_literal(self.ir, lit.clone());
+                    let op_kind = match con {
+                        Constant::Bool(_) => OperandKind::Bool,
+                        Constant::Int(_) => OperandKind::Int,
+                        Constant::Float(_) => OperandKind::Float,
+                        Constant::Str(_) => OperandKind::Str,
+                        Constant::Array(_)
+                        | Constant::Dict(_)
+                        | Constant::Instance(_, _)
+                        | Constant::Null => OperandKind::Generic,
+                    };
+                    let this = self.constant(con);
+                    let eq = self.bin(BinOp::Identity, scrut_val, this, op_kind);
+                    self.jump_if_false(eq, fail_block);
+                }
                 Some(())
             }
             PatKind::Tuple(sub_pats) => {
@@ -454,18 +457,11 @@ impl BlockWriter<'_> {
                 Some(())
             }
             PatKind::Variant(path) => {
-                let layout = self.layout_adt(path);
-                let tag = self.is_instance(scrut_val, layout);
-                self.jump_if_false(tag, fail_block);
+                self.test_tag(path, scrut_val, fail_block);
                 Some(())
             }
             PatKind::TupleVariant(path, sub_pats) => {
-                let layout = self.layout_adt(path);
-                let tag = self.is_instance(scrut_val, layout);
-                self.jump_if_false(tag, fail_block);
-                let ok_block = self.ir.push_block("pat_tag_ok");
-                self.jump(ok_block);
-                self.ir.target(ok_block);
+                self.test_tag(path, scrut_val, fail_block);
                 for (i, sub) in sub_pats.iter().enumerate() {
                     let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, true);
                     self.test_pattern(sub, elem, fail_block)?;
@@ -473,42 +469,39 @@ impl BlockWriter<'_> {
                 Some(())
             }
             PatKind::Struct(path, field_pats) => {
-                let layout = self.layout_adt(path);
-                let tag = self.is_instance(scrut_val, layout);
-                self.jump_if_false(tag, fail_block);
-                let ok_block = self.ir.push_block("pat_tag_ok");
-                self.jump(ok_block);
-                self.ir.target(ok_block);
-                let field_order: Vec<String> = self.ir.resolutions.adts[layout].fields.clone();
+                let layout = self.test_tag(path, scrut_val, fail_block);
                 for (name, sub) in field_pats {
-                    let slot = field_order
-                        .iter()
-                        .position(|f| f == name)
-                        .expect("solver verified field exists")
-                        as u32;
+                    let slot = self.ir.slot(layout, &name.lexeme) as u32;
                     let elem = self.get_field(scrut_val, slot, AccessKind::Direct, true);
                     self.test_pattern(sub, elem, fail_block)?;
                 }
                 Some(())
             }
             PatKind::NullBind(inner) => {
-                let cond = if matches!(
-                    self.ir.resolutions.node_tys.get(&pat.id()),
-                    Some(Ty::Result(_))
-                ) {
-                    let raised = self.is_raised(scrut_val);
-                    self.unary(UnaryOp::Not, raised)
-                } else {
-                    let null = self.constant(Constant::Null);
-                    self.bin(BinOp::NotEqual, scrut_val, null, OperandKind::Generic)
-                };
-                self.jump_if_false(cond, fail_block);
-                let ok_block = self.ir.push_block("nullbind_ok");
-                self.jump(ok_block);
-                self.ir.target(ok_block);
+                if let Some(fail_block) = fail_block {
+                    let cond = if matches!(
+                        self.ir.resolutions.node_tys.get(&pat.id()),
+                        Some(Ty::Result(_))
+                    ) {
+                        let raised = self.is_raised(scrut_val);
+                        self.unary(UnaryOp::Not, raised)
+                    } else {
+                        let null = self.constant(Constant::Null);
+                        self.bin(BinOp::NotEqual, scrut_val, null, OperandKind::Generic)
+                    };
+                    self.jump_if_false(cond, fail_block);
+                }
                 self.test_pattern(inner, scrut_val, fail_block)
             }
             PatKind::Or(alts) => {
+                let Some(fail_block) = fail_block else {
+                    // every alternative binds the same slots (the switch planner checks), and the
+                    // first one's bindings serve whichever tag matched
+                    if let Some(first) = alts.first() {
+                        self.test_pattern(first, scrut_val, None)?;
+                    }
+                    return Some(());
+                };
                 if alts.is_empty() {
                     self.jump(fail_block);
                     return Some(());
@@ -521,7 +514,7 @@ impl BlockWriter<'_> {
                     } else {
                         self.ir.push_block("or_try_next")
                     };
-                    self.test_pattern(alt, scrut_val, try_next)?;
+                    self.test_pattern(alt, scrut_val, Some(try_next))?;
                     self.jump(success);
                     if !last {
                         self.ir.target(try_next);
@@ -533,49 +526,18 @@ impl BlockWriter<'_> {
         }
     }
 
-    pub(crate) fn bind_pattern(&mut self, pat: &Pat, scrut_val: InstId) {
-        match pat.kind() {
-            PatKind::Ident(_) => {
-                let dec = self.ir.node_dec(pat.id());
-                let local = self.ir.local_for(dec);
-                self.set_local(local, scrut_val);
-            }
-            PatKind::Variant(_) => {}
-            PatKind::TupleVariant(_, sub_pats) => {
-                for (i, sub) in sub_pats.iter().enumerate() {
-                    let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, true);
-                    self.bind_pattern(sub, elem);
-                }
-            }
-            PatKind::Struct(path, field_pats) => {
-                let layout = self.layout_adt(path);
-                let field_order: Vec<String> = self.ir.resolutions.adts[layout].fields.clone();
-                for (name, sub) in field_pats {
-                    let slot = field_order
-                        .iter()
-                        .position(|f| f == name)
-                        .expect("solver verified field exists")
-                        as u32;
-                    let elem = self.get_field(scrut_val, slot, AccessKind::Direct, true);
-                    self.bind_pattern(sub, elem);
-                }
-            }
-            PatKind::Or(alts) => {
-                if let Some(first) = alts.first() {
-                    self.bind_pattern(first, scrut_val);
-                }
-            }
-            PatKind::Literal(_) => {} // lits are okay! we use them in switches
-            _ => unreachable!("bind_pattern on a refutable pattern; planner should exclude it"),
+    fn test_tag(
+        &mut self,
+        path: &parse::Expr,
+        scrut_val: InstId,
+        fail_block: Option<BlockId>,
+    ) -> AdtId {
+        let layout = self.ir.layout_adt(path);
+        if let Some(fail_block) = fail_block {
+            let tag = self.is_instance(scrut_val, layout);
+            self.jump_if_false(tag, fail_block);
         }
-    }
-
-    /// Reads the layout adt id that the solver shadowed onto a pattern's path expression.
-    fn layout_adt(&self, path: &parse::Expr) -> AdtId {
-        match self.ir.resolutions.node_tys.get(&path.id()) {
-            Some(Ty::Adt(adt)) => *adt,
-            other => panic!("solver should have shadowed path with an adt type, got {other:?}",),
-        }
+        layout
     }
 
     pub(crate) fn id(&self) -> BlockId {

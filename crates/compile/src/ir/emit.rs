@@ -17,7 +17,7 @@ use solve::{
 };
 
 // per-kind worker -- mirrors `Solve`. source location is ambient on `Ir.current_loc`,
-// set by `Lower for Expr` / `Ir::stmt` / `Ir::pattern` before dispatch.
+// set by `Lower for Expr` / `Ir::stmt` before dispatch.
 pub(crate) trait Emit {
     #[must_use]
     fn emit(&self, id: NodeId, ir: &mut Ir) -> Option<InstId>;
@@ -35,11 +35,11 @@ impl Ir {
             StmtKind::Let(s) => {
                 let value = s.right.lower(ir)?;
                 match s.else_branch.as_ref() {
-                    None => ir.pattern(&s.left, Some(value))?,
+                    None => ir.current().test_pattern(&s.left, value, None)?,
                     Some(else_expr) => {
                         let otherwise = ir.push_block("let_else");
                         let cont = ir.push_block("let_cont");
-                        ir.current().test_pattern(&s.left, value, otherwise)?;
+                        ir.current().test_pattern(&s.left, value, Some(otherwise))?;
                         ir.current().jump(cont);
                         ir.target(otherwise);
                         let _ = else_expr.lower(ir);
@@ -144,32 +144,6 @@ impl Ir {
 
         let body_value = body.lower(self);
         self.finish(body_value);
-    }
-
-    pub(crate) fn pattern(&mut self, pat: &Pat, value: Option<InstId>) -> Option<()> {
-        self.with_loc(pat.location(), |ir| match pat.kind() {
-            PatKind::Ident(_ident) => {
-                let dec = ir.node_dec(pat.id());
-                let local = ir.local_for(dec);
-
-                if let Some(value) = value {
-                    ir.current().set_local(local, value);
-                }
-
-                Some(())
-            }
-            PatKind::Tuple(pats) => {
-                for (i, pat) in pats.iter().enumerate() {
-                    let index = ir.current().constant(i);
-                    let value =
-                        value.map(|v| ir.current().get_index(v, index, AccessKind::Direct, false));
-
-                    ir.pattern(pat, value)?; // todo: how could this actually return none?
-                }
-                Some(())
-            }
-            _ => todo!(),
-        })
     }
 }
 
@@ -868,7 +842,7 @@ impl Emit for For {
                 Some(Ty::Array(element) | Ty::Dict(element)) if element.is_plain()
             );
             let elem = owned(ir, elem, plain);
-            ir.pattern(&self.binding, Some(elem))?;
+            ir.current().test_pattern(&self.binding, elem, None)?;
         }
 
         ir.loop_stack_mut()
@@ -979,18 +953,16 @@ impl Emit for If {
         let else_block = ir.push_block("else");
         let merge_block = ir.push_block("merge");
 
-        let condition = if let Some(binding) = self.binding.as_ref() {
-            let value = self.condition.lower(ir)?;
-            ir.current().test_pattern(binding, value, else_block)?;
-            ir.current().constant(true)
-        } else {
-            self.condition.lower(ir)?
-        };
-
-        ir.in_current(|block| {
-            block.jump_if_false(condition, else_block);
-            block.jump(then_block);
-        });
+        let value = self.condition.lower(ir)?;
+        match self.binding.as_ref() {
+            Some(binding) => ir
+                .current()
+                .test_pattern(binding, value, Some(else_block))?,
+            None => {
+                ir.current().jump_if_false(value, else_block);
+            }
+        }
+        ir.current().jump(then_block);
 
         let then_branch = ir.in_block(then_block, |block| {
             let value = block.emit_expr(&self.main_body)?;
@@ -1208,10 +1180,7 @@ impl Emit for Match {
                     PatKind::Variant(p) | PatKind::TupleVariant(p, _) | PatKind::Struct(p, _) => p,
                     _ => return None,
                 };
-                let layout = match ir.resolutions.node_tys.get(&path.id())? {
-                    Ty::Adt(adt) => *adt,
-                    _ => return None,
-                };
+                let layout = ir.layout_adt(path);
                 let ident_dec = |sub: &Pat| match sub.kind() {
                     PatKind::Ident(_) => Some(ir.node_dec(sub.id())),
                     _ => None,
@@ -1223,18 +1192,12 @@ impl Emit for Match {
                         .enumerate()
                         .map(|(i, sub)| Some((i as u32, ident_dec(sub)?)))
                         .collect::<Option<Vec<_>>>()?,
-                    PatKind::Struct(_, fields) => {
-                        let order = &ir.resolutions.adts[layout].fields;
-                        fields
-                            .iter()
-                            .map(|(name, sub)| {
-                                Some((
-                                    order.iter().position(|f| f == name)? as u32,
-                                    ident_dec(sub)?,
-                                ))
-                            })
-                            .collect::<Option<Vec<_>>>()?
-                    }
+                    PatKind::Struct(_, fields) => fields
+                        .iter()
+                        .map(|(name, sub)| {
+                            Some((ir.slot(layout, &name.lexeme) as u32, ident_dec(sub)?))
+                        })
+                        .collect::<Option<Vec<_>>>()?,
                     _ => unreachable!(),
                 };
 
@@ -1319,16 +1282,12 @@ impl Emit for Match {
             // the phi at `merge` -- skip pushing it as a branch and move on to the next
             // arm. propagating the None here would abort emit for every later arm.
             let branch = ir.in_block(*block, |b| {
-                if is_switched {
-                    // the switch already proved the tag -- just bind the variant's fields.
-                    b.bind_pattern(case.pat(), scrut_val);
-                } else {
-                    b.test_pattern(case.pat(), scrut_val, next_block)?;
-
-                    if let Some(guard) = case.guard() {
-                        let guard_val = b.emit_expr(guard)?;
-                        b.jump_if_false(guard_val, next_block);
-                    }
+                // the switch already proved the tag
+                let fail_block = (!is_switched).then_some(next_block);
+                b.test_pattern(case.pat(), scrut_val, fail_block)?;
+                if let Some(guard) = case.guard() {
+                    let guard_val = b.emit_expr(guard)?;
+                    b.jump_if_false(guard_val, next_block);
                 }
 
                 let body = b.emit_expr(case.body())?;
@@ -1442,7 +1401,7 @@ impl Emit for While {
             let value = block.emit_expr(&self.header)?;
             match self.binding.as_ref() {
                 Some(binding) => {
-                    block.test_pattern(binding, value, condition_exit)?;
+                    block.test_pattern(binding, value, Some(condition_exit))?;
                 }
                 None => {
                     block.jump_if_false(value, condition_exit);

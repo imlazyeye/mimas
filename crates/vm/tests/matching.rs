@@ -150,6 +150,13 @@ test_vm!(
 );
 
 test_vm!(
+    match_struct_fields_out_of_order,
+    "struct Pair { a: int, b: int }
+     let p = Pair { a = 4, b = 9 };",
+    "match p { Pair { b, a } => a - b }" => Int(-5),
+);
+
+test_vm!(
     match_tuple_struct_destructure,
     "struct Wrap(int);
      let w = Wrap(42);",

@@ -1305,7 +1305,7 @@ impl Solver {
                 PatKind::Tuple(pats) | PatKind::TupleVariant(_, pats) | PatKind::Or(pats) => {
                     stack.extend(pats);
                 }
-                PatKind::Struct(_, fields) => stack.extend(fields.values()),
+                PatKind::Struct(_, fields) => stack.extend(fields.iter().map(|(_, p)| p)),
                 PatKind::NullBind(inner) => stack.push(inner),
                 PatKind::Variant(_) | PatKind::Literal(_) => {}
                 PatKind::Poison(poison) => poison.escaped(),
@@ -1490,17 +1490,24 @@ impl Solver {
                         Ok(())
                     }
                     (PatKind::Struct(_, field_pats), Variant::Struct(sv)) => {
-                        for (name, sub) in field_pats {
+                        for (i, (name, sub)) in field_pats.iter().enumerate() {
+                            if field_pats[..i].iter().any(|(n, _)| n.lexeme == name.lexeme) {
+                                Err(crate::errors::DuplicateField {
+                                    src: self.src(name.location),
+                                    at: name.location.into(),
+                                    name: name.lexeme.clone(),
+                                })?
+                            }
                             let (fty, dec) = sv
                                 .fields
-                                .get(name)
+                                .get(&name.lexeme)
                                 .map(|f| (f.ty.clone(), f.dec))
                                 .ok_or_else(|| FieldNotFound {
-                                    src: self.src(sub.location()),
-                                    at: sub.location().into(),
-                                    field_name: name.clone(),
+                                    src: self.src(name.location),
+                                    at: name.location.into(),
+                                    field_name: name.lexeme.clone(),
                                 })?;
-                            self.check_vis(dec, sub.location())?;
+                            self.check_vis(dec, name.location)?;
                             self.solve_match_pat(sub, fty, reuse)?;
                         }
                         Ok(())

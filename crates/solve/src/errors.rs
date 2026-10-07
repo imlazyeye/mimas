@@ -501,6 +501,16 @@ pub struct DuplicateNamedArgument {
 }
 
 #[derive(Error, Debug, Diagnostic)]
+#[error("duplicate field")]
+pub struct DuplicateField {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("'{name}' is already listed")]
+    pub at: SourceSpan,
+    pub name: String,
+}
+
+#[derive(Error, Debug, Diagnostic)]
 #[error("extra arguments")]
 pub struct ExtraArguments {
     #[source_code]

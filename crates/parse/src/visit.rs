@@ -305,7 +305,7 @@ pub fn walk_pat(pat: &Pat, visitor: &mut impl Visitor) {
         }
         PatKind::Struct(expr, fields) => {
             walk_expr(expr, visitor);
-            for pat in fields.values() {
+            for (_, pat) in fields {
                 walk_pat(pat, visitor);
             }
         }
