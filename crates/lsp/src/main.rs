@@ -1,14 +1,6 @@
-mod analysis;
-mod host_api;
-mod server;
-mod solved;
-mod source_file;
-mod workspace;
-
-use host_api::HostApi;
 use lsp_server::Connection;
 use lsp_types::*;
-use server::Server;
+use mimas_lsp::{host_api::HostApi, server::Server};
 
 fn main() -> anyhow::Result<()> {
     let (connection, io_threads) = Connection::stdio();

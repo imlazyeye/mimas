@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use api::Project;
 
-use crate::workspace::Workspace;
+use mimas_lsp::workspace::Workspace;
 
 /// Writes `files` into a fresh folder outside other repositories and packages, with a `.git` at its
 /// top.

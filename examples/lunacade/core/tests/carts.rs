@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lunacade_core::{Button, Cart, Diagnostic, Machine};
+use lunacade_core::{Button, Cart, Diagnostic, Input, Machine};
 use scripted::{Hold, scripted};
 
 const FRAMES: u64 = 3600;
@@ -71,6 +71,31 @@ fn describe(diagnostic: &Diagnostic) -> String {
         "{}:{}:{}: {}",
         diagnostic.file, diagnostic.line, diagnostic.col, diagnostic.message
     )
+}
+
+#[test]
+fn snake_fills_the_board() {
+    let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../carts/snake"));
+    let mut cart = Cart::from_dir(dir).unwrap();
+    cart.files.get_mut("snake.mim").unwrap().push_str(
+        "\ngame.scene = Scene::Playing;
+         game.body = (for cell in 1..COLS * ROWS collect cell);
+         game.dir = ivec2(-1, 0);
+         game.turn = game.dir;
+         game.food = 0;
+         game.timer = game.delay - 1;
+         game.update();
+         print(game.body.len());
+         print(game.scene == Scene::Over);
+         print(game.score);
+         print(game.timer);",
+    );
+    let mut machine = Machine::load(&cart, 1).unwrap();
+    assert_eq!(machine.take_output(), ["576", "true", "1", "0"]);
+    for _ in 0..120 {
+        assert!(!machine.frame(&Input::default()));
+    }
+    assert!(machine.fault().is_none());
 }
 
 #[test]

@@ -8,7 +8,7 @@ use api::{ApiConstant, ApiEntry, Library, Manifest, Project};
 use shared::{Literal, Ty};
 
 use super::utils::{open, tree};
-use crate::{host_api::HostApi, workspace::Workspace};
+use mimas_lsp::{host_api::HostApi, workspace::Workspace};
 
 /// A cargo package with a binary and an example, and a script that uses `host::SPEED`.
 fn package(name: &str) -> PathBuf {

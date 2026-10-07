@@ -185,6 +185,7 @@ fn mouse_and_buttons() {
         mouse: Some((WIDTH as i32 - 1, HEIGHT as i32 - 1)),
         held: Button::Left.bit(),
         mouse_held: Mouse::Left.bit() | Mouse::Right.bit(),
+        ..Input::default()
     };
     let inside = Input {
         mouse: Some((12, 34)),
@@ -212,6 +213,33 @@ fn mouse_and_buttons() {
             "true true false true",
             "mouse 12 34",
             "true true false false",
+        ]
+    );
+}
+
+#[test]
+fn taps_between_frames_are_delivered_once() {
+    let mut machine = machine(
+        "luna::update(|| {
+             print((input::held(Button::A), input::pressed(Button::A), input::released(Button::A)));
+             print((input::mouse_held(Mouse::Left), input::mouse_pressed(Mouse::Left)));
+         });
+         luna::draw(|| {});",
+    );
+    machine.frame(&Input {
+        pressed: Button::A.bit(),
+        released: Button::A.bit(),
+        mouse_pressed: Mouse::Left.bit(),
+        ..Input::default()
+    });
+    machine.frame(&Input::default());
+    assert_eq!(
+        machine.take_output(),
+        [
+            "[false, true, true]",
+            "[false, true]",
+            "[false, false, false]",
+            "[false, false]"
         ]
     );
 }

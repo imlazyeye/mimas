@@ -52,8 +52,12 @@ export function mountConsole(frame, hooks) {
     let paused = false;
     let halted = false;
     let held = 0;
+    const keys = new Set();
+    let pressed = 0;
+    let released = 0;
     let mouse = [-1, -1];
     let mouseHeld = 0;
+    let mousePressed = 0;
     let owed = 0;
     let last = 0;
     let ran = 0;
@@ -70,37 +74,47 @@ export function mountConsole(frame, hooks) {
         canvas.style.height = `${HEIGHT * scale}px`;
     }).observe(frame);
 
-    canvas.addEventListener('keydown', (event) => {
+    function key(event, down) {
         const bit = KEYS[event.code];
         if (bit === undefined) return;
-        held |= 1 << bit;
+        const before = held;
+        if (down) keys.add(event.code);
+        else keys.delete(event.code);
+        held = 0;
+        for (const code of keys) held |= 1 << KEYS[code];
+        pressed |= held & ~before;
+        released |= before & ~held;
         event.preventDefault();
-    });
-    canvas.addEventListener('keyup', (event) => {
-        const bit = KEYS[event.code];
-        if (bit === undefined) return;
-        held &= ~(1 << bit);
-        event.preventDefault();
-    });
+    }
+    canvas.addEventListener('keydown', (event) => key(event, true));
+    canvas.addEventListener('keyup', (event) => key(event, false));
     canvas.addEventListener('blur', () => {
+        keys.clear();
+        released |= held;
         held = 0;
         mouseHeld = 0;
     });
-    canvas.addEventListener('pointermove', (event) => {
+    function moveMouse(event) {
         const rect = canvas.getBoundingClientRect();
         const x = Math.floor(((event.clientX - rect.left) / rect.width) * WIDTH);
         const y = Math.floor(((event.clientY - rect.top) / rect.height) * HEIGHT);
         mouse = [x, y];
-    });
+    }
+    canvas.addEventListener('pointermove', moveMouse);
     canvas.addEventListener('pointerleave', () => (mouse = [-1, -1]));
     canvas.addEventListener('pointerdown', (event) => {
-        if (event.button > 2) return;
-        mouseHeld |= 1 << (event.button === 2 ? 1 : 0);
+        if (event.button !== 0 && event.button !== 2) return;
+        moveMouse(event);
+        const bit = 1 << (event.button === 2 ? 1 : 0);
+        mousePressed |= bit & ~mouseHeld;
+        mouseHeld |= bit;
         canvas.focus({ preventScroll: true });
         event.preventDefault();
     });
     window.addEventListener('pointerup', (event) => {
-        if (event.button <= 2) mouseHeld &= ~(1 << (event.button === 2 ? 1 : 0));
+        if (event.button === 0 || event.button === 2) {
+            mouseHeld &= ~(1 << (event.button === 2 ? 1 : 0));
+        }
     });
     canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
@@ -145,7 +159,11 @@ export function mountConsole(frame, hooks) {
             owed -= FRAME;
             const start = performance.now();
             try {
-                if (console.frame(held, mouse[0], mouse[1], mouseHeld)) {
+                const drewFrame = console.frame(
+                    held, pressed, released, mouse[0], mouse[1], mouseHeld, mousePressed,
+                );
+                pressed = released = mousePressed = 0;
+                if (drewFrame) {
                     ms = performance.now() - start;
                     ran += 1;
                     drew = true;
@@ -175,6 +193,7 @@ export function mountConsole(frame, hooks) {
             }
             console?.free();
             console = next;
+            pressed = released = mousePressed = 0;
             halted = false;
             paused = false;
             owed = 0;

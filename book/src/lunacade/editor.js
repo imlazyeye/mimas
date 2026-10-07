@@ -3,12 +3,15 @@
 // about every edit through `store.setFile`. The packages come from esm.sh through the import map
 // in index.html.
 
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateEffect, StateField } from '@codemirror/state';
 import {
+    Decoration,
     EditorView,
+    WidgetType,
     drawSelection,
     highlightActiveLine,
     highlightActiveLineGutter,
+    hoverTooltip,
     keymap,
     lineNumbers,
 } from '@codemirror/view';
@@ -195,6 +198,96 @@ export function mountEditor(el, store) {
 
     const view = new EditorView({ parent: body });
 
+    // what the language server's analysis says about the file shown, asked through the wasm
+    // module in the protocol's positions (0-based lines, UTF-16 columns)
+    function ask(question, ...args) {
+        if (!store.lsp || path === null) return null;
+        try {
+            const json = store.lsp[question](path, ...args);
+            return json === undefined || json === null ? null : JSON.parse(json);
+        } catch (error) {
+            console.error(error);
+            return null;
+        }
+    }
+
+    function refreshHints() {
+        const doc = view.state.doc;
+        const list = ask('inlay_hints') ?? [];
+        const widgets = list.map((hint) =>
+            Decoration.widget({ widget: new Hint(hint.label), side: 1 }).range(at(doc, hint.position)),
+        );
+        view.dispatch({ effects: hints.set.of(Decoration.set(widgets, true)) });
+    }
+
+    function refreshRefs() {
+        const doc = view.state.doc;
+        const list = view.hasFocus ? (ask('highlights', ...cursorPosition(view.state)) ?? []) : [];
+        const marks = list
+            .map((range) => rangeOf(doc, range))
+            .filter(([from, to]) => from < to)
+            .map(([from, to]) => Decoration.mark({ class: 'mb-ref' }).range(from, to));
+        view.dispatch({ effects: refs.set.of(Decoration.set(marks, true)) });
+    }
+
+    const hover = hoverTooltip(
+        (view, pos) => {
+            const doc = view.state.doc;
+            const result = ask('hover', ...position(doc, pos));
+            if (!result) return null;
+            const [from, to] = result.range ? rangeOf(doc, result.range) : [pos, pos];
+            return { pos: from, end: to, above: true, create: () => ({ dom: tooltip(result.contents.value) }) };
+        },
+        { hoverTime: 250 },
+    );
+
+    // Ctrl-click (or Cmd-click) goes to where the name is declared
+    const jump = EditorView.domEventHandlers({
+        mousedown(event, view) {
+            if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
+            const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos === null) return false;
+            const place = ask('definition', ...position(view.state.doc, pos));
+            if (!place) return false;
+            event.preventDefault();
+            store.select(place.file, selectable(place.range));
+            return true;
+        },
+    });
+
+    function renameAt(view) {
+        if (!store.ensureAnalysis()) return false;
+        const doc = view.state.doc;
+        const where = cursorPosition(view.state);
+        const range = ask('prepare_rename', ...where);
+        if (!range) return false;
+        const [from, to] = rangeOf(doc, range);
+        const old = doc.sliceString(from, to);
+        const name = window.prompt(`Rename ${old} to`, old);
+        if (!name || name === old) return true;
+        const result = ask('rename', ...where, name);
+        if (!result) return true;
+        if (result.error) {
+            store.notify(result.error);
+            return true;
+        }
+        for (const [file, edits] of Object.entries(result.changes)) {
+            if (file === path) {
+                view.dispatch({
+                    changes: edits.map((edit) => {
+                        const [from, to] = rangeOf(doc, edit.range);
+                        return { from, to, insert: edit.newText };
+                    }),
+                });
+            } else {
+                store.setFile(file, edited(store.cart.files[file], edits));
+            }
+        }
+        return true;
+    }
+
+    let refTimer = 0;
+
     function makeState(file, text) {
         const extensions = [
             lineNumbers(),
@@ -208,11 +301,25 @@ export function mountEditor(el, store) {
             highlightActiveLine(),
             highlightSelectionMatches(),
             lintGutter(),
-            keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+            keymap.of([
+                ...defaultKeymap,
+                ...historyKeymap,
+                ...searchKeymap,
+                indentWithTab,
+                { key: 'F2', run: renameAt },
+            ]),
             theme,
             syntaxHighlighting(colors),
+            hover,
+            jump,
+            refs.field,
+            hints.field,
             EditorView.updateListener.of((update) => {
                 if (update.docChanged && !applying) store.setFile(path, update.state.doc.toString());
+                if (update.selectionSet || update.focusChanged) {
+                    clearTimeout(refTimer);
+                    refTimer = setTimeout(refreshRefs, 60);
+                }
             }),
         ];
         if (file.endsWith('.mim')) extensions.push(mimas);
@@ -236,6 +343,8 @@ export function mountEditor(el, store) {
         }
         markProblems();
         renderTree();
+        refreshHints();
+        refreshRefs();
     }
 
     // an edit that came from somewhere else (the sprite editor writes sprites.txt)
@@ -475,10 +584,13 @@ export function mountEditor(el, store) {
         renderTree();
     });
 
+    // a check has run, so the analysis is current again
     store.on('diagnostics', () => {
         markProblems();
         renderTree();
         renderProblems();
+        refreshHints();
+        refreshRefs();
     });
 
     store.on('select', ({ path: target, range }) => {
@@ -504,4 +616,113 @@ export function mountEditor(el, store) {
 function offset(doc, line, col) {
     const at = doc.line(Math.min(Math.max(line, 1), doc.lines));
     return Math.min(at.from + Math.max(col - 1, 0), at.to);
+}
+
+// the protocol's positions, 0 based with UTF-16 columns, against the document
+
+function at(doc, { line, character }) {
+    const row = doc.line(Math.min(line + 1, doc.lines));
+    return Math.min(row.from + character, row.to);
+}
+
+function position(doc, offset) {
+    const row = doc.lineAt(offset);
+    return [row.number - 1, offset - row.from];
+}
+
+// the position of the caret, or of the character before it when the caret sits at the end of a
+// word, since that is the word someone means
+function cursorPosition(state) {
+    const { head } = state.selection.main;
+    const before = head > 0 && /\w/.test(state.doc.sliceString(head - 1, head));
+    const after = /\w/.test(state.doc.sliceString(head, head + 1));
+    return position(state.doc, before && !after ? head - 1 : head);
+}
+
+function rangeOf(doc, range) {
+    return [at(doc, range.start), at(doc, range.end)];
+}
+
+// a range in the shape of a diagnostic, which is what store.select takes
+function selectable(range) {
+    return {
+        line: range.start.line + 1,
+        col: range.start.character + 1,
+        end_line: range.end.line + 1,
+        end_col: range.end.character + 1,
+    };
+}
+
+// `text` with the protocol's edits applied, back to front so the earlier ones keep their offsets
+function edited(text, edits) {
+    const starts = [0];
+    for (let i = 0; i < text.length; i += 1) {
+        if (text[i] === '\n') starts.push(i + 1);
+    }
+    const offsetOf = ({ line, character }) =>
+        Math.min((starts[line] ?? text.length) + character, text.length);
+    return [...edits]
+        .sort((a, b) => offsetOf(b.range.start) - offsetOf(a.range.start))
+        .reduce(
+            (out, edit) =>
+                out.slice(0, offsetOf(edit.range.start)) + edit.newText + out.slice(offsetOf(edit.range.end)),
+            text,
+        );
+}
+
+// a set of decorations the editor replaces whole, as a field and the effect that sets it
+function decorations() {
+    const set = StateEffect.define();
+    const field = StateField.define({
+        create: () => Decoration.none,
+        update(value, transaction) {
+            value = value.map(transaction.changes);
+            for (const effect of transaction.effects) {
+                if (effect.is(set)) value = effect.value;
+            }
+            return value;
+        },
+        provide: (field) => EditorView.decorations.from(field),
+    });
+    return { set, field };
+}
+
+const refs = decorations();
+const hints = decorations();
+
+class Hint extends WidgetType {
+    constructor(label) {
+        super();
+        this.label = label;
+    }
+
+    eq(other) {
+        return other.label === this.label;
+    }
+
+    toDOM() {
+        return h('span', { class: 'mb-hint' }, this.label);
+    }
+
+    ignoreEvent() {
+        return true;
+    }
+}
+
+// the hover's markdown, as far as the docs go: fenced blocks, rules, paragraphs and code spans
+function tooltip(markdown) {
+    const root = h('div', { class: 'mb-tip' });
+    for (const block of markdown.split(/\n{2,}/)) {
+        const text = block.trim();
+        const fence = /^```\w*\n([\s\S]*?)\n?```$/.exec(text);
+        if (fence) root.append(h('pre', {}, h('code', {}, fence[1])));
+        else if (text === '---') root.append(h('hr'));
+        else if (text) {
+            const parts = text.split(/(`[^`]+`)/).map((part) =>
+                part.startsWith('`') && part.endsWith('`') ? h('code', {}, part.slice(1, -1)) : part,
+            );
+            root.append(h('p', {}, ...parts));
+        }
+    }
+    return root;
 }

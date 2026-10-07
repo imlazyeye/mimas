@@ -86,15 +86,18 @@ impl Controls {
     pub fn feed(&self, previous: &Input, input: &Input) {
         self.held.set(input.held);
         self.pressed
-            .set(self.pressed.get() | input.held & !previous.held);
+            .set(self.pressed.get() | input.pressed | input.held & !previous.held);
         self.released
-            .set(self.released.get() | !input.held & previous.held);
+            .set(self.released.get() | input.released | !input.held & previous.held);
         self.mouse.set(input.mouse);
         self.mouse_moved
             .set(self.mouse_moved.get() || input.mouse != previous.mouse);
         self.mouse_held.set(input.mouse_held);
-        self.mouse_pressed
-            .set(self.mouse_pressed.get() | input.mouse_held & !previous.mouse_held);
+        self.mouse_pressed.set(
+            self.mouse_pressed.get()
+                | input.mouse_pressed
+                | input.mouse_held & !previous.mouse_held,
+        );
     }
 
     /// Forgets the presses and releases, once a frame has had its look at them.

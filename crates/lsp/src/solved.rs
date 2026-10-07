@@ -8,7 +8,7 @@ use api::Library;
 use indexmap::{IndexMap, IndexSet};
 use lsp_types::{Location, Position, TextEdit, Uri, WorkspaceEdit};
 
-use crate::analysis::Analysis;
+use crate::analysis::{Analysis, path_of};
 
 /// The files under one root, solved the way a host runs them: the modules on their own, and each
 /// script with every module. A script sees every module and nothing of the other scripts.
@@ -110,7 +110,7 @@ impl Solved {
         // own analysis answers alone
         let Some((declared, at)) = analysis
             .definition(path, position)
-            .and_then(|location| Some((location.uri.to_file_path().ok()?, location.range.start)))
+            .and_then(|location| Some((path_of(&location.uri)?, location.range.start)))
         else {
             return Some((path.to_path_buf(), position, vec![analysis]));
         };

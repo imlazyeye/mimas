@@ -90,6 +90,12 @@ const store = {
     // a `.mim` file that isn't a module is the cart's script
     isModule: (text) => wasm.is_module(text),
     focusConsole: () => screen.focus(),
+    // Queries only see analysis of the current files. Rename and Run can check immediately.
+    get lsp() {
+        return analysisCurrent ? wasm : null;
+    },
+    ensureAnalysis,
+    notify,
 };
 
 // the carts: the examples from the console, and a cart from a link
@@ -116,6 +122,7 @@ function openCart(id) {
     saveNow();
     const files = { ...(savedFiles(id) ?? base.files) };
     store.cart = { id, files };
+    analysisCurrent = false;
     checkList = [];
     fault = null;
     notice.hidden = true;
@@ -127,6 +134,7 @@ function openCart(id) {
     $('cart-name').textContent = title(id);
     publishDiagnostics();
     emit('cart');
+    check();
     runNow();
 }
 
@@ -136,12 +144,14 @@ function resetCart() {
     dirty = false;
     remove(KEY + store.cart.id);
     store.cart.files = { ...base.files };
+    analysisCurrent = false;
     checkList = [];
     fault = null;
     notice.hidden = true;
     setSaved(null);
     publishDiagnostics();
     emit('cart');
+    check();
     runNow();
 }
 
@@ -153,6 +163,7 @@ let runPending = false;
 let autorun = read(AUTORUN) !== 'off';
 let checkList = [];
 let fault = null;
+let analysisCurrent = false;
 
 function setFile(path, text) {
     if (!store.cart) return;
@@ -164,6 +175,7 @@ function setFile(path, text) {
         if (files[path] === text) return;
         files[path] = text;
     }
+    analysisCurrent = false;
     scheduleSave();
     clearTimeout(checkTimer);
     checkTimer = setTimeout(check, CHECK_DELAY);
@@ -176,12 +188,14 @@ function setFile(path, text) {
     emit('file', path);
 }
 
+// a check also builds the analysis the editor asks about, so an open cart gets one right away
 function check() {
     clearTimeout(checkTimer);
     checkTimer = 0;
     if (!wasm || !store.cart) return;
     try {
         checkList = JSON.parse(wasm.check_cart(JSON.stringify({ files: store.cart.files })));
+        analysisCurrent = true;
     } catch (error) {
         crashed(error);
         return;
@@ -189,6 +203,11 @@ function check() {
     fault = null;
     publishDiagnostics();
     tryRun();
+}
+
+function ensureAnalysis() {
+    if (!analysisCurrent) check();
+    return analysisCurrent;
 }
 
 function tryRun() {
@@ -199,10 +218,9 @@ function tryRun() {
 
 function runNow() {
     if (!store.cart || !wasm) return;
-    clearTimeout(checkTimer);
-    checkTimer = 0;
     clearTimeout(runTimer);
     runPending = false;
+    if (!ensureAnalysis()) return;
     let problems;
     try {
         problems = screen.load(wasm.Console, store.cart.files, Math.floor(Math.random() * 2 ** 53));
@@ -302,6 +320,7 @@ async function boot() {
 function crashed(error) {
     console.error('the console crashed:', error);
     wasm = null;
+    analysisCurrent = false;
     screen.stop();
     renderStats({ state: 'crashed' });
     notify('The console crashed. Press Restart to start it again.', true);

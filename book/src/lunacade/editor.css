@@ -209,3 +209,45 @@
     padding: 4px 12px;
     color: var(--muted);
 }
+
+/* what the analysis adds: the uses of the name under the caret, the type a `let` got, and the
+   hover */
+
+.mb-ref {
+    background: rgb(255 255 255 / 0.1);
+    border-radius: 2px;
+}
+
+.mb-hint {
+    margin-left: 2px;
+    color: var(--slate);
+    font-size: 11px;
+}
+
+.mb-tip {
+    max-width: 60ch;
+    padding: 6px 10px;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.mb-tip p {
+    margin: 6px 0;
+}
+
+.mb-tip pre {
+    margin: 0;
+    font: 12px/1.45 var(--mono);
+    white-space: pre-wrap;
+}
+
+.mb-tip hr {
+    margin: 6px 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+}
+
+.mb-tip code {
+    padding: 0;
+    background: none;
+}

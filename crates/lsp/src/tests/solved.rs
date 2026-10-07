@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use lsp_types::{Contents, Position};
 
 use super::utils::{open, tree};
-use crate::{host_api::HostApi, workspace::Workspace};
+use mimas_lsp::{host_api::HostApi, workspace::Workspace};
 
 /// A module with a documented `one`, and two scripts that call it.
 fn scripts(name: &str, b: &str) -> PathBuf {

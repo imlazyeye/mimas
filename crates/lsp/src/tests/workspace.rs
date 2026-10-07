@@ -1,7 +1,7 @@
 use api::Project;
 
 use super::utils::{open, tree, update};
-use crate::{host_api::HostApi, workspace::Workspace};
+use mimas_lsp::{host_api::HostApi, workspace::Workspace};
 
 #[test]
 fn nested_script_in_package_sees_modules_above() {

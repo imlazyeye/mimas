@@ -174,7 +174,7 @@ impl Analysis {
         }
         let (target_path, target) = self.files.get_index(dec.location.file_id)?;
         Some(Location {
-            uri: Uri::from_file_path(target_path).ok()?,
+            uri: uri_of(target_path)?,
             range: target.range(span)?,
         })
     }
@@ -192,7 +192,7 @@ impl Analysis {
 
         let mut locations = Vec::new();
         for (file_id, (path, file)) in self.files.iter().enumerate() {
-            let Ok(uri) = Uri::from_file_path(path) else {
+            let Some(uri) = uri_of(path) else {
                 continue;
             };
             for (id, span) in file.idents() {
@@ -306,7 +306,7 @@ impl Analysis {
                         })
                     })
                     .collect();
-                Some((Uri::from_file_path(path).ok()?, edits))
+                Some((uri_of(path)?, edits))
             })
             .collect();
 
@@ -446,6 +446,11 @@ impl Analysis {
         Some(self.files.get(path)?.symbols())
     }
 
+    /// Every error, when any file failed to parse or the solve failed.
+    pub fn errors(&self) -> &[shared::Error] {
+        self.resolutions.as_ref().err().map_or(&[], Vec::as_slice)
+    }
+
     /// The errors that point into `path`.
     pub fn diagnostics(&self, path: &Path) -> Vec<Diagnostic> {
         let (Err(errors), Some(file_id)) = (&self.resolutions, self.files.get_index_of(path))
@@ -464,5 +469,30 @@ impl Analysis {
         let label = error.labels()?.next()?;
         let contents = error.source_code()?.read_span(label.inner(), 0, 0).ok()?;
         self.files.get_index_of(Path::new(contents.name()?))
+    }
+}
+
+/// The uri of a file's path. The url crate only knows how on targets with a file system, so a
+/// host without one (the web) gets `file://` and the path as it is.
+pub fn uri_of(path: &Path) -> Option<Uri> {
+    #[cfg(any(unix, windows))]
+    {
+        Uri::from_file_path(path).ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Uri::parse(&format!("file://{}", path.to_str()?)).ok()
+    }
+}
+
+/// The path behind a uri [`uri_of`] made.
+pub fn path_of(uri: &Uri) -> Option<PathBuf> {
+    #[cfg(any(unix, windows))]
+    {
+        uri.to_file_path().ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Some(PathBuf::from(uri.path()))
     }
 }

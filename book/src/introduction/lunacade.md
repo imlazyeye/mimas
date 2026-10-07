@@ -12,7 +12,7 @@ The page has the console on one side, with a picker for the example carts under 
 
 | Tab | What it does |
 | :-- | :-- |
-| Code | Edits a cart's files, listed as a tree with a folder for each part of a path. It checks the cart as you type, marks the errors, and runs the cart again a moment after the code checks clean (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it now). |
+| Code | Edits a cart's files, listed as a tree with a folder for each part of a path. It checks the cart as you type, marks the errors, and runs the cart again a moment after the code checks clean (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it now). Hovering a name shows what it is and its docs, <kbd>Ctrl</kbd>-click goes to where it's declared, <kbd>F2</kbd> renames it everywhere, and a `let` without a type shows the one it got. |
 | Sprites | A pixel editor for `sprites.txt`. |
 
 The [Cart API](./lunacade-api.md) chapter is the reference for everything a cart can call. Edits are saved in your browser for each cart. Share compresses the whole cart into the part of the link after the `#`. Nothing is sent to a server, and the page sets no cookies. The page needs WebAssembly, and it loads its code editor and the font of its title from CDNs.
@@ -125,7 +125,7 @@ lunacade reads a keyboard and a mouse.
 
 The mouse is the cursor over the screen, in screen pixels. `input::mouse()` is `null` while the cursor is outside it. Click the console first so it has the keyboard.
 
-The console works out which buttons were just pressed or released by comparing each frame's state with the one before.
+The page remembers button presses and releases until the next frame, so a quick tap between frames still counts. Other hosts can pass those events in `Input`, or let the console infer them from changes in the held buttons.
 
 ## The fuel cap
 
@@ -142,14 +142,14 @@ They're in `examples/lunacade/carts`, and the page has them all. A new cart on t
 `lunacade-core` is the console without a page, and it has no dependency on the web. Its `Machine` loads a cart, and a front end calls `frame` 60 times a second with what the player is holding:
 
 ```rs
-use lunacade_core::{Button, Cart, Frame, Input, Machine};
+use lunacade_core::{Button, Cart, Input, Machine};
 
 let cart = Cart::from_dir("carts/pong".as_ref()).unwrap();
 let mut machine = Machine::load(&cart, seed).expect("the cart loads");
 
 // then, 60 times a second
 let input = Input { held: Button::Left.bit(), ..Input::default() };
-if machine.frame(&input) == Frame::Ran {
+if !machine.frame(&input) {
     machine.screen().write_rgba(&mut pixels);
 }
 ```

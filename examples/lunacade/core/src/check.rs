@@ -36,7 +36,7 @@ impl Diagnostic {
     /// the name of the label's source picks the file out of the cart. An error that points
     /// nowhere, or at a source that isn't one of the cart's files, is a point at the top of the
     /// cart's script.
-    pub(crate) fn from_report(error: &Error, cart: &Cart, kind: DiagnosticKind) -> Self {
+    pub fn from_report(error: &Error, cart: &Cart, kind: DiagnosticKind) -> Self {
         let files = &cart.files;
         let label = error.labels().and_then(|mut labels| labels.next());
         let name = label.as_ref().and_then(|label| {

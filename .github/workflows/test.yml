@@ -57,7 +57,7 @@ jobs:
         with:
           shared-key: lunacade
           workspaces: examples/lunacade -> target
-      - run: cargo test --manifest-path examples/lunacade/Cargo.toml -p lunacade-core
+      - run: cargo test --manifest-path examples/lunacade/Cargo.toml --workspace
 
   all-checks-passed:
     runs-on: ubuntu-latest
