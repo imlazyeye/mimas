@@ -141,16 +141,65 @@ test_ty!(
     "Dog::NAME" => Str,
 );
 
-// pact *constants* have no dispatch -- each impl declares its own value, and a pact-typed
-// receiver hasn't decided which. methods are fine (see `pact_default_method_used`); only the
-// constant form is rejected, and it's rejected here rather than crashing during lowering.
-test_fail!(
+test_ty!(
     pact_const_via_dot,
-    "pact Identified { const ID: int; }
-     struct Foo { tag: int }
-     impl Identified for Foo { const ID = 7; }
-     fn get_id(v: Identified) -> int { v.ID }
-     get_id(Foo { tag = 0 });"
+    "pact Identified {
+         const ID: int;
+     }
+     struct Foo {
+         tag: int,
+     }
+     impl Identified for Foo {
+         const ID = 7;
+     }
+     fn get_id(v: Identified) -> int {
+         v.ID
+     }",
+    "get_id(Foo { tag = 0 })" => Int,
+);
+
+test_ty!(
+    pact_const_via_self,
+    "pact Identified {
+         const ID: int;
+         fn next(self) -> int {
+             self.ID + 1
+         }
+     }
+     struct Foo {
+         tag: int,
+     }
+     impl Identified for Foo {
+         const ID = 7;
+     }",
+    "Foo { tag = 0 }.next()" => Int,
+);
+
+test_fail!(
+    pact_const_via_dot_wrong_type,
+    "pact Identified {
+         const ID: int;
+     }
+     fn get_id(v: Identified) -> str {
+         v.ID
+     }",
+);
+
+test_fail!(
+    pact_const_via_dot_in_const,
+    "pact Identified {
+         const ID: int;
+     }
+     struct Foo {
+         tag: int,
+     }
+     impl Identified for Foo {
+         const ID = 7;
+     }
+     fn copy(v: Identified) -> int {
+         const COPY = v.ID;
+         COPY
+     }",
 );
 
 test_ty!(
@@ -220,16 +269,29 @@ test_ty!(
     "describe(p)" => Int,
 );
 
-// same limitation as `pact_const_via_dot`, reached through a multi-pact `+` bound
-test_fail!(
+test_ty!(
     pact_bound_const_access,
-    "pact Tagged { const TAG: int; }
-     pact Greet { fn hi(self) -> str; }
-     struct W { n: int }
-     impl Tagged for W { const TAG = 7; }
-     impl Greet for W { fn hi(self) -> str { \"y\" } }
-     fn tag_of(v: Tagged + Greet) -> int { v.TAG }
-     tag_of(W { n = 1 });"
+    "pact Tagged {
+         const TAG: int;
+     }
+     pact Greet {
+         fn hi(self) -> str;
+     }
+     struct W {
+         n: int,
+     }
+     impl Tagged for W {
+         const TAG = 7;
+     }
+     impl Greet for W {
+         fn hi(self) -> str {
+             \"y\"
+         }
+     }
+     fn tag_of(v: Tagged + Greet) -> int {
+         v.TAG
+     }",
+    "tag_of(W { n = 1 })" => Int,
 );
 
 test_fail!(

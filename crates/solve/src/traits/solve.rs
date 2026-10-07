@@ -304,7 +304,7 @@ impl Solve for Access {
                         for pid in &lhs.as_pacts().expect("narrowed by the outer arm") {
                             let pact = &solver.pacts[pid];
                             if let Some(c) = pact.constants.get(name) {
-                                con = Some(c.clone());
+                                con = Some((*pid, c.clone()));
                                 matches += 1;
                             } else if let Some((header, _)) = pact.functions.get(name) {
                                 fun = Some((*pid, header.clone()));
@@ -320,17 +320,12 @@ impl Solve for Access {
                             }
                             .into());
                         }
-                        if con.is_some() {
-                            // methods dispatch through `pact_impls`, but constants have no
-                            // runtime dispatch -- every impl declares its own value and the
-                            // receiver's concrete type isn't known here
-                            return Err(PactConstantNotDispatchable {
-                                src: solver.src(right.location()),
-                                at: right.location().into(),
-                                member: name.clone(),
-                                via: lhs.to_string(),
-                            }
-                            .into());
+                        if let Some((pid, ty)) = con {
+                            // every impl declares its own value, and the receiver picks one at
+                            // runtime the way it picks a method
+                            let member = solver.pact_members.get(&(pid, name.clone())).copied();
+                            solver.note(right.as_ident().unwrap(), ty.clone(), member);
+                            ty
                         } else if let Some((pid, header)) = fun {
                             // `Self` in a parameter is the receiver's concrete type (Skolem). a
                             // bound doesn't pin that down, so any implementer would satisfy it and
@@ -507,8 +502,8 @@ impl Solve for Access {
                     let pact = &solver.pacts[pid];
                     if pact.constants.contains_key(&right.lexeme) {
                         // a default body is compiled once and shared by every impl, so `Self`
-                        // is still the abstract pact here and there's no single constant to
-                        // point at -- same limitation as reaching one through a value
+                        // is still the abstract pact here, and unlike a value it carries no
+                        // type to pick an impl's constant by
                         Err(PactConstantNotDispatchable {
                             src: solver.src(right.location),
                             at: right.location.into(),

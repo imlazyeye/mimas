@@ -26,6 +26,91 @@ test_vm!(
 );
 
 test_vm!(
+    pact_const_dispatch,
+    r#"pact Named {
+         const KIND: str;
+         const LEGS: int;
+         fn shout(self) -> str {
+             self.KIND + "!"
+         }
+     }
+     struct Dog;
+     struct Bird;
+     enum Fish {
+         Trout,
+         Eel(int),
+     }
+     impl Named for Dog {
+         const KIND = "canine";
+         const LEGS = 4;
+     }
+     impl Named for Bird {
+         const KIND = "avian";
+         const LEGS = 2;
+     }
+     impl Named for Fish {
+         const KIND = "fish";
+         const LEGS = 0;
+     }
+     fn kind(thing: Named) -> str {
+         thing.KIND
+     }
+     fn legs(things: [Named]) -> int {
+         let sum = 0;
+         for thing in things {
+             sum += thing.LEGS;
+         }
+         sum
+     }"#,
+    "kind(Dog)" => str!("canine"),
+    "kind(Bird)" => str!("avian"),
+    "kind(Fish::Eel(3))" => str!("fish"),
+    "legs([Dog, Bird, Fish::Trout, Dog])" => Int(10),
+    "Bird.shout()" => str!("avian!"),
+);
+
+test_vm!(
+    pact_const_dispatch_through_bound,
+    "pact Tagged {
+         const TAG: int;
+     }
+     pact Aged {
+         const AGE: int;
+     }
+     struct Old;
+     struct Young;
+     impl Tagged for Old {
+         const TAG = 1;
+     }
+     impl Aged for Old {
+         const AGE = 90;
+     }
+     impl Tagged for Young {
+         const TAG = 2;
+     }
+     fn sum(thing: Tagged + Aged) -> int {
+         thing.TAG + thing.AGE
+     }",
+    "sum(Old)" => Int(91),
+);
+
+test_vm!(
+    pact_const_dispatch_on_option,
+    r#"pact Named {
+         const KIND: str;
+     }
+     struct Dog;
+     impl Named for Dog {
+         const KIND = "canine";
+     }
+     fn kind(thing: Named?) -> str {
+         thing?.KIND ?? "nothing"
+     }"#,
+    "kind(Dog)" => str!("canine"),
+    "kind(null)" => str!("nothing"),
+);
+
+test_vm!(
     pact_method_dispatch_on_option,
     r#"pact Named {
          fn shout(self) -> str;

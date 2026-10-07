@@ -10,9 +10,9 @@ use parse::{
     Unary, Unwrap, While,
     components::{Binding, Pat, PatKind},
 };
-use shared::{Located, PactId};
+use shared::{AdtId, Located, PactId};
 use solve::{
-    ResolvedDeclKind,
+    ResolvedAdt, ResolvedDeclKind,
     components::{DecId, FnHeader, Ty},
 };
 
@@ -178,6 +178,30 @@ impl Emit for Access {
         match self {
             Access::Identity { right: _ } => todo!(),
             Access::Dot { left, right, kind } => {
+                // a pact-typed receiver has no fields, so this reads a pact constant, and the
+                // receiver's own impl of it is picked at runtime
+                let optional = *kind == AccessKind::Option || left.taints_chain();
+                let pact_pids = match ir.resolutions.node_tys.get(&left.id()) {
+                    Some(Ty::Option(inner)) if optional => inner.as_pacts(),
+                    Some(ty) => ty.as_pacts(),
+                    None => None,
+                };
+                if let Some(pids) = pact_pids {
+                    let name = &right.as_ident().expect("constant name is an ident").lexeme;
+                    let recv = left.lower(ir)?;
+                    let candidates = pact_candidates(ir, &pids, |adt| adt.constants[name]);
+                    let read = |ir: &mut Ir| {
+                        pact_dispatch(ir, recv, candidates, |ir, dec| {
+                            Constant::emit_const_dec(ir, dec, id)
+                        })
+                    };
+                    return if optional {
+                        unless_null(ir, recv, read)
+                    } else {
+                        read(ir)
+                    };
+                }
+
                 // associated-const access: solver resolved this to a Constant dec.
                 // emit the receiver for side effects, then load the folded value.
                 if let Some(dec) = ir.try_node_dec(id)
@@ -413,40 +437,14 @@ impl Emit for Call {
             // effects.
             let args = fill_call_args(ir, fn_ty, &[], arguments, fn_ty.is_method.then_some(recv))?;
 
-            let candidates: Vec<_> = ir
-                .resolutions
-                .adts
-                .iter()
-                .filter(|(_, adt)| pids.iter().all(|p| adt.implements.contains(p)))
-                .map(|(_, adt)| (adt.methods[method], adt.dispatch_ids.clone()))
-                .collect();
+            let candidates = pact_candidates(ir, pids, |adt| adt.methods[method]);
             let candidates: Vec<_> = candidates
                 .into_iter()
                 .map(|(dec, ids)| (ir.item_body_for(dec), ids))
                 .collect();
-
-            let merge = ir.push_block("pact_merge");
-            let mut branches = Vec::new();
-            for (body, ids) in candidates {
-                for id in ids {
-                    let hit = ir.push_block("pact_hit");
-                    let next = ir.push_block("pact_next");
-                    let is_inst = ir.current().is_instance(recv, id);
-                    ir.in_current(|block| {
-                        block.jump_if_false(is_inst, next);
-                        block.jump(hit);
-                    });
-                    ir.target(hit);
-                    let value = ir.current().call_direct(body, args.clone());
-                    let end = ir.current_block_id();
-                    ir.current().jump(merge);
-                    branches.push((end, value));
-                    ir.target(next);
-                }
-            }
-            // only an implementor added after this call site was compiled gets here
-            ir.current().no_impl();
-            merge_branches(ir, merge, branches)
+            pact_dispatch(ir, recv, candidates, |ir, body| {
+                Some(ir.current().call_direct(body, args.clone()))
+            })
         }
 
         let callee_ty = ir.resolutions.node_tys.get(&self.left.id());
@@ -1521,6 +1519,52 @@ fn unless_null(
     ir.current().jump(merge);
 
     merge_branches(ir, merge, vec![(null_end, null_value), (end, value)])
+}
+
+// each implementer of every pact in `pids`, as its `member` and the ids its values carry
+fn pact_candidates<T>(
+    ir: &Ir,
+    pids: &[PactId],
+    member: impl Fn(&ResolvedAdt) -> T,
+) -> Vec<(T, Vec<AdtId>)> {
+    ir.resolutions
+        .adts
+        .iter()
+        .filter(|(_, adt)| pids.iter().all(|p| adt.implements.contains(p)))
+        .map(|(_, adt)| (member(adt), adt.dispatch_ids.clone()))
+        .collect()
+}
+
+// a runtime IsInstance chain on `recv`, where the arm of the implementer it turns out to be gives
+// the value
+fn pact_dispatch<T: Copy>(
+    ir: &mut Ir,
+    recv: InstId,
+    candidates: Vec<(T, Vec<AdtId>)>,
+    mut arm: impl FnMut(&mut Ir, T) -> Option<InstId>,
+) -> Option<InstId> {
+    let merge = ir.push_block("pact_merge");
+    let mut branches = Vec::new();
+    for (member, ids) in candidates {
+        for id in ids {
+            let hit = ir.push_block("pact_hit");
+            let next = ir.push_block("pact_next");
+            let is_inst = ir.current().is_instance(recv, id);
+            ir.in_current(|block| {
+                block.jump_if_false(is_inst, next);
+                block.jump(hit);
+            });
+            ir.target(hit);
+            let value = arm(ir, member)?;
+            let end = ir.current_block_id();
+            ir.current().jump(merge);
+            branches.push((end, value));
+            ir.target(next);
+        }
+    }
+    // only an implementor added after this site was compiled gets here
+    ir.current().no_impl();
+    merge_branches(ir, merge, branches)
 }
 
 fn merge_branches(
