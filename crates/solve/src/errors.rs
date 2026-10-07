@@ -306,6 +306,20 @@ pub struct PactMethodNotDispatchable {
     pub via: String,
 }
 
+/// `Pact::*::member` calls an associated function once per implementer, with no receiver to give a
+/// method and no single type to give a `Self` parameter.
+#[derive(Error, Debug, Diagnostic)]
+#[error("`{member}` can't be called on every implementer of `{pact}`")]
+pub struct NotCallableOnEach {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("{why}")]
+    pub at: SourceSpan,
+    pub member: String,
+    pub pact: String,
+    pub why: &'static str,
+}
+
 #[derive(Error, Debug, Diagnostic)]
 #[error("'{member}' is declared by more than one pact in this bound")]
 #[diagnostic(help("a `+` bound can't combine pacts that share a member name -- rename one"))]

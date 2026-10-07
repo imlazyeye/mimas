@@ -531,7 +531,65 @@ impl Solve for Access {
                     handle_adt_access(id, solver, left, right)
                 }
             }
-            Access::Each { .. } => unimplemented!(),
+            Access::Each { left, right } => {
+                let head = left.query(solver)?;
+                let named = match solver.node_decs.get(&left.id()) {
+                    Some(&dec) => matches!(solver.decs[dec].kind, DecKind::Pact(_)),
+                    None => matches!(left.kind(), ExprKind::Ident(_)),
+                };
+                let Some(pid) = head.as_single_pact().filter(|_| named) else {
+                    Err(NotAPact {
+                        src: solver.src(left.location()),
+                        at: left.location().into(),
+                        ty: left.to_string(),
+                    })?
+                };
+                let pact = &solver.pacts[pid];
+                let ty = if let Some(ty) = pact.constants.get(&right.lexeme) {
+                    array!(ty.clone())
+                } else if let Some((header, _)) = pact.functions.get(&right.lexeme) {
+                    let mut header = header.clone();
+                    let why = if header.is_method {
+                        Some(
+                            "a method needs an actual `Self` which is a different type for each implementer",
+                        )
+                    } else if header.parameters.iter().any(|p| p.ty.contains_skolem()) {
+                        Some("a `Self` parameter is a different type for each implementer")
+                    } else {
+                        None
+                    };
+                    if let Some(why) = why {
+                        Err(NotCallableOnEach {
+                            src: solver.src(right.location),
+                            at: right.location.into(),
+                            member: right.lexeme.clone(),
+                            pact: pact.name.clone(),
+                            why,
+                        })?
+                    }
+                    if solver.non_value != Some(id) {
+                        Err(MethodIsNotAValue {
+                            src: solver.src(location),
+                            at: location.into(),
+                        })?
+                    }
+                    // a `Self` return widens to the pact, same as a call through a bound
+                    *header.return_ty = Ty::Array(header.return_ty.clone());
+                    solver.instantiate_pact_fn(&header, &head)
+                } else {
+                    Err(FieldNotFound {
+                        src: solver.src(right.location),
+                        at: right.location.into(),
+                        field_name: right.lexeme.clone(),
+                    })?
+                };
+                let member = solver
+                    .pact_members
+                    .get(&(pid, right.lexeme.clone()))
+                    .copied();
+                solver.note(right, ty.clone(), member);
+                Ok(ty)
+            }
         }
     }
 }
