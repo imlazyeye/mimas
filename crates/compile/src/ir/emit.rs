@@ -246,9 +246,10 @@ impl Emit for Access {
                         Some(ir.current().ref_body(body))
                     }
                     ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec, id),
-                    ResolvedDeclKind::Adt(_) => unreachable!(
-                        "`::` resolved to an adt-dec directly -- should only be possible for variants"
-                    ),
+                    ResolvedDeclKind::Adt(adt) => {
+                        let adt = *adt;
+                        Some(adt_value(ir, dec, adt))
+                    }
                     ResolvedDeclKind::Local => unreachable!("`::` never resolves to a local"),
                     ResolvedDeclKind::Pact(_) => todo!(),
                 }
@@ -897,11 +898,7 @@ impl Emit for Ident {
             }
             ResolvedDeclKind::Adt(adt) => {
                 let adt = *adt;
-                if ir.resolutions.adts[adt].fields.is_empty() {
-                    return Some(ir.current().new_instance(adt, vec![]));
-                }
-                let body = ir.item_body_for(dec);
-                Some(ir.current().ref_body(body))
+                Some(adt_value(ir, dec, adt))
             }
             ResolvedDeclKind::Pact(_) => todo!(),
             ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec, id),
@@ -1487,6 +1484,15 @@ fn num_kind_of(ir: &Ir, id: NodeId) -> OperandKind {
         Some(Ty::Str) => OperandKind::Str,
         _ => OperandKind::Generic,
     }
+}
+
+// a struct's name used as a value (the struct itself when it has no fields, otherwise its ctor)
+fn adt_value(ir: &mut Ir, dec: DecId, adt: AdtId) -> InstId {
+    if ir.resolutions.adts[adt].fields.is_empty() {
+        return ir.current().new_instance(adt, vec![]);
+    }
+    let body = ir.item_body_for(dec);
+    ir.current().ref_body(body)
 }
 
 // null when `receiver` is, and what `then` gives when it isn't
