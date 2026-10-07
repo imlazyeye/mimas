@@ -404,12 +404,11 @@ impl Emit for Call {
         fn emit_pact_dispatch(
             ir: &mut Ir,
             fn_ty: &FnHeader,
-            receiver: &Expr,
+            recv: InstId,
             arguments: &[parse::Argument],
             pids: &[PactId],
             method: &str,
         ) -> Option<InstId> {
-            let recv = receiver.lower(ir)?;
             // lower args once -- fill_call_args evaluates them, so per-arm calls re-run side
             // effects.
             let args = fill_call_args(ir, fn_ty, &[], arguments, fn_ty.is_method.then_some(recv))?;
@@ -507,18 +506,28 @@ impl Emit for Call {
             // over every implementor of the bound. a grafted default lands in each impl's table,
             // so default methods dispatch here for free.
             // `self` inside a default body counts too: one implementer, decided at runtime
-            let pact_pids = ir
-                .resolutions
-                .node_tys
-                .get(&left.id())
-                .and_then(Ty::as_pacts);
+            // through `?.` the receiver is an option of the bound, and null skips the dispatch
+            let optional = *access_kind == AccessKind::Option || left.taints_chain();
+            let pact_pids = match ir.resolutions.node_tys.get(&left.id()) {
+                Some(Ty::Option(inner)) if optional => inner.as_pacts(),
+                Some(ty) => ty.as_pacts(),
+                None => None,
+            };
             if let Some(pids) = pact_pids {
                 let method = right
                     .as_ident()
                     .expect("method name is an ident")
                     .lexeme
                     .clone();
-                return emit_pact_dispatch(ir, &fn_ty, left, &self.arguments, &pids, &method);
+                let recv = left.lower(ir)?;
+                let dispatch = |ir: &mut Ir| {
+                    emit_pact_dispatch(ir, &fn_ty, recv, &self.arguments, &pids, &method)
+                };
+                return if optional {
+                    unless_null(ir, recv, dispatch)
+                } else {
+                    dispatch(ir)
+                };
             }
 
             let access_id = self.left.id();
@@ -550,34 +559,7 @@ impl Emit for Call {
                 // Option-wrapped return type). if non-null, do the call. otherwise lower as-is.
                 // a tainted receiver (an upstream `?` in the chain) null-checks the same way.
                 if *access_kind == AccessKind::Option || left.taints_chain() {
-                    let null_lit = ir.current().constant(Constant::Null);
-                    let is_null =
-                        ir.current()
-                            .bin(BinOp::Identity, receiver, null_lit, OperandKind::Generic);
-                    let call_block = ir.push_block("opt_call");
-                    let null_block = ir.push_block("opt_call_null");
-                    let merge = ir.push_block("opt_call_merge");
-
-                    ir.in_current(|block| {
-                        block.jump_if_false(is_null, call_block);
-                        block.jump(null_block);
-                    });
-
-                    ir.target(null_block);
-                    let null_value = ir.current().constant(Constant::Null);
-                    let null_end = ir.current_block_id();
-                    ir.current().jump(merge);
-
-                    ir.target(call_block);
-                    let call_value = do_call(ir, receiver)?;
-                    let call_end = ir.current_block_id();
-                    ir.current().jump(merge);
-
-                    return merge_branches(
-                        ir,
-                        merge,
-                        vec![(null_end, null_value), (call_end, call_value)],
-                    );
+                    return unless_null(ir, receiver, |ir| do_call(ir, receiver));
                 }
 
                 return do_call(ir, receiver);
@@ -1507,6 +1489,38 @@ fn num_kind_of(ir: &Ir, id: NodeId) -> OperandKind {
         Some(Ty::Str) => OperandKind::Str,
         _ => OperandKind::Generic,
     }
+}
+
+// null when `receiver` is, and what `then` gives when it isn't
+fn unless_null(
+    ir: &mut Ir,
+    receiver: InstId,
+    then: impl FnOnce(&mut Ir) -> Option<InstId>,
+) -> Option<InstId> {
+    let null_lit = ir.current().constant(Constant::Null);
+    let is_null = ir
+        .current()
+        .bin(BinOp::Identity, receiver, null_lit, OperandKind::Generic);
+    let some_block = ir.push_block("opt_some");
+    let null_block = ir.push_block("opt_null");
+    let merge = ir.push_block("opt_merge");
+
+    ir.in_current(|block| {
+        block.jump_if_false(is_null, some_block);
+        block.jump(null_block);
+    });
+
+    ir.target(null_block);
+    let null_value = ir.current().constant(Constant::Null);
+    let null_end = ir.current_block_id();
+    ir.current().jump(merge);
+
+    ir.target(some_block);
+    let value = then(ir)?;
+    let end = ir.current_block_id();
+    ir.current().jump(merge);
+
+    merge_branches(ir, merge, vec![(null_end, null_value), (end, value)])
 }
 
 fn merge_branches(

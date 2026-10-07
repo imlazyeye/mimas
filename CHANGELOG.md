@@ -27,6 +27,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - A value typed as a pact was accepted where a specific implementer was expected, so one struct could be read as another. It's now a type mismatch.
 - The branches of an `if` or `match`, and the values a loop breaks with or collects, can be different types that share a pact. They used to be a type mismatch, even under a pact annotation.
 - `Self` in a type mismatch reads as the type it stands for. Two different types could show as "expected Self but found Self".
+- Calling a pact method with `?.` on an optional pact value (`thing?.name()` with `thing: Named?`) iced the compiler.
 
 ## [0.3.0] - 2026-09-26
 
