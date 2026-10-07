@@ -25,8 +25,10 @@ mod std_lib {
 }
 
 mod prelude;
+mod random;
 
 pub use prelude::Output;
+pub use random::Random;
 pub use std_lib::{parse::Value, sys::ScriptArgs};
 
 use vm::api::Api;

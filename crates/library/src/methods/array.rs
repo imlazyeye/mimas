@@ -4,6 +4,8 @@ use rand::{prelude::IndexedRandom, seq::SliceRandom};
 use shared::Ty;
 use vm::{Array, Ctx, DictMap, RtErr, Str, Val, anon, api::Api};
 
+use crate::Random;
+
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_assoc(Ty::Array(Box::new(Ty::Anon(0))), new);
     api.add_assoc(Ty::Array(Box::new(Ty::Anon(0))), new_filled);
@@ -179,8 +181,8 @@ fn first(arr: &[Val<'gc>]) -> Option<anon::T<'gc>> {
 /// deck.shuffle();
 /// ```
 #[native]
-fn shuffle(arr: &mut Vec<anon::T<'gc>>) {
-    arr.shuffle(&mut rand::rng());
+fn shuffle<'gc>(ctx: Ctx<'gc>, arr: &mut Vec<anon::T<'gc>>) {
+    arr.shuffle(&mut *ctx.fixture::<Random>().rng());
 }
 
 // `other` stays as the gc handle because we already hold a borrow on `arr`. if `other`
@@ -235,8 +237,10 @@ fn flat(arr: Vec<Vec<anon::T<'gc>>>) -> Vec<anon::T<'gc>> {
 /// let drop = loot.choose() ?? "nothing";
 /// ```
 #[native]
-fn choose(arr: &[Val<'gc>]) -> Option<anon::T<'gc>> {
-    arr.choose(&mut rand::rng()).copied().map(anon::Anon)
+fn choose<'gc>(ctx: Ctx<'gc>, arr: &[Val<'gc>]) -> Option<anon::T<'gc>> {
+    arr.choose(&mut *ctx.fixture::<Random>().rng())
+        .copied()
+        .map(anon::Anon)
 }
 
 /// Returns the strings joined together with `separator` between each one. Only `[str]` has
