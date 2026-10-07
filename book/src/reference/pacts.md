@@ -30,7 +30,21 @@ fn render_all(items: [Draw]) {
 render_all([Square, Circle]);
 ```
 
-A collection literal holding several types settles on the pacts they share, which is how you build "a list of things that implement `Draw`" without generics. If the elements have no pact in common, it's an ordinary type mismatch.
+A collection literal holding several types settles on the pacts they share, which is how you build "a list of things that implement `Draw`" without generics. The branches of an `if` or a `match` settle the same way. If the types have no pact in common, it's an ordinary type mismatch.
+
+This only goes one way. A value typed as a pact could be any implementer, so it can't be used where a specific one is expected:
+
+```mimas
+# pact Draw {
+#     fn draw(self);
+# }
+# struct Square;
+# impl Draw for Square {
+#     fn draw(self) { print("a square"); }
+# }
+let shape: Draw = Square;
+let square: Square = shape; // compile error: mismatched types
+```
 
 ## Constants
 

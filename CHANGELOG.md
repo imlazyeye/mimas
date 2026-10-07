@@ -23,6 +23,9 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 - Some std methods panicked the host on bad arguments rather than raising a runtime error: `array.insert` past the end, `int.clamp` and `float.clamp` with `low` above `high`, `int::random` and `float::random` with an empty range, `array.sum` and `int.abs` overflowing, and `array::new_filled` with a length too large for an array.
 - `array::new_filled` with a negative length is now a runtime error. It used to give an empty array.
+- A value typed as a pact was accepted where a specific implementer was expected, so one struct could be read as another. It's now a type mismatch.
+- The branches of an `if` or `match`, and the values a loop breaks with or collects, can be different types that share a pact. They used to be a type mismatch, even under a pact annotation.
+- `Self` in a type mismatch reads as the type it stands for. Two different types could show as "expected Self but found Self".
 
 ## [0.3.0] - 2026-09-26
 

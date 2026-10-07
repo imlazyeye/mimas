@@ -419,7 +419,8 @@ impl Ty {
                 .unresolved()
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("{INTERNAL_ANON_MARKER}{n}")),
-            Ty::Identity(_) | Ty::Skolem(_) => "Self".into(),
+            Ty::Identity(id) => names.adt(*id).unwrap_or_else(|| "Self".into()),
+            Ty::Skolem(_) => "Self".into(),
             Ty::Adt(id) => match names.adt(*id) {
                 // module adts are spelled `<module:foo>` internally
                 Some(name) => match name

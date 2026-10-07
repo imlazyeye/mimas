@@ -2043,7 +2043,9 @@ impl Solver {
         if let Some(break_ty) = target_option
             && let Err(e) = ty.fulfill_ty(break_ty, self)
         {
-            ty = Ty::coerce_option(ty, break_ty.clone(), self).ok_or(e)?;
+            ty = Ty::coerce_option(ty.clone(), break_ty.clone(), self)
+                .or_else(|| Ty::coerce_pacts(ty, break_ty.clone(), self))
+                .ok_or(e)?;
         }
 
         *target_option = Some(ty);
