@@ -924,6 +924,7 @@ impl Solver {
                 ApiAdtKind::Enum => AdtFlags::IS_ENUM,
                 ApiAdtKind::Struct => AdtFlags::empty(),
             },
+            parent: None,
         };
         let pushed = self.push_adt(umbrella);
         debug_assert_eq!(pushed, api_adt.adt_id);
@@ -933,7 +934,7 @@ impl Solver {
                 let qualified = format!("{}::{}", api_adt.name, v.name);
                 let layout_adt = {
                     let variant = &self.adts[api_adt.adt_id].variants[&v.name];
-                    Adt::new_variant_layout(qualified.clone(), variant)
+                    Adt::new_variant_layout(qualified.clone(), variant, api_adt.adt_id)
                 };
                 let layout_pushed = self.push_adt(layout_adt);
                 debug_assert_eq!(layout_pushed, v.layout_id);
@@ -1258,6 +1259,7 @@ impl Solver {
         fn supported(pat: &Pat) -> bool {
             match pat.kind() {
                 PatKind::Ident(_) => true,
+                PatKind::Bind(_, inner) => supported(inner),
                 PatKind::Tuple(parts) => parts.iter().all(supported),
                 _ => false,
             }
@@ -1272,14 +1274,15 @@ impl Solver {
             }
             .into());
         }
-        self.solve_match_pat(pat, ty, false)
+        self.solve_match_pat(pat, ty, false).map(|_| ())
     }
 
     /// Solves the pattern of an `if let`, `while let` or `let else`. A bare name over an option or
     /// result is rejected (it would always match).
     pub(crate) fn solve_refutable_pat(&mut self, pat: &Pat, ty: Ty) -> Result<()> {
         let ty = ty.normalized(self);
-        if let (PatKind::Ident(ident), Ty::Option(_) | Ty::Result(_)) = (pat.kind(), &ty) {
+        if let (PatKind::Ident(ident), Ty::Option(_) | Ty::Result(_)) = (pat.unbound().kind(), &ty)
+        {
             Err(crate::errors::MissingNullBind {
                 src: self.src(pat.location()),
                 at: pat.location().into(),
@@ -1287,7 +1290,7 @@ impl Solver {
                 ty: ty.to_string(),
             })?
         }
-        self.solve_match_pat(pat, ty, false)
+        self.solve_match_pat(pat, ty, false).map(|_| ())
     }
 
     /// The set of names a pattern binds. Every alternative of an or-pattern must bind this same
@@ -1302,6 +1305,12 @@ impl Solver {
                     out.insert(ident.lexeme.clone());
                 }
                 PatKind::Ident(_) => {}
+                PatKind::Bind(name, inner) => {
+                    if name.lexeme != "_" {
+                        out.insert(name.lexeme.clone());
+                    }
+                    stack.push(inner);
+                }
                 PatKind::Tuple(pats) | PatKind::TupleVariant(_, pats) | PatKind::Or(pats) => {
                     stack.extend(pats);
                 }
@@ -1316,13 +1325,14 @@ impl Solver {
 
     /// Solves a match-arm pattern against the scrutinee type. Binds any names the pattern
     /// introduces into the current scope. Unifies literal/variant patterns with the scrutinee
-    /// type.
+    /// type. Returns the type the pattern refines the value to (a variant's layout for a variant
+    /// pattern, the inner type for `x?`), which is what a `name @` binding takes.
     ///
     /// `reuse` is set while solving the non-first alternatives of an or-pattern: rather than mint a
     /// fresh dec, an ident rebinds to the one the first alternative already declared (looked up in
     /// this arm's own rib), so all alternatives share a single binding and its type. That sharing
     /// is what makes the payload types of `Foo::Bar(n) | Foo::Fizz(n)` unify.
-    pub(crate) fn solve_match_pat(&mut self, pat: &Pat, ty: Ty, reuse: bool) -> Result<()> {
+    pub(crate) fn solve_match_pat(&mut self, pat: &Pat, ty: Ty, reuse: bool) -> Result<Ty> {
         let pat_src = self.src(pat.location());
         let bad = |ty: &Ty| InvalidPattern {
             src: pat_src.clone(),
@@ -1337,44 +1347,43 @@ impl Solver {
         };
 
         match pat.kind() {
-            PatKind::Ident(ident) if reuse && ident.lexeme != "_" => {
-                // the or-pattern already checked every alternative binds the same names, so the
-                // first alternative's dec is guaranteed present in this arm's rib.
-                let dec = self
-                    .ribs
-                    .resolve_current_only(ident)
-                    .expect("first or-alternative declared this binding");
-                self.node_decs.insert(pat.id(), dec);
-                unify(self, Ty::Vid(self.decs[dec].vid), ty, pat.location())
+            PatKind::Ident(ident) => self.bind(ident, pat.id(), ty, reuse),
+            PatKind::Bind(name, inner) => {
+                let refined = self.solve_match_pat(inner, ty, reuse)?;
+                self.bind(name, name.id, refined, reuse)
             }
-            PatKind::Ident(ident) => self.declare(ident, pat.id(), ty).map(|_| ()),
             PatKind::Poison(poison) => poison.escaped(),
-            PatKind::Literal(lit) => unify(
-                self,
-                match lit {
-                    parse::Literal::True | parse::Literal::False => Ty::Bool,
-                    parse::Literal::Null => Ty::Null,
-                    parse::Literal::Unit => Ty::Unit,
-                    parse::Literal::String(_) => Ty::Str,
-                    parse::Literal::Int(_) | parse::Literal::Hex(_) => Ty::Int,
-                    parse::Literal::Float(_) => Ty::Float,
-                    _ => Ty::Vid(crate::components::Vid::UNKNOWN),
-                },
-                ty,
-                pat.location(),
-            ),
+            PatKind::Literal(lit) => {
+                unify(
+                    self,
+                    match lit {
+                        parse::Literal::True | parse::Literal::False => Ty::Bool,
+                        parse::Literal::Null => Ty::Null,
+                        parse::Literal::Unit => Ty::Unit,
+                        parse::Literal::String(_) => Ty::Str,
+                        parse::Literal::Int(_) | parse::Literal::Hex(_) => Ty::Int,
+                        parse::Literal::Float(_) => Ty::Float,
+                        _ => Ty::Vid(crate::components::Vid::UNKNOWN),
+                    },
+                    ty.clone(),
+                    pat.location(),
+                )?;
+                Ok(ty)
+            }
             PatKind::Tuple(pats) => {
                 let normalized = ty.normalized(self);
-                let Ty::Tuple(tys) = normalized else {
+                let Ty::Tuple(tys) = &normalized else {
                     Err(bad(&normalized))?
                 };
                 if pats.len() != tys.len() {
-                    Err(bad(&Ty::Tuple(tys.clone())))?
+                    Err(bad(&normalized))?
                 }
-                for (p, t) in pats.iter().zip(tys) {
-                    self.solve_match_pat(p, t, reuse)?;
+                for (pat, ty) in pats.iter().zip(tys) {
+                    self.solve_match_pat(pat, ty.clone(), reuse)?;
                 }
-                Ok(())
+                // The tuple is shared and its slots can still be changed through another alias.
+                // Only the bindings extracted from those slots take their refined types.
+                Ok(normalized)
             }
             PatKind::NullBind(inner_pat) => {
                 let normalized = ty.normalized(self);
@@ -1388,7 +1397,7 @@ impl Solver {
             }
             PatKind::Or(alts) => {
                 let Some((first, rest)) = alts.split_first() else {
-                    return Ok(());
+                    return Ok(ty);
                 };
                 // the first alternative declares the canonical bindings (or, if this or-pattern is
                 // itself nested in a reuse context, rebinds the enclosing ones); the rest reuse.
@@ -1407,7 +1416,7 @@ impl Solver {
                     }
                     self.solve_match_pat(alt, ty.clone(), true)?;
                 }
-                Ok(())
+                Ok(ty)
             }
             PatKind::Variant(_) | PatKind::TupleVariant(_, _) | PatKind::Struct(_, _) => {
                 let path = match pat.kind() {
@@ -1479,7 +1488,7 @@ impl Solver {
                 let layout = variant.layout().unwrap_or(adt);
                 self.shadow_expr_ty(path.id(), Ty::Adt(layout), path.location())?;
                 match (pat.kind(), variant) {
-                    (PatKind::Variant(_), _) => Ok(()),
+                    (PatKind::Variant(_), _) => {}
                     (PatKind::TupleVariant(_, sub_pats), Variant::Tuple(tv)) => {
                         if tv.members.len() != sub_pats.len() {
                             Err(bad(&Ty::Adt(adt)))?
@@ -1487,7 +1496,6 @@ impl Solver {
                         for (sp, mty) in sub_pats.iter().zip(tv.members) {
                             self.solve_match_pat(sp, mty, reuse)?;
                         }
-                        Ok(())
                     }
                     (PatKind::Struct(_, field_pats), Variant::Struct(sv)) => {
                         for (i, (name, sub)) in field_pats.iter().enumerate() {
@@ -1508,14 +1516,36 @@ impl Solver {
                                     field_name: name.lexeme.clone(),
                                 })?;
                             self.check_vis(dec, name.location)?;
+                            self.note(name, fty.clone(), Some(dec));
                             self.solve_match_pat(sub, fty, reuse)?;
                         }
-                        Ok(())
                     }
                     _ => Err(bad(&Ty::Adt(adt)))?,
                 }
+                Ok(Ty::Adt(layout))
             }
         }
+    }
+
+    // a pattern's name is a fresh dec, or in a later or-alternative the dec the first one made
+    fn bind(&mut self, ident: &Ident, node: NodeId, ty: Ty, reuse: bool) -> Result<Ty> {
+        if !reuse || ident.lexeme == "_" {
+            return self.declare(ident, node, ty);
+        }
+        // the or-pattern already checked every alternative binds the same names, so the
+        // first alternative's dec is guaranteed present in this arm's rib.
+        let dec = self
+            .ribs
+            .resolve_current_only(ident)
+            .expect("first or-alternative declared this binding");
+        self.node_decs.insert(node, dec);
+        let mut found = Ty::Vid(self.decs[dec].vid);
+        let mut expected = ty.clone();
+        Unification::equate(&mut found, &mut expected, self)
+            .map(|sub| sub.commit(self))
+            .map_err(|e| e.into_type_mismatch(self, ident.location))?;
+        self.note(ident, Ty::Vid(self.decs[dec].vid), Some(dec));
+        Ok(ty)
     }
 }
 

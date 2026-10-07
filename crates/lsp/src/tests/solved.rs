@@ -157,3 +157,51 @@ fn each_path_resolves_its_member() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+macro_rules! definition_test {
+    ($name:ident, $source:expr, $($usage:expr => $declaration:expr),+ $(,)?) => {
+        #[test]
+        fn $name() {
+            let root = tree(stringify!($name), &[("a.mim", $source)]);
+            let path = root.join("a.mim");
+            let mut workspace = Workspace::new(HostApi::Off);
+            assert_eq!(open(&mut workspace, &path), vec![(path.clone(), 0)]);
+            let analysis = workspace.analysis(&path).unwrap();
+            $(
+                let definition = analysis.definition(&path, at(&path, $usage)).unwrap();
+                assert_eq!(definition.uri.to_file_path().unwrap(), path);
+                assert_eq!(definition.range.start, at(&path, $declaration), "{}", $usage);
+            )+
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    };
+}
+
+definition_test!(
+    pattern_field_keys_refer_to_fields,
+    "struct Pair { first: int, second: int }
+     let pair = Pair { first = 1, second = 2 };
+     let whole @ Pair { first = chosen, second } = pair else loop {};
+     whole.first + chosen;",
+    "first = chosen" => "first: int",
+    "second } =" => "second } =",
+    "chosen;" => "chosen, second",
+    "whole.first" => "whole @",
+);
+
+definition_test!(
+    pattern_or_bindings_share_the_first_declaration,
+    "enum E { A(int), B(int) }
+     match E::B(2) { E::A(n) | E::B(n) => n + 1 }",
+    "n) =>" => "n) |",
+    "n + 1" => "n) |",
+);
+
+definition_test!(
+    pattern_or_shorthand_refers_to_the_local,
+    "enum E { A { value: int }, B { value: int } }
+     let e = E::B { value = 2 };
+     match e { E::A { value } | E::B { value } => value + 1 }",
+    "value } =>" => "value } |",
+    "value + 1" => "value } |",
+);

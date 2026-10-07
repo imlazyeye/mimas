@@ -24,6 +24,7 @@ fn pick_method_overload(
     actual: &Ty,
     location: Location,
 ) -> Result<Option<Field>> {
+    let aid = solver.adts[aid].parent.unwrap_or(aid);
     let primary = solver.adts[aid].impls.get(name).cloned();
     let overloads = solver.adts[aid]
         .native_overloads
@@ -1069,7 +1070,7 @@ impl Solve for Enum {
             .filter_map(|variant| {
                 variant.layout().map(|layout| {
                     let name = solver.adts[layout].name.clone();
-                    (layout, Adt::new_variant_layout(name, variant))
+                    (layout, Adt::new_variant_layout(name, variant, adt))
                 })
             })
             .collect();
@@ -1199,9 +1200,8 @@ impl Solve for For {
             })?,
         }
 
-        if let Some(dec_id) = solver.node_decs.get(&self.binding.id()) {
-            let dec = &mut solver.decs[dec_id];
-            dec.kind = DecKind::LoopVar;
+        for dec_id in solver.ribs.current_mut().table.values() {
+            solver.decs[*dec_id].kind = DecKind::LoopVar;
         }
 
         let LoopRun {

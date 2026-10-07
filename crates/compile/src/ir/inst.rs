@@ -4,7 +4,7 @@ use parse::{
     AccessKind,
     components::{Pat, PatKind},
 };
-use shared::StrId;
+use shared::{Located, StrId};
 use solve::components::{AdtId, Ty};
 
 use crate::ir::{BodyId, Local, UnaryOp};
@@ -415,115 +415,112 @@ impl BlockWriter<'_> {
     /// guard, etc). On success, falls through with any bindings emitted. Caller continues with
     /// the arm body directly -- no separate bool to act on. Without a `fail_block` the pattern is
     /// already known to match (a `let`, a `for`, a switch arm) and only its bindings are emitted.
-    pub fn test_pattern(
-        &mut self,
-        pat: &Pat,
-        scrut_val: InstId,
-        fail_block: Option<BlockId>,
-    ) -> Option<()> {
-        match pat.kind() {
-            PatKind::Poison(poison) => poison.escaped(),
-            PatKind::Ident(_) => {
-                let dec = self.ir.node_dec(pat.id());
-                let local = self.ir.local_for(dec);
-                self.set_local(local, scrut_val);
-                Some(())
-            }
-            PatKind::Literal(lit) => {
-                if let Some(fail_block) = fail_block {
-                    let con = Constant::from_literal(self.ir, lit.clone());
-                    let op_kind = match con {
-                        Constant::Bool(_) => OperandKind::Bool,
-                        Constant::Int(_) => OperandKind::Int,
-                        Constant::Float(_) => OperandKind::Float,
-                        Constant::Str(_) => OperandKind::Str,
-                        Constant::Array(_)
-                        | Constant::Dict(_)
-                        | Constant::Instance(_, _)
-                        | Constant::Null => OperandKind::Generic,
-                    };
-                    let this = self.constant(con);
-                    let eq = self.bin(BinOp::Identity, scrut_val, this, op_kind);
-                    self.jump_if_false(eq, fail_block);
+    pub fn test_pattern(&mut self, pat: &Pat, scrut_val: InstId, fail_block: Option<BlockId>) {
+        self.ir.with_loc(pat.location(), |ir| {
+            let mut block = ir.current();
+            match pat.kind() {
+                PatKind::Poison(poison) => poison.escaped(),
+                PatKind::Ident(_) => {
+                    let dec = block.ir.node_dec(pat.id());
+                    let local = block.ir.local_for(dec);
+                    block.set_local(local, scrut_val);
                 }
-                Some(())
-            }
-            PatKind::Tuple(sub_pats) => {
-                for (i, sub) in sub_pats.iter().enumerate() {
-                    let idx = self.constant(i);
-                    let elem = self.get_index(scrut_val, idx, AccessKind::Direct, false);
-                    self.test_pattern(sub, elem, fail_block)?;
+                PatKind::Bind(name, inner) => {
+                    let dec = block.ir.node_dec(name.id);
+                    let local = block.ir.local_for(dec);
+                    block.set_local(local, scrut_val);
+                    block.test_pattern(inner, scrut_val, fail_block)
                 }
-                Some(())
-            }
-            PatKind::Variant(path) => {
-                self.test_tag(path, scrut_val, fail_block);
-                Some(())
-            }
-            PatKind::TupleVariant(path, sub_pats) => {
-                self.test_tag(path, scrut_val, fail_block);
-                for (i, sub) in sub_pats.iter().enumerate() {
-                    let elem = self.get_field(scrut_val, i as u32, AccessKind::Direct, true);
-                    self.test_pattern(sub, elem, fail_block)?;
-                }
-                Some(())
-            }
-            PatKind::Struct(path, field_pats) => {
-                let layout = self.test_tag(path, scrut_val, fail_block);
-                for (name, sub) in field_pats {
-                    let slot = self.ir.slot(layout, &name.lexeme) as u32;
-                    let elem = self.get_field(scrut_val, slot, AccessKind::Direct, true);
-                    self.test_pattern(sub, elem, fail_block)?;
-                }
-                Some(())
-            }
-            PatKind::NullBind(inner) => {
-                if let Some(fail_block) = fail_block {
-                    let cond = if matches!(
-                        self.ir.resolutions.node_tys.get(&pat.id()),
-                        Some(Ty::Result(_))
-                    ) {
-                        let raised = self.is_raised(scrut_val);
-                        self.unary(UnaryOp::Not, raised)
-                    } else {
-                        let null = self.constant(Constant::Null);
-                        self.bin(BinOp::NotEqual, scrut_val, null, OperandKind::Generic)
-                    };
-                    self.jump_if_false(cond, fail_block);
-                }
-                self.test_pattern(inner, scrut_val, fail_block)
-            }
-            PatKind::Or(alts) => {
-                let Some(fail_block) = fail_block else {
-                    // every alternative binds the same slots (the switch planner checks), and the
-                    // first one's bindings serve whichever tag matched
-                    if let Some(first) = alts.first() {
-                        self.test_pattern(first, scrut_val, None)?;
-                    }
-                    return Some(());
-                };
-                if alts.is_empty() {
-                    self.jump(fail_block);
-                    return Some(());
-                }
-                let success = self.ir.push_block("or_success");
-                for (i, alt) in alts.iter().enumerate() {
-                    let last = i + 1 == alts.len();
-                    let try_next = if last {
-                        fail_block
-                    } else {
-                        self.ir.push_block("or_try_next")
-                    };
-                    self.test_pattern(alt, scrut_val, Some(try_next))?;
-                    self.jump(success);
-                    if !last {
-                        self.ir.target(try_next);
+                PatKind::Literal(lit) => {
+                    if let Some(fail_block) = fail_block {
+                        let con = Constant::from_literal(block.ir, lit.clone());
+                        let op_kind = match con {
+                            Constant::Bool(_) => OperandKind::Bool,
+                            Constant::Int(_) => OperandKind::Int,
+                            Constant::Float(_) => OperandKind::Float,
+                            Constant::Str(_) => OperandKind::Str,
+                            Constant::Array(_)
+                            | Constant::Dict(_)
+                            | Constant::Instance(_, _)
+                            | Constant::Null => OperandKind::Generic,
+                        };
+                        let this = block.constant(con);
+                        let eq = block.bin(BinOp::Identity, scrut_val, this, op_kind);
+                        block.jump_if_false(eq, fail_block);
                     }
                 }
-                self.ir.target(success);
-                Some(())
+                PatKind::Tuple(sub_pats) => {
+                    for (i, sub) in sub_pats.iter().enumerate() {
+                        let idx = block.constant(i);
+                        let elem = block.get_index(scrut_val, idx, AccessKind::Direct, false);
+                        block.test_pattern(sub, elem, fail_block);
+                    }
+                }
+                PatKind::Variant(path) => {
+                    block.test_tag(path, scrut_val, fail_block);
+                }
+                PatKind::TupleVariant(path, sub_pats) => {
+                    block.test_tag(path, scrut_val, fail_block);
+                    for (i, sub) in sub_pats.iter().enumerate() {
+                        let elem = block.get_field(scrut_val, i as u32, AccessKind::Direct, true);
+                        block.test_pattern(sub, elem, fail_block);
+                    }
+                }
+                PatKind::Struct(path, field_pats) => {
+                    let layout = block.test_tag(path, scrut_val, fail_block);
+                    for (name, sub) in field_pats {
+                        let slot = block.ir.slot(layout, &name.lexeme) as u32;
+                        let elem = block.get_field(scrut_val, slot, AccessKind::Direct, true);
+                        block.test_pattern(sub, elem, fail_block);
+                    }
+                }
+                PatKind::NullBind(inner) => {
+                    if let Some(fail_block) = fail_block {
+                        let cond = if matches!(
+                            block.ir.resolutions.node_tys.get(&pat.id()),
+                            Some(Ty::Result(_))
+                        ) {
+                            let raised = block.is_raised(scrut_val);
+                            block.unary(UnaryOp::Not, raised)
+                        } else {
+                            let null = block.constant(Constant::Null);
+                            block.bin(BinOp::NotEqual, scrut_val, null, OperandKind::Generic)
+                        };
+                        block.jump_if_false(cond, fail_block);
+                    }
+                    block.test_pattern(inner, scrut_val, fail_block)
+                }
+                PatKind::Or(alts) => {
+                    let Some(fail_block) = fail_block else {
+                        // The switch planner verified identical binding slots for every
+                        // alternative.
+                        if let Some(first) = alts.first() {
+                            block.test_pattern(first, scrut_val, None);
+                        }
+                        return;
+                    };
+                    if alts.is_empty() {
+                        block.jump(fail_block);
+                        return;
+                    }
+                    let success = block.ir.push_block("or_success");
+                    for (i, alt) in alts.iter().enumerate() {
+                        let last = i + 1 == alts.len();
+                        let try_next = if last {
+                            fail_block
+                        } else {
+                            block.ir.push_block("or_try_next")
+                        };
+                        block.test_pattern(alt, scrut_val, Some(try_next));
+                        block.jump(success);
+                        if !last {
+                            block.ir.target(try_next);
+                        }
+                    }
+                    block.ir.target(success);
+                }
             }
-        }
+        });
     }
 
     fn test_tag(

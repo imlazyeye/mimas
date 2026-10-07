@@ -1,62 +1,71 @@
 use crate::tests::utils::parse;
 
-fn node_text_at(source: &str, offset: usize) -> Option<String> {
-    let (ast, errors) = parse(source);
-    assert!(errors.is_empty(), "{errors:?}");
-    let (_, span) = ast.node_at(offset)?;
-    Some(source[span.start..span.end].to_string())
+macro_rules! node_at_test {
+    ($name:ident, $source:expr, $($needle:expr => $expected:expr),+ $(,)?) => {
+        #[test]
+        fn $name() {
+            let source = $source;
+            let (ast, errors) = parse(source);
+            assert!(errors.is_empty(), "{errors:?}");
+            $(
+                let offset = source.find($needle).unwrap();
+                let text = ast.node_at(offset).map(|(_, span)| &source[span.start..span.end]);
+                assert_eq!(text, $expected, "node at {:?} in {source:?}", $needle);
+            )+
+        }
+    };
 }
 
-#[test]
-fn ident_inside_call() {
-    let source = "let x = 1; print(x + 1);";
-    let x = source.rfind('x').unwrap();
-    assert_eq!(node_text_at(source, x).as_deref(), Some("x"));
-}
+node_at_test!(
+    ident_inside_call,
+    "let x = 1; print(x + 1);",
+    "x +" => Some("x"),
+);
 
-#[test]
-fn let_pattern() {
-    let source = "let name = 1;";
-    assert_eq!(node_text_at(source, 4).as_deref(), Some("name"));
-}
+node_at_test!(let_pattern, "let name = 1;", "name" => Some("name"));
 
-#[test]
-fn nested_expr_is_the_innermost() {
-    let source = "let x = foo(a, bar(b));";
-    let b = source.rfind('b').unwrap();
-    assert_eq!(node_text_at(source, b).as_deref(), Some("b"));
-    let bar = source.find("bar").unwrap();
-    assert_eq!(node_text_at(source, bar).as_deref(), Some("bar"));
-}
+node_at_test!(
+    nested_expr_is_the_innermost,
+    "let x = foo(a, bar(b));",
+    "b)" => Some("b"),
+    "bar" => Some("bar"),
+);
 
-#[test]
-fn closure_parameter_and_body() {
-    let source = "let f = |a| a + 1;";
-    let param = source.find('a').unwrap();
-    assert_eq!(node_text_at(source, param).as_deref(), Some("a"));
-    let plus = source.find('+').unwrap();
-    assert_eq!(node_text_at(source, plus).as_deref(), Some("a + 1"));
-}
+node_at_test!(
+    closure_parameter_and_body,
+    "let f = |a| a + 1;",
+    "a|" => Some("a"),
+    "+" => Some("a + 1"),
+);
 
-#[test]
-fn fn_body_and_parameter() {
-    let source = "fn add(a: int, b: int) -> int { a + b }";
-    let b = source.rfind('b').unwrap();
-    assert_eq!(node_text_at(source, b).as_deref(), Some("b"));
-    let param = source.find("a:").unwrap();
-    assert_eq!(node_text_at(source, param).as_deref(), Some("a"));
-}
+node_at_test!(
+    fn_body_and_parameter,
+    "fn add(a: int, b: int) -> int { a + b }",
+    "b }" => Some("b"),
+    "a:" => Some("a"),
+);
 
-#[test]
-fn whitespace_hits_nothing() {
-    assert_eq!(node_text_at("let x = 1;", 3), None);
-}
+node_at_test!(whitespace_hits_nothing, "let x = 1;", " x" => None);
 
-#[test]
-fn item_matches_only_on_its_name() {
-    let source = "fn add(a: int) -> int { a }";
-    assert_eq!(node_text_at(source, 3).as_deref(), Some("add"));
-    assert_eq!(node_text_at(source, 0), None);
-    let source = "struct P { x: int }";
-    assert_eq!(node_text_at(source, 7).as_deref(), Some("P"));
-}
+node_at_test!(
+    function_matches_only_on_its_name,
+    "fn add(a: int) -> int { a }",
+    "add" => Some("add"),
+    "fn" => None,
+);
+
+node_at_test!(
+    struct_matches_only_on_its_name,
+    "struct P { x: int }",
+    "P" => Some("P"),
+    "struct" => None,
+);
+
+node_at_test!(
+    binding_and_struct_pattern_fields,
+    "let whole @ Pair { first = value, second } = pair;",
+    "whole" => Some("whole"),
+    "first" => Some("first"),
+    "value" => Some("value"),
+    "second" => Some("second"),
+);

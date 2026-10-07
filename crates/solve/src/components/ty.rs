@@ -44,6 +44,13 @@ impl TyExt for Ty {
             (Ty::Result(inner), ty) | (ty, Ty::Result(inner)) => {
                 return Ok(Ty::Result(Box::new(inner.join(ty, solver)?)));
             }
+            (Ty::Adt(a), Ty::Adt(b)) if a != b => {
+                let a = solver.adts[a].parent.unwrap_or(a);
+                let b = solver.adts[b].parent.unwrap_or(b);
+                if a == b {
+                    return Ok(Ty::Adt(a));
+                }
+            }
             _ => {}
         }
         match Unification::equate(&mut a, &mut b, solver) {
@@ -75,7 +82,9 @@ impl TyExt for Ty {
                     solver
                         .pact_impls
                         .iter()
-                        .filter(|(_, impl_adt)| impl_adt == aid)
+                        .filter(|(_, impl_adt)| {
+                            *impl_adt == solver.adts[*aid].parent.unwrap_or(*aid)
+                        })
                         .map(|(pid, _)| *pid)
                         .collect(),
                 ),

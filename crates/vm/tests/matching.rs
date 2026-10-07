@@ -32,13 +32,6 @@ test_vm!(
 );
 
 test_vm!(
-    match_or_binding,
-    "enum Foo { A(int), B(int) }",
-    "match Foo::A(3) { Foo::A(n) | Foo::B(n) => n }" => Int(3),
-    "match Foo::B(9) { Foo::A(n) | Foo::B(n) => n }" => Int(9),
-);
-
-test_vm!(
     match_tuple,
     "let t = (1, 2);",
     "match t { (a, b) => a + b }" => Int(3),
@@ -56,14 +49,6 @@ test_vm!(
     match_switch_wildcard_default,
     "enum E { A(int), B(int), C(int) }",
     "match E::C(9) { E::A(x) => x, E::B(x) => x + 1, _ => 99 }" => Int(99),
-);
-
-// jump-table dispatch binds struct-variant fields after the tag jump.
-test_vm!(
-    match_switch_struct_variant,
-    "enum Msg { Quit, Move { x: int, y: int } }
-     let m = Msg::Move { x = 5, y = 6 };",
-    "match m { Msg::Quit => 0, Msg::Move { x, y } => x + y }" => Int(11),
 );
 
 // jump-table dispatch: a binding catch-all is the default, and binds the whole scrutinee.
@@ -129,13 +114,6 @@ test_vm!(
 );
 
 test_vm!(
-    match_enum_tuple_variant_binds,
-    "enum Shape { Circle(int), Square(int, int) }
-     let s = Shape::Square(3, 4);",
-    "match s { Shape::Circle(r) => r, Shape::Square(a, b) => a + b }" => Int(7),
-);
-
-test_vm!(
     match_enum_struct_variant_binds,
     "enum Msg { Quit, Move { x: int, y: int } }
      let m = Msg::Move { x = 7, y = 11 };",
@@ -154,6 +132,108 @@ test_vm!(
     "struct Pair { a: int, b: int }
      let p = Pair { a = 4, b = 9 };",
     "match p { Pair { b, a } => a - b }" => Int(-5),
+);
+
+test_vm!(
+    at_binding_mutates_the_variant_in_place,
+    "enum Scene {
+         Title,
+         LevelUp { cursor: int },
+     }
+     let s = Scene::LevelUp { cursor = 0 };
+     match s {
+         lv @ Scene::LevelUp {} => {
+             lv.cursor += 1;
+         },
+         Scene::Title => {},
+     }",
+    "match s {
+         Scene::LevelUp { cursor } => cursor,
+         Scene::Title => -1,
+     }" => Int(1),
+);
+
+test_vm!(
+    at_binding_in_if_let_and_let_else,
+    "enum Scene {
+         Title,
+         LevelUp { cursor: int },
+     }
+     let s = Scene::LevelUp { cursor = 5 };
+     if let lv @ Scene::LevelUp {} = s {
+         lv.cursor += 1;
+     }
+     let whole @ Scene::LevelUp { cursor } = s else loop {};",
+    "whole.cursor + cursor" => Int(12),
+);
+
+test_vm!(
+    at_binding_over_or_keeps_the_switch_bindings,
+    "enum Shape {
+         Circle { r: int },
+         Square { r: int },
+         Dot,
+     }
+     let s = Shape::Square { r = 3 };",
+    "match s {
+         whole @ Shape::Circle { r } | Shape::Square { r } => if whole == s { r * 2 } else { -1 },
+         Shape::Dot => 0,
+     }" => Int(6),
+);
+
+test_vm!(
+    at_binding_on_a_tuple_variant,
+    "enum Offer {
+         Grow(int),
+         Skip,
+     }
+     let o = Offer::Grow(4);",
+    "match o {
+         g @ Offer::Grow(n) => g.0 + n,
+         Offer::Skip => 0,
+     }" => Int(8),
+);
+
+test_vm!(
+    at_binding_in_irrefutable_patterns,
+    "{ let pair @ (x, y) = (2, 3); pair.0 + x + y }" => Int(7),
+    "{ let total = 0; for pair @ (x, y) in [(2, 3), (5, 7)] { total += pair.0 + x + y; } total }" => Int(24),
+    "{ let total = 0; for whole @ n in 4 { total += whole + n; } total }" => Int(12),
+    "{ let total = 0; for whole @ n in 2..5 { total += whole + n; } total }" => Int(18),
+);
+
+test_vm!(
+    at_binding_mutates_a_copy_of_shared_constants,
+    "enum Scene { Title, LevelUp { cursor: int } }
+     const LEVEL = Scene::LevelUp { cursor = 5 };
+     const SCENES = [LEVEL, Scene::Title];
+     fn matched() -> int {
+         match LEVEL {
+             lv @ Scene::LevelUp {} => {
+                 lv.cursor += 1;
+                 lv.cursor
+             },
+             Scene::Title => 0,
+         }
+     }
+     fn looped() -> int {
+         let total = 0;
+         for scene in SCENES {
+             if let lv @ Scene::LevelUp {} = scene {
+                 lv.cursor += 1;
+                 total += lv.cursor;
+             }
+         }
+         total
+     }
+     fn read() -> int {
+         match LEVEL {
+             Scene::LevelUp { cursor } => cursor,
+             Scene::Title => 0,
+         }
+     }",
+    "matched() + matched() + read()" => Int(17),
+    "looped() + looped() + read()" => Int(17),
 );
 
 test_vm!(

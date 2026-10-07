@@ -183,7 +183,7 @@ impl Hoist for parse::item::Enum {
 
             let layout_adt = {
                 let variant = &ctx.solver.adts[id].variants[&name];
-                Adt::new_variant_layout(qualified.clone(), variant)
+                Adt::new_variant_layout(qualified.clone(), variant, id)
             };
             let layout = ctx.solver.push_adt(layout_adt);
 

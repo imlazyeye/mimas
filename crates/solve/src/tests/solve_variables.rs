@@ -263,6 +263,8 @@ test_fail!(
     assign_to_loop_var,
     "for i in [1, 2] { i = 0; }",
     "for c in \"abc\" { c = \"x\"; }",
+    "for whole @ i in 3 { whole = 0; }",
+    "for whole @ (a, b) in [(1, 2)] { b = 0; }",
 );
 
 // Patterns

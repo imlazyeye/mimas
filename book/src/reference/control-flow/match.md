@@ -29,14 +29,15 @@ mimas supports a wide range of patterns:
 
 ```mimas ignore
 match value {
-    0 => "zero",                 // literal
-    1 | 2 | 3 => "small",        // multiple literals (an "or" pattern)
-    n if n > 100 => "huge",      // a guard -- an extra boolean condition
-    found? => found.label,       // null-bind: matches & binds when `value` is not null
-    Point { x = 0, y } => y,     // struct destructure (note: `=`, like construction)
-    Shape::Circle(r) => area(r), // enum-variant destructure
-    (a, b) => a + b,             // tuple destructure
-    other => fallback(other),    // a bare name binds anything (the catch-all)
+    0 => "zero",                      // literal
+    1 | 2 | 3 => "small",             // multiple literals (an "or" pattern)
+    n if n > 100 => "huge",           // a guard -- an extra boolean condition
+    found? => found.label,            // null-bind: matches & binds when `value` is not null
+    Point { x = 0, y } => y,          // struct destructure (note: `=`, like construction)
+    Shape::Circle(r) => area(r),      // enum-variant destructure
+    s @ Shape::Circle(_) => area(s.0) // bind on a variant to keep mutable access (see below)
+    (a, b) => a + b,                  // tuple destructure
+    other => fallback(other),         // a bare name binds anything (the catch-all)
 }
 ```
 
@@ -45,6 +46,24 @@ A few things to keep in mind:
 - **Struct and variant patterns mirror construction.** Fields use `=` (`Point { x = 0 }`), not `:`. Write just the field name to bind it (`Point { x, y }` binds both `x` and `y`).
 - **A bare identifier matches anything** and binds the value to that name -- this is your wildcard / default arm. `_` works too when you don't need the binding.
 - **Guards** (`n if cond`) add a runtime condition to an arm.
+- **`name @ pattern` binds the whole value too**, alongside whatever the pattern binds. Over a variant pattern the binding has that _variant's_ type, so its fields are reachable through it, and it still fits anywhere the enum does.
+
+Binding the whole value is how an arm changes a variant's fields in place. Enum values are shared references, so the write through on the variable reaches its original source.
+
+```mimas
+enum Shape {
+    Circle(float),
+}
+let scene = Scene::Circle(5.0);
+match scene {
+    // Shape::Circle(r) => r = 10.0, // this would only edit the local variable `r`
+    shape @ Shape::Circle(_) => { shape.0 = 10.0; }, // this lets you mutate
+}
+```
+
+`@` applies to the whole pattern to its right: `n @ 1 | 2` binds `n` for either alternative. It works anywhere a pattern is accepted, including `let`, `if let`, `while let`, and `for`.
+
+A variant binding also keeps its enum's methods and pacts. A whole-tuple binding keeps the tuple's original element types, since another reference can still change its elements.
 
 ## Exhaustiveness
 

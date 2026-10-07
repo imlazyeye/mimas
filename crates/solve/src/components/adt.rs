@@ -21,6 +21,7 @@ pub(crate) struct Adt {
     pub impls: HashMap<String, Field>,
     pub native_overloads: HashMap<String, Vec<Field>>,
     pub flags: AdtFlags,
+    pub parent: Option<AdtId>,
 }
 impl Adt {
     pub(crate) const STRUCT_VARIANT_NAME: &'static str = "@";
@@ -37,6 +38,7 @@ impl Adt {
             impls: HashMap::new(),
             native_overloads: HashMap::new(),
             flags: AdtFlags::empty(),
+            parent: None,
         }
     }
 
@@ -47,6 +49,7 @@ impl Adt {
             impls: HashMap::new(),
             native_overloads: HashMap::new(),
             flags: AdtFlags::IS_ENUM,
+            parent: None,
         }
     }
 
@@ -66,18 +69,21 @@ impl Adt {
             impls: HashMap::new(),
             native_overloads: HashMap::new(),
             flags: AdtFlags::empty(),
+            parent: None,
         }
     }
 
-    pub(crate) fn new_variant_layout(name: String, variant: &Variant) -> Self {
-        match variant {
+    pub(crate) fn new_variant_layout(name: String, variant: &Variant, parent: AdtId) -> Self {
+        let mut adt = match variant {
             Variant::Tuple(variant) => Self::new_tuple_struct(name, variant.members.clone()),
             Variant::Struct(variant) => {
                 let mut adt = Self::new_struct(name);
                 adt.as_struct_mut().fields = variant.fields.clone();
                 adt
             }
-        }
+        };
+        adt.parent = Some(parent);
+        adt
     }
 
     /// True for a non-enum, non-module struct whose single variant is a

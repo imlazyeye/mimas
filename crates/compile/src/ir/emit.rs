@@ -35,11 +35,11 @@ impl Ir {
             StmtKind::Let(s) => {
                 let value = s.right.lower(ir)?;
                 match s.else_branch.as_ref() {
-                    None => ir.current().test_pattern(&s.left, value, None)?,
+                    None => ir.current().test_pattern(&s.left, value, None),
                     Some(else_expr) => {
                         let otherwise = ir.push_block("let_else");
                         let cont = ir.push_block("let_cont");
-                        ir.current().test_pattern(&s.left, value, Some(otherwise))?;
+                        ir.current().test_pattern(&s.left, value, Some(otherwise));
                         ir.current().jump(cont);
                         ir.target(otherwise);
                         let _ = else_expr.lower(ir);
@@ -830,19 +830,24 @@ impl Emit for For {
         ir.current().jump(exit);
 
         ir.target(header);
-        if let Some(seq) = seq {
+        // A bare name on an integer/range loop already is the index local.
+        if seq.is_some() || !matches!(self.binding.kind(), PatKind::Ident(_)) {
             let i = ir.current().get_local(idx_local);
-            let is_array = matches!(
-                ir.resolutions.node_tys.get(&self.iterator.id()),
-                Some(Ty::Array(_))
-            );
-            let elem = ir.current().get_index(seq, i, AccessKind::Direct, is_array);
-            let plain = matches!(
-                ir.resolutions.node_tys.get(&self.iterator.id()),
-                Some(Ty::Array(element) | Ty::Dict(element)) if element.is_plain()
-            );
-            let elem = owned(ir, elem, plain);
-            ir.current().test_pattern(&self.binding, elem, None)?;
+            let elem = if let Some(seq) = seq {
+                let is_array = matches!(
+                    ir.resolutions.node_tys.get(&self.iterator.id()),
+                    Some(Ty::Array(_))
+                );
+                let elem = ir.current().get_index(seq, i, AccessKind::Direct, is_array);
+                let plain = matches!(
+                    ir.resolutions.node_tys.get(&self.iterator.id()),
+                    Some(Ty::Array(element) | Ty::Dict(element)) if element.is_plain()
+                );
+                owned(ir, elem, plain)
+            } else {
+                i
+            };
+            ir.current().test_pattern(&self.binding, elem, None);
         }
 
         ir.loop_stack_mut()
@@ -955,9 +960,7 @@ impl Emit for If {
 
         let value = self.condition.lower(ir)?;
         match self.binding.as_ref() {
-            Some(binding) => ir
-                .current()
-                .test_pattern(binding, value, Some(else_block))?,
+            Some(binding) => ir.current().test_pattern(binding, value, Some(else_block)),
             None => {
                 ir.current().jump_if_false(value, else_block);
             }
@@ -1220,19 +1223,20 @@ impl Emit for Match {
                     break 'plan None;
                 }
                 // a bare ident is the catch-all default.
-                if matches!(case.pat().kind(), PatKind::Ident(_)) {
+                let pat = case.pat().unbound();
+                if matches!(pat.kind(), PatKind::Ident(_)) {
                     default = Some(*block);
                     continue;
                 }
                 // otherwise one variant pattern, or the several of an `A | B`, all binding the same
                 // (slot, dec) set so the single body bind serves whichever tag matched.
-                let alts = match case.pat().kind() {
+                let alts = match pat.kind() {
                     PatKind::Or(alts) => alts.as_slice(),
-                    _ => std::slice::from_ref(case.pat()),
+                    _ => std::slice::from_ref(pat),
                 };
                 let mut binds: Option<Vec<(u32, DecId)>> = None;
                 for alt in alts {
-                    let Some((tag, alt_binds)) = variant_arm(ir, alt) else {
+                    let Some((tag, alt_binds)) = variant_arm(ir, alt.unbound()) else {
                         break 'plan None;
                     };
                     match &binds {
@@ -1284,7 +1288,7 @@ impl Emit for Match {
             let branch = ir.in_block(*block, |b| {
                 // the switch already proved the tag
                 let fail_block = (!is_switched).then_some(next_block);
-                b.test_pattern(case.pat(), scrut_val, fail_block)?;
+                b.test_pattern(case.pat(), scrut_val, fail_block);
                 if let Some(guard) = case.guard() {
                     let guard_val = b.emit_expr(guard)?;
                     b.jump_if_false(guard_val, next_block);
@@ -1401,7 +1405,7 @@ impl Emit for While {
             let value = block.emit_expr(&self.header)?;
             match self.binding.as_ref() {
                 Some(binding) => {
-                    block.test_pattern(binding, value, Some(condition_exit))?;
+                    block.test_pattern(binding, value, Some(condition_exit));
                 }
                 None => {
                     block.jump_if_false(value, condition_exit);

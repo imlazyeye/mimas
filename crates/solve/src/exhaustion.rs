@@ -232,6 +232,14 @@ impl Ctor {
             Ty::Option(_) => Some(vec![Ctor::Null, Ctor::Some]),
             Ty::Tuple(members) => Some(vec![Ctor::Tuple(members.len())]),
             Ty::Adt(adt) => {
+                if let Some(parent) = solver.adts[adt].parent {
+                    let (name, _) = solver.adts[parent]
+                        .variants
+                        .iter()
+                        .find(|(_, variant)| variant.layout() == Some(*adt))
+                        .expect("variant layout belongs to its parent enum");
+                    return Some(vec![Ctor::Variant(parent, name.clone())]);
+                }
                 let flags = solver.adts[adt].flags;
                 if flags.contains(AdtFlags::IS_ENUM) {
                     Some(
@@ -257,6 +265,7 @@ impl Ctor {
     fn from_pat(pat: &Pat, ty: &Ty, solver: &Solver) -> Option<(Self, Vec<Pat>)> {
         match pat.kind() {
             PatKind::Ident(_) | PatKind::Or(_) => None,
+            PatKind::Bind(_, inner) => Self::from_pat(inner, ty, solver),
             PatKind::Poison(poison) => poison.escaped(),
             PatKind::NullBind(pat) => Some((Ctor::Some, vec![pat.as_ref().clone()])),
             PatKind::Literal(lit) => match lit {
@@ -301,7 +310,7 @@ impl Ctor {
             _ => return None,
         };
         let adt = match ty.clone().normalized(solver) {
-            Ty::Adt(adt) => adt,
+            Ty::Adt(adt) => solver.adts[adt].parent.unwrap_or(adt),
             _ => return None,
         };
         match path.kind() {
@@ -412,6 +421,7 @@ impl Matrix {
             let Some((first, rest)) = pats.split_first() else {
                 continue;
             };
+            let first = first.unbound();
             match first.kind() {
                 PatKind::Ident(_) => {
                     let mut new: Vec<Pat> =
@@ -447,6 +457,7 @@ impl Matrix {
             let Some((first, rest)) = pats.split_first() else {
                 continue;
             };
+            let first = first.unbound();
             match first.kind() {
                 PatKind::Ident(_) => out.push(rest.to_vec()),
                 PatKind::Or(alts) => out.extend(Matrix::from_or_alts(alts, rest).defaulted().0),
@@ -463,6 +474,7 @@ impl Matrix {
             let Some((first, rest)) = pats.split_first() else {
                 continue;
             };
+            let first = first.unbound();
             match first.kind() {
                 PatKind::Or(alts) => {
                     out.extend(Matrix::from_or_alts(alts, rest).ctors_present(ty, solver));
