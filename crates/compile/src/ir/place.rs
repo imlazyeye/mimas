@@ -83,6 +83,7 @@ impl Place for Access {
                 })
             }
             Access::DoubleColon { left: _, right: _ } => todo!(),
+            Access::Each { left: _, right: _ } => todo!(),
             Access::Square { left, key, kind: _ } => {
                 let array = left.lower(ir)?;
                 let index = key.lower(ir)?;

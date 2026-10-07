@@ -706,3 +706,146 @@ test_ty!(
      };",
     "xs[0].d()" => Int,
 );
+
+test_ty!(
+    each_assoc_fn,
+    "pact Draw {
+         fn make() -> Self;
+         fn sides(n: int) -> int;
+         fn reset();
+     }
+     struct Square;
+     impl Draw for Square {
+         fn make() -> Self {
+             Square
+         }
+         fn sides(n: int) -> int {
+             4 * n
+         }
+         fn reset() {}
+     }",
+    "Draw::*::make()" => array!(query!(Draw)),
+    "Draw::*::sides(2)" => array!(Int),
+    "Draw::*::sides(n = 2)" => array!(Int),
+    "Draw::*::reset()" => array!(Unit),
+);
+
+test_ty!(
+    each_constant,
+    r#"pact Draw {
+         const NAME: str;
+     }
+     struct Square;
+     impl Draw for Square {
+         const NAME = "square";
+     }"#,
+    "Draw::*::NAME" => array!(Str),
+);
+
+test_ty!(
+    each_without_impls,
+    "pact Draw {
+         const NAME: str;
+         fn make() -> Self;
+     }",
+    "Draw::*::make()" => array!(query!(Draw)),
+    "Draw::*::NAME" => array!(Str),
+);
+
+test_multi_file!(
+    each_through_a_module,
+    shapes => "module @;
+               pub pact Draw {
+                   fn make() -> Self;
+               }";
+    "shapes::Draw::*::make()" => array!(query!(Draw)),
+);
+
+test_fail!(
+    each_method_rejected,
+    "pact Draw {
+         fn area(self) -> int;
+     }
+     Draw::*::area();"
+);
+
+test_fail!(
+    each_self_param_rejected,
+    "pact Draw {
+         fn same(other: Self) -> bool;
+     }
+     struct Square;
+     impl Draw for Square {
+         fn same(other: Self) -> bool {
+             true
+         }
+     }
+     Draw::*::same(Square);"
+);
+
+test_fail!(
+    each_fn_is_not_a_value,
+    "pact Draw {
+         fn make() -> Self;
+     }
+     let f = Draw::*::make;"
+);
+
+test_fail!(
+    each_arguments_checked,
+    "pact Draw {
+         fn sides(n: int) -> int;
+     }
+     Draw::*::sides(true);",
+    "pact Draw {
+         fn sides(n: int) -> int;
+     }
+     Draw::*::sides();"
+);
+
+test_fail!(
+    each_unknown_member,
+    "pact Draw {}
+     Draw::*::missing();"
+);
+
+test_fail!(
+    each_on_a_struct,
+    "struct Square;
+     Square::*::make();"
+);
+
+test_fail!(
+    each_on_a_pact_value,
+    "pact Draw {
+         fn make() -> Self;
+     }
+     struct Square;
+     impl Draw for Square {
+         fn make() -> Self {
+             Square
+         }
+     }
+     let shape: Draw = Square;
+     shape::*::make();",
+    "pact Draw {
+         fn make() -> Self;
+     }
+     fn all(shape: Draw) -> [Draw] {
+         shape::*::make()
+     }"
+);
+
+test_fail!(
+    each_result_is_not_one_impl,
+    "pact Draw {
+         fn make() -> Self;
+     }
+     struct Square;
+     impl Draw for Square {
+         fn make() -> Self {
+             Square
+         }
+     }
+     let squares: [Square] = Draw::*::make();"
+);

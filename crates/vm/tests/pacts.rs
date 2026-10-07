@@ -256,3 +256,209 @@ test_vm!(
     "dbl(V { x = 3 })" => Int(6),
     "dbl(W { y = 4 })" => Int(8)
 );
+
+test_vm!(
+    each_assoc_fn,
+    "pact Shape {
+         fn sides() -> int;
+     }
+     struct Square;
+     struct Triangle;
+     impl Shape for Square {
+         fn sides() -> int {
+             4
+         }
+     }
+     impl Shape for Triangle {
+         fn sides() -> int {
+             3
+         }
+     }
+     fn total() -> int {
+         let sum = 0;
+         for sides in Shape::*::sides() {
+             sum += sides;
+         }
+         sum
+     }",
+    "4 in Shape::*::sides()" => Bool(true),
+    "3 in Shape::*::sides()" => Bool(true),
+    "total()" => Int(7),
+);
+
+test_vm!(
+    each_result_dispatches,
+    "pact Shape {
+         fn make() -> Self;
+         fn sides(self) -> int;
+     }
+     struct Square;
+     struct Triangle;
+     impl Shape for Square {
+         fn make() -> Self {
+             Square
+         }
+         fn sides(self) -> int {
+             4
+         }
+     }
+     impl Shape for Triangle {
+         fn make() -> Self {
+             Triangle
+         }
+         fn sides(self) -> int {
+             3
+         }
+     }
+     fn total() -> int {
+         let sum = 0;
+         for shape in Shape::*::make() {
+             sum += shape.sides();
+         }
+         sum
+     }",
+    "total()" => Int(7),
+);
+
+test_vm!(
+    each_shares_its_arguments,
+    "pact Shape {
+         fn mark(log: [int], n: int);
+     }
+     struct Square;
+     struct Triangle;
+     impl Shape for Square {
+         fn mark(log: [int], n: int) {
+             log[0] += n;
+         }
+     }
+     impl Shape for Triangle {
+         fn mark(log: [int], n: int) {
+             log[0] += n;
+         }
+     }
+     fn next(counter: [int]) -> int {
+         counter[0] += 1;
+         counter[0]
+     }
+     let counter = [0];
+     let log = [0];
+     let marked = Shape::*::mark(log, next(counter));",
+    "marked" => array!(Null, Null),
+    "counter" => array!(Int(1)),
+    "log" => array!(Int(2)),
+);
+
+test_vm!(
+    each_default_assoc_fn,
+    "pact Shape {
+         fn sides() -> int {
+             1
+         }
+     }
+     struct Blob;
+     struct Square;
+     impl Shape for Blob {}
+     impl Shape for Square {
+         fn sides() -> int {
+             4
+         }
+     }
+     fn total() -> int {
+         let sum = 0;
+         for sides in Shape::*::sides() {
+             sum += sides;
+         }
+         sum
+     }",
+    "total()" => Int(5),
+);
+
+test_vm!(
+    each_counts_an_enum_once,
+    "pact Shape {
+         fn sides() -> int;
+     }
+     enum Poly {
+         Five,
+         Six,
+     }
+     impl Shape for Poly {
+         fn sides() -> int {
+             5
+         }
+     }",
+    "Shape::*::sides()" => array!(Int(5)),
+);
+
+test_vm!(
+    each_constant,
+    r#"struct Point {
+         x: int,
+     }
+     pact Shape {
+         const NAME: str;
+         const ORIGIN: Point;
+     }
+     struct Square;
+     struct Triangle;
+     impl Shape for Square {
+         const NAME = "square";
+         const ORIGIN = Point { x = 4 };
+     }
+     impl Shape for Triangle {
+         const NAME = "triangle";
+         const ORIGIN = Point { x = 3 };
+     }
+     fn total() -> int {
+         let sum = 0;
+         for origin in Shape::*::ORIGIN {
+             sum += origin.x;
+         }
+         sum
+     }"#,
+    r#""square" in Shape::*::NAME"# => Bool(true),
+    r#""triangle" in Shape::*::NAME"# => Bool(true),
+    "total()" => Int(7),
+);
+
+test_vm!(
+    each_without_impls,
+    "pact Shape {
+         const NAME: str;
+         fn make() -> Self;
+     }",
+    "Shape::*::make()" => array!(),
+    "Shape::*::NAME" => array!(),
+);
+
+test_vm!(
+    each_across_files,
+    files {
+        shapes => "module @;
+                   pub pact Shape {
+                       fn sides() -> int;
+                   }
+                   struct Square;
+                   impl Shape for Square {
+                       fn sides() -> int {
+                           4
+                       }
+                   }
+                   pub fn total() -> int {
+                       let sum = 0;
+                       for sides in Shape::*::sides() {
+                           sum += sides;
+                       }
+                       sum
+                   }",
+        main => "use shapes::Shape;
+                 struct Triangle;
+                 impl Shape for Triangle {
+                     fn sides() -> int {
+                         3
+                     }
+                 }
+                 let TEST_VALUE = shapes::total();",
+    } => Int(7),
+);

@@ -226,6 +226,25 @@ impl Ir {
             .unwrap_or_else(|| panic!("no field `{field}` on adt"))
     }
 
+    // each implementer's dec for `member` of the pact at node `pact` (`Pact::*::member`). order is
+    // not guarenteed
+    pub(crate) fn each_impl(&self, pact: NodeId, member: &str) -> Vec<DecId> {
+        let pid = self.resolutions.node_tys[&pact]
+            .as_single_pact()
+            .expect("solver only lets `::*::` follow a pact");
+        self.resolutions
+            .adts
+            .iter()
+            .filter(|(_, adt)| adt.implements.contains(&pid))
+            .map(|(_, adt)| {
+                adt.methods
+                    .get(member)
+                    .unwrap_or_else(|| &adt.constants[member])
+            })
+            .copied()
+            .collect()
+    }
+
     // allocate-or-fetch this binding's slot within the current body
     pub(crate) fn local_for(&mut self, dec: DecId) -> Local {
         if let Some(&local) = self.bodies[self.current_body].dec_to_local.get(&dec) {

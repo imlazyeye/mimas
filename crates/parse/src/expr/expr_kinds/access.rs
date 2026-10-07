@@ -25,6 +25,13 @@ pub enum Access {
         /// The value being extracted from the leftside value.
         right: Ident,
     },
+    /// A member read off every implementer of a pact (`Enemy::*::make`).
+    Each {
+        /// The pact.
+        left: Expr,
+        /// The member read off each implementer.
+        right: Ident,
+    },
     /// Array access. The bool at the end represents if the `@` accessor is present, which denotes
     /// the access to be direct instead of copy-on-write.
     ///
@@ -59,6 +66,7 @@ impl std::fmt::Display for Access {
                 AccessKind::Option => f.pad(&format!("{left}?.{right}")),
             },
             Access::DoubleColon { left, right } => f.pad(&format!("{left}::{right}")),
+            Access::Each { left, right } => f.pad(&format!("{left}::*::{right}")),
             Access::Square { left, key, kind } => match kind {
                 AccessKind::Direct => f.pad(&format!("{left}[{key}]")),
                 AccessKind::Option => f.pad(&format!("{left}?[{key}]")),
