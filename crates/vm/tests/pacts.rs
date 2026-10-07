@@ -26,6 +26,24 @@ test_vm!(
 );
 
 test_vm!(
+    pact_method_dispatch_on_option,
+    r#"pact Named {
+         fn shout(self) -> str;
+     }
+     struct Dog;
+     impl Named for Dog {
+         fn shout(self) -> str {
+             "woof!"
+         }
+     }
+     fn shout(thing: Named?) -> str {
+         thing?.shout() ?? "silence"
+     }"#,
+    "shout(Dog)" => str!("woof!"),
+    "shout(null)" => str!("silence"),
+);
+
+test_vm!(
     pact_int_method_in_arithmetic,
     "pact Score { fn score(self) -> int; }
      struct P { v: int }
