@@ -1,0 +1,183 @@
+module player;
+
+use std::math::{Vec2, ivec2, vec2};
+
+use sprites::Sprite;
+
+pub const MAX_RANK = 5;
+pub const PASSIVES = [Passive::Speed, Passive::Might, Passive::Haste, Passive::Magnet];
+const MOVE_SPEED = 1.4; // pixels per 60 Hz frame before boots
+const HURT_FRAMES = 50; // slightly less than a second of invulnerability after a bite
+
+// the upgrades that make everything else better, a rank at a time
+pub enum Passive {
+    Speed,
+    Might,
+    Haste,
+    Magnet,
+}
+
+impl Passive {
+    // where this passive's rank lives in `Player::ranks`
+    pub fn slot(self) -> int {
+        match self {
+            Passive::Speed => 0,
+            Passive::Might => 1,
+            Passive::Haste => 2,
+            Passive::Magnet => 3,
+        }
+    }
+
+    pub fn name(self) -> str {
+        match self {
+            Passive::Speed => "BOOTS",
+            Passive::Might => "BLADE",
+            Passive::Haste => "CLOCK",
+            Passive::Magnet => "MAGNET",
+        }
+    }
+
+    pub fn perk(self) -> str {
+        match self {
+            Passive::Speed => "MOVE 12% FASTER",
+            Passive::Might => "WEAPONS HIT 20% HARDER",
+            Passive::Haste => "WEAPONS FIRE 15% SOONER",
+            Passive::Magnet => "GEMS COME FROM 50% FARTHER",
+        }
+    }
+
+    pub fn icon(self) -> Sprite {
+        match self {
+            Passive::Speed => Sprite::Speed,
+            Passive::Might => Sprite::Might,
+            Passive::Haste => Sprite::Haste,
+            Passive::Magnet => Sprite::Magnet,
+        }
+    }
+}
+
+// what the passives add up to, which the weapons read
+pub struct Stats {
+    pub speed: float,
+    pub might: float,
+    pub haste: float,
+    pub magnet: float,
+}
+
+impl Stats {
+    pub fn of(ranks: [int]) -> Self {
+        Self {
+            speed = 1.0 + 0.12 * ranks[0].to_float(),
+            might = 1.0 + 0.2 * ranks[1].to_float(),
+            // a wait gets multiplied by this, so more haste means a smaller number
+            haste = 1.0 / (1.0 + 0.15 * ranks[2].to_float()),
+            magnet = 1.0 + 0.5 * ranks[3].to_float(),
+        }
+    }
+}
+
+pub struct Player {
+    // never changed in place, so whatever is fired from here can hold on to it
+    pub pos: Vec2,
+    pub hp: int,
+    pub max_hp: int,
+    // frames left in which nothing can hurt it
+    pub hurt: int,
+    pub xp: int,
+    pub need: int,
+    pub level: int,
+    pub ranks: [int],
+    pub stats: Stats,
+    pub left: bool,
+    pub step: int,
+    // takes no damage at all (the stress start)
+    pub god: bool,
+}
+
+impl Player {
+    pub fn new(pos: Vec2, god: bool) -> Self {
+        let ranks = [0, 0, 0, 0];
+        Self {
+            pos,
+            hp = 100,
+            max_hp = 100,
+            hurt = 0,
+            xp = 0,
+            need = 6,
+            level = 1,
+            ranks,
+            stats = Stats::of(ranks),
+            left = false,
+            step = 0,
+            god,
+        }
+    }
+
+    pub fn update(self) {
+        let dir = vec2(axis(Button::Right, Button::Left), axis(Button::Down, Button::Up));
+        if dir.x != 0.0 || dir.y != 0.0 {
+            // normalized, so diagonals aren't faster
+            self.pos = self.pos.add(dir.normalize().scale(MOVE_SPEED * self.stats.speed));
+            self.step += 1;
+            if dir.x != 0.0 {
+                self.left = dir.x < 0.0;
+            }
+        }
+        if self.hurt > 0 {
+            self.hurt -= 1;
+        }
+    }
+
+    // says whether it landed, which it doesn't while the player is safe
+    pub fn hit(self, dmg: int) -> bool {
+        if self.hurt > 0 || self.god {
+            return false;
+        }
+        self.hp -= dmg;
+        self.hurt = HURT_FRAMES;
+        true
+    }
+
+    pub fn heal(self, n: int) {
+        self.hp = (self.hp + n).min(self.max_hp);
+    }
+
+    // says whether that was enough to level up (a god doesn't, so a stress run stays one)
+    pub fn gain(self, n: int) -> bool {
+        if self.god {
+            return false;
+        }
+        self.xp += n;
+        if self.xp < self.need {
+            return false;
+        }
+        self.xp -= self.need;
+        self.level += 1;
+        self.need = 4 + self.level * self.level;
+        true
+    }
+
+    pub fn boost(self, passive: Passive) {
+        self.ranks[passive.slot()] += 1;
+        self.stats = Stats::of(self.ranks);
+    }
+
+    pub fn draw(self) {
+        // blinks while it can't be hurt
+        if self.hurt > 0 && self.hurt % 6 < 3 {
+            return;
+        }
+        let corner = self.pos.to_ivec2().sub(ivec2(4, 4));
+        gfx::sprite(Sprite::Player.id() + (self.step ~/ 6) % 2, corner, self.left);
+    }
+}
+
+fn axis(plus: Button, minus: Button) -> float {
+    if input::held(plus) {
+        1.0
+    } else if input::held(minus) {
+        -1.0
+    } else {
+        0.0
+    }
+}

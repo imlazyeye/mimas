@@ -1,0 +1,558 @@
+module weapons;
+
+use std::math::{IVec2, PI, TAU, Vec2, ivec2, vec2};
+
+use enemies::Enemy;
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+
+// the level a weapon stops growing at
+const MAX_LEVEL = 6;
+const MIN_WAIT = 6; // at least a tenth of a second between attacks, even with high haste
+const ARC_STEPS = 6; // six line segments approximate each whip crescent
+const ARC_STEP = 0.37; // radians: three steps on either side cover roughly +/-64 degrees
+const ARC_START = -3.0 * ARC_STEP;
+const ARC_LAYERS = [1.0, 0.8];
+const BLADE_IFRAMES = 14; // one orbit contact per enemy per roughly quarter-second
+
+// a weapon looks after itself. the run calls `update` every frame and `draw` after the player,
+// and the weapon decides when to fire, whom to hit, and what that looks like. the methods with a
+// body are hooks that a weapon only writes when it has something to say. (a pact is hoisted before
+// any `use` is read, so its signatures spell out the module a type comes from.)
+pub pact Weapon {
+    const NAME: str;
+    const ICON: sprites::Sprite;
+
+    // a weapon at its first level. `Weapon::*::new()` is one of every weapon there is, which is
+    // where the level up screen finds the ones to offer
+    fn new() -> Self;
+    fn level(self) -> int;
+    fn level_up(self);
+
+    // what reaching a level adds, for the level up screen
+    fn perk(self, level: int) -> str;
+
+    fn update(self, p: player::Player, horde: horde::Horde, fx: fx::Fx);
+
+    fn draw(self, p: player::Player) {}
+
+    fn maxed(self) -> bool {
+        self.level() >= MAX_LEVEL
+    }
+}
+
+// a wait in frames, shortened by the player's haste
+fn wait(frames: int, p: Player) -> int {
+    (frames.to_float() * p.stats.haste).to_int().max(MIN_WAIT)
+}
+
+// shoots the nearest enemy, and then more of them as it levels
+struct Bolt {
+    pos: Vec2,
+    vel: Vec2,
+    life: int,
+    pierce: int,
+    // the id of the last enemy it hit, so a bolt passing through one doesn't hit it twice
+    last: int?,
+}
+
+pub struct Wand {
+    pub lv: int,
+    cool: int,
+    bolts: [Bolt],
+}
+
+impl Wand {
+    // the bolts of one shot, fanned out around the aim
+    fn volley(self, p: Player, foe: Enemy) {
+        let n = 1 + self.lv ~/ 3;
+        let aim = foe.pos.sub(p.pos).angle();
+        let pierce = if self.lv >= 5 2 else 1;
+        for i in n {
+            let a = aim + (i.to_float() - (n - 1).to_float() / 2.0) * 0.22;
+            let vel = Vec2::from_angle(a).scale(3.4);
+            self.bolts.push(Bolt { pos = p.pos, vel, life = 45, pierce, last = null });
+        }
+    }
+}
+
+impl Weapon for Wand {
+    const NAME = "WAND";
+    const ICON = Sprite::Wand;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, bolts = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn perk(self, level: int) -> str {
+        const PERKS = [
+            "SHOOTS THE NEAREST FOE",
+            "SHOOTS FASTER",
+            "FIRES TWO BOLTS",
+            "SHOOTS FASTER",
+            "BOLTS PIERCE A FOE",
+            "FIRES THREE BOLTS",
+        ];
+        PERKS[level - 1]
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.cool <= 0 {
+            // `nearest` gives back an option, since there may be nobody in range
+            if let foe? = horde.nearest(p.pos, 150.0, null) {
+                self.cool = wait(46 - self.lv * 4, p);
+                self.volley(p, foe);
+            }
+        }
+        let dmg = (6.0 + self.lv.to_float() * 2.0) * p.stats.might;
+        self.bolts = for bolt in self.bolts {
+            let from = bolt.pos;
+            bolt.pos = from.add(bolt.vel);
+            bolt.life -= 1;
+            if let foe? = horde.first_touching(bolt.pos, 3.0, bolt.last) {
+                horde.hurt(foe, dmg, from, 2.0);
+                bolt.last = foe.id;
+                bolt.pierce -= 1;
+            }
+            if bolt.life > 0 && bolt.pierce > 0 collect bolt;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for bolt in self.bolts {
+            gfx::sprite(Sprite::Bolt.id(), bolt.pos.to_ivec2().sub(ivec2(4, 4)));
+        }
+    }
+}
+
+// slashes to one side and then the other
+pub struct Whip {
+    pub lv: int,
+    cool: int,
+    side: float,
+    swing: int,
+}
+
+impl Whip {
+    fn reach(self) -> float {
+        36.0 + self.lv.to_float() * 5.0
+    }
+
+    // hits what's in the strip on one side of the player
+    fn lash(self, p: Player, horde: Horde, side: float) {
+        let reach = self.reach();
+        let half = 10.0 + self.lv.to_float();
+        let dmg = (9.0 + self.lv.to_float() * 4.0) * p.stats.might;
+        let middle = p.pos.add(vec2(side * reach / 2.0, 0.0));
+        for foe in horde.touching(middle, reach / 2.0 + half) {
+            let off = foe.pos.sub(p.pos);
+            let along = off.x * side;
+            let wide = foe.kind.REACH;
+            if along > -4.0 && along < reach + wide && off.y.abs() < half + wide {
+                horde.hurt(foe, dmg, p.pos, 3.0);
+            }
+        }
+    }
+
+    // a crescent bulging out to one side
+    fn crescent(self, p: Player, side: float, color: Color) {
+        let reach = self.reach();
+        for scale in ARC_LAYERS {
+            let r = reach * scale;
+            let last = p.pos.add(vec2(side * ARC_START.cos() * r, ARC_START.sin() * r * 0.45)).to_ivec2();
+            // Stream adjacent vertices: no seven-point array is needed just to draw six lines.
+            for i in 1..=ARC_STEPS {
+                let a = (i.to_float() - 3.0) * ARC_STEP;
+                let point = p.pos.add(vec2(side * a.cos() * r, a.sin() * r * 0.45)).to_ivec2();
+                gfx::line(last, point, color);
+                last = point;
+            }
+        }
+    }
+}
+
+impl Weapon for Whip {
+    const NAME = "WHIP";
+    const ICON = Sprite::Whip;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, side = 1.0, swing = 0 }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn perk(self, level: int) -> str {
+        const PERKS = [
+            "SLASHES LEFT AND RIGHT IN TURN",
+            "REACHES FARTHER",
+            "HITS HARDER",
+            "SLASHES BOTH SIDES AT ONCE",
+            "REACHES FARTHER",
+            "HITS HARDER",
+        ];
+        PERKS[level - 1]
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.swing > 0 {
+            self.swing -= 1;
+        }
+        if self.cool <= 0 {
+            self.cool = wait(70 - self.lv * 6, p);
+            self.swing = 8;
+            self.side = -self.side;
+            self.lash(p, horde, self.side);
+            if self.lv >= 4 {
+                self.lash(p, horde, -self.side);
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        if self.swing == 0 {
+            return;
+        }
+        let color = if self.swing > 5 {
+            Color::White
+        } else if self.swing > 2 {
+            Color::Silver
+        } else {
+            Color::Slate
+        };
+        self.crescent(p, self.side, color);
+        if self.lv >= 4 {
+            self.crescent(p, -self.side, color);
+        }
+    }
+}
+
+// blades that circle the player and cut whatever they pass through
+pub struct Orbit {
+    pub lv: int,
+    angle: float,
+}
+
+impl Orbit {
+    // Even angular spacing puts each blade on the same ring; compute only the blade being
+    // visited, rather than building a fresh list in both update() and draw().
+    fn blade(self, p: Player, i: int, n: int) -> Vec2 {
+        let radius = 26.0 + self.lv.to_float() * 2.0;
+        let a = self.angle + TAU * i.to_float() / n.to_float();
+        p.pos.add(Vec2::from_angle(a).scale(radius))
+    }
+}
+
+impl Weapon for Orbit {
+    const NAME = "ORBIT";
+    const ICON = Sprite::Orbit;
+
+    pub fn new() -> Self {
+        Self { lv = 1, angle = 0.0 }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn perk(self, level: int) -> str {
+        const PERKS = [
+            "TWO BLADES CIRCLE YOU",
+            "A THIRD BLADE",
+            "SPINS FASTER",
+            "A FOURTH BLADE",
+            "SPINS FASTER",
+            "A FIFTH BLADE",
+        ];
+        PERKS[level - 1]
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.angle += 0.05 + 0.004 * self.lv.to_float();
+        let dmg = (5.0 + self.lv.to_float() * 2.0) * p.stats.might;
+        let n = 2 + self.lv ~/ 2;
+        for i in n {
+            let blade = self.blade(p, i, n);
+            for foe in horde.touching(blade, 4.0) {
+                // a blade that is still inside an enemy shouldn't hit it every frame
+                if foe.iframes == 0 {
+                    foe.iframes = BLADE_IFRAMES;
+                    horde.hurt(foe, dmg, blade, 3.0);
+                }
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        let n = 2 + self.lv ~/ 2;
+        for i in n {
+            let blade = self.blade(p, i, n);
+            let at = blade.to_ivec2();
+            gfx::fill_circle(at, 3, Color::Sky);
+            gfx::fill_circle(at, 1, Color::White);
+        }
+    }
+}
+
+// a bomb in the air, and then the blast it leaves
+const FLIGHT = 36; // 0.6 seconds along a sine arc before impact
+const BLAST = 12;  // keep the impact ring visible for another 0.2 seconds
+
+struct Lob {
+    from: Vec2,
+    to: Vec2,
+    age: int,
+}
+
+// lobs a bomb at the nearest enemy
+pub struct Bomb {
+    pub lv: int,
+    cool: int,
+    lobs: [Lob],
+}
+
+impl Bomb {
+    fn radius(self) -> float {
+        28.0 + self.lv.to_float() * 3.0
+    }
+}
+
+impl Weapon for Bomb {
+    const NAME = "BOMB";
+    const ICON = Sprite::Bomb;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, lobs = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn perk(self, level: int) -> str {
+        const PERKS = [
+            "LOBS A BOMB AT THE NEAREST FOE",
+            "THROWS MORE OFTEN",
+            "A BIGGER BLAST",
+            "HITS HARDER",
+            "THROWS MORE OFTEN",
+            "A BIGGER BLAST",
+        ];
+        PERKS[level - 1]
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.cool <= 0 {
+            if let foe? = horde.nearest(p.pos, 130.0, null) {
+                self.cool = wait(110 - self.lv * 8, p);
+                self.lobs.push(Lob { from = p.pos, to = foe.pos, age = 0 });
+            }
+        }
+        let radius = self.radius();
+        let dmg = (14.0 + self.lv.to_float() * 5.0) * p.stats.might;
+        self.lobs = for lob in self.lobs {
+            lob.age += 1;
+            if lob.age == FLIGHT {
+                for foe in horde.touching(lob.to, radius) {
+                    horde.hurt(foe, dmg, lob.to, 6.0);
+                }
+                fx.burst(lob.to, 14, Color::Orange);
+                fx.shake(3.0);
+            }
+            if lob.age < FLIGHT + BLAST collect lob;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for lob in self.lobs {
+            if lob.age < FLIGHT {
+                // along the line to the target, and up in an arc
+                let u = lob.age.to_float() / FLIGHT.to_float();
+                let rise = vec2(0.0, (u * PI).sin() * 26.0);
+                let at = lob.from.lerp(lob.to, u).sub(rise).to_ivec2();
+                gfx::sprite(Sprite::Lob.id(), at.sub(ivec2(4, 4)));
+            } else {
+                let grown = ((lob.age - FLIGHT).to_float() / 6.0).min(1.0);
+                let r = self.radius() * grown;
+                let at = lob.to.to_ivec2();
+                gfx::circle(at, r.to_int(), Color::Yellow);
+                gfx::circle(at, (r * 0.7).to_int(), Color::Orange);
+            }
+        }
+    }
+}
+
+// a bolt of lightning that jumps from enemy to enemy
+struct Strike {
+    points: [IVec2],
+    life: int,
+}
+
+pub struct Spark {
+    pub lv: int,
+    cool: int,
+    strikes: [Strike],
+}
+
+impl Spark {
+    // hits `first` and then whichever enemy is nearest to the last one hit, `lv + 2` times
+    fn zap(self, p: Player, horde: Horde, first: Enemy) {
+        let dmg = (9.0 + self.lv.to_float() * 3.0) * p.stats.might;
+        let points = [p.pos.to_ivec2()];
+        let seen = [first.id];
+        let foe = first;
+        let jumps = 2 + self.lv;
+        for hop in jumps {
+            horde.hurt(foe, dmg, p.pos, 1.0);
+            points.push(foe.pos.to_ivec2());
+            if hop + 1 == jumps { break; } // no unused nearest-enemy query after the last hit
+            if let next? = horde.nearest(foe.pos, 60.0, seen) {
+                seen.push(next.id);
+                foe = next;
+            } else {
+                break;
+            }
+        }
+        self.strikes.push(Strike { points, life = 7 });
+    }
+}
+
+impl Weapon for Spark {
+    const NAME = "SPARK";
+    const ICON = Sprite::Spark;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, strikes = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn perk(self, level: int) -> str {
+        f"CHAINS THROUGH {level + 2} FOES"
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.cool <= 0 {
+            if let first? = horde.nearest(p.pos, 110.0, null) {
+                self.cool = wait(84 - self.lv * 8, p);
+                self.zap(p, horde, first);
+            }
+        }
+        self.strikes = for strike in self.strikes {
+            strike.life -= 1;
+            if strike.life > 0 collect strike;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for strike in self.strikes {
+            for i in strike.points.len() - 1 {
+                let a = strike.points[i];
+                let b = strike.points[i + 1];
+                // a kink in the middle that changes every frame
+                let mx = (a.x + b.x) ~/ 2 + int::random(9) - 4;
+                let my = (a.y + b.y) ~/ 2 + int::random(9) - 4;
+                let mid = ivec2(mx, my);
+                gfx::line(a, mid, Color::Cyan);
+                gfx::line(mid, b, Color::White);
+            }
+        }
+    }
+}
+
+// a ring around the player that pulses
+pub struct Aura {
+    pub lv: int,
+    cool: int,
+    pulse: int,
+}
+
+impl Aura {
+    fn radius(self) -> float {
+        24.0 + self.lv.to_float() * 5.0
+    }
+}
+
+impl Weapon for Aura {
+    const NAME = "AURA";
+    const ICON = Sprite::Aura;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, pulse = 0 }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn perk(self, level: int) -> str {
+        if level == 1 {
+            "HURTS EVERYTHING AROUND YOU"
+        } else {
+            "A WIDER RING THAT PULSES FASTER"
+        }
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.pulse > 0 {
+            self.pulse -= 1;
+        }
+        if self.cool <= 0 {
+            self.cool = wait(34 - self.lv * 2, p);
+            self.pulse = 8;
+            let dmg = (4.0 + self.lv.to_float() * 1.5) * p.stats.might;
+            for foe in horde.touching(p.pos, self.radius()) {
+                horde.hurt(foe, dmg, p.pos, 4.0);
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        let at = p.pos.to_ivec2();
+        let r = self.radius().to_int();
+        if self.pulse > 0 {
+            gfx::circle(at, r, Color::Lime);
+            gfx::circle(at, r - 2, Color::Green);
+        } else {
+            gfx::circle(at, r, Color::Green);
+        }
+    }
+}

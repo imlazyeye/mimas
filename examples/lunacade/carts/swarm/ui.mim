@@ -1,0 +1,170 @@
+module ui;
+
+use std::math::{IVec2, TAU, ivec2};
+
+use ground;
+use offers::Offer;
+use player::PASSIVES;
+use run::Run;
+use sprites::Sprite;
+
+const LOGO = [
+    ".#### #...# .###. ####. #...#",
+    "#.... #...# #...# #...# ##.##",
+    ".###. #.#.# ##### ####. #.#.#",
+    "....# #.#.# #...# #..#. #...#",
+    "####. .#.#. #...# #...# #...#",
+];
+
+// the clock as minutes and seconds
+pub fn clock(t: int) -> str {
+    let seconds = (t ~/ 60) % 60;
+    let pad = if seconds < 10 "0" else "";
+    f"{t ~/ 3600}:{pad}{seconds}"
+}
+
+// the bars and counters over the field
+pub fn hud(run: Run) {
+    let p = run.player;
+    gfx::sprite(Sprite::Heart.id(), ivec2(2, 1));
+    bar(ivec2(12, 3), ivec2(64, 5), p.hp, p.max_hp, Color::Red);
+    label(f"LV {p.level}", ivec2(80, 2), Color::White);
+    center(clock(run.t), 2, Color::White);
+    let score = f"KILLS {run.horde.kills}";
+    label(score, ivec2(254 - gfx::text_width(score), 2), Color::White);
+    for slot in run.weapons.len() {
+        let weapon = run.weapons[slot];
+        let x = 2 + slot * 20;
+        gfx::sprite(weapon.ICON.id(), ivec2(x, 11));
+        label(f"{weapon.level()}", ivec2(x + 9, 14), Color::Yellow);
+    }
+    let shown = 0;
+    for passive in PASSIVES {
+        let rank = p.ranks[passive.slot()];
+        if rank > 0 {
+            gfx::sprite(passive.icon().id(), ivec2(2 + shown * 20, 20));
+            label(f"{rank}", ivec2(11 + shown * 20, 23), Color::Cyan);
+            shown += 1;
+        }
+    }
+    bar(ivec2(0, 141), ivec2(256, 3), p.xp, p.need, Color::Cyan);
+    if let lich? = run.horde.boss {
+        if lich.hp > 0.0 {
+            center("THE LICH", 118, Color::White);
+            gfx::rect(ivec2(67, 127), ivec2(122, 7), Color::Silver);
+            let size = ivec2(120, 5);
+            bar(ivec2(68, 128), size, lich.hp.to_int(), lich.max_hp.to_int(), Color::Plum);
+        }
+    }
+}
+
+pub fn title(t: int, best: int, chord: int) {
+    ground::draw(ivec2(100000 + t ~/ 2, 100000));
+    gfx::camera(IVec2::zero());
+    // the swarm closes in on the survivor, round and round
+    for i in 15 {
+        let a = TAU * i.to_float() / 15.0 + t.to_float() * 0.012;
+        let r = 46.0 + (i % 3).to_float() * 14.0 + (t.to_float() * 0.05 + i.to_float()).sin() * 6.0;
+        let x = 124 + (a.cos() * r * 1.5).to_int();
+        let y = 100 + (a.sin() * r * 0.7).to_int();
+        let foe = Sprite::Bat.id() + (i % 5) * 2 + (t ~/ 10 + i) % 2;
+        gfx::sprite(foe, ivec2(x, y), a.cos() > 0.0);
+    }
+    gfx::sprite(Sprite::Player.id() + (t ~/ 8) % 2, ivec2(124, 96));
+    logo(ivec2(40, 20));
+    center("SURVIVE TEN MINUTES", 58, Color::White);
+    if (t ~/ 30) % 2 == 0 {
+        center("PRESS START", 112, Color::Yellow);
+    }
+    center("D-PAD MOVES    START PAUSES", 126, Color::Silver);
+    if best > 0 {
+        center(f"BEST {clock(best)}", 134, Color::Cyan);
+    }
+    // the stress start fills in as X and Y are held together
+    if chord > 0 {
+        gfx::fill_rect(ivec2(88, 106), ivec2(chord * 80 ~/ 30, 2), Color::Orange);
+    }
+}
+
+pub fn level_up(run: Run, offers: [Offer], cursor: int) {
+    let weapons = run.weapons;
+    panel(ivec2(24, 8), ivec2(208, 124));
+    center("LEVEL UP!", 14, Color::Yellow);
+    center(f"YOU ARE LEVEL {run.player.level}", 23, Color::Silver);
+    let size = ivec2(196, 24);
+    for i in offers.len() {
+        let offer = offers[i];
+        let y = 38 + i * 27;
+        let corner = ivec2(30, y - 2);
+        if i == cursor {
+            gfx::fill_rect(corner, size, Color::Blue);
+        }
+        gfx::rect(corner, size, if i == cursor Color::White else Color::Slate);
+        gfx::sprite(offer.icon(weapons).id(), ivec2(36, y + 5));
+        gfx::text(offer.title(weapons), ivec2(50, y + 1), Color::White);
+        gfx::text(offer.detail(weapons), ivec2(50, y + 11), Color::Silver);
+    }
+    center("UP DOWN CHOOSE    A TAKE", 120, Color::Slate);
+}
+
+pub fn paused(run: Run) {
+    panel(ivec2(64, 30), ivec2(128, 84));
+    center("PAUSED", 37, Color::Yellow);
+    center(f"{clock(run.t)}  LV {run.player.level}  KILLS {run.horde.kills}", 47, Color::Silver);
+    for slot in run.weapons.len() {
+        let weapon = run.weapons[slot];
+        let y = 58 + slot * 11;
+        gfx::sprite(weapon.ICON.id(), ivec2(78, y - 1));
+        gfx::text(f"{weapon.NAME} LV {weapon.level()}", ivec2(90, y + 1), Color::White);
+    }
+    center("ANY BUTTON RESUMES", 104, Color::Slate);
+}
+
+// the dead and won screens, which only differ in the words
+pub fn finished(heading: str, color: Color, run: Run, ready: bool) {
+    panel(ivec2(48, 32), ivec2(160, 76));
+    center(heading, 40, color);
+    center(f"SURVIVED {clock(run.t)}", 56, Color::White);
+    center(f"KILLS {run.horde.kills}", 66, Color::Silver);
+    center(f"LEVEL {run.player.level}", 76, Color::Silver);
+    if ready && (luna::frame() ~/ 30) % 2 == 0 {
+        center("PRESS START", 94, Color::Yellow);
+    }
+}
+
+pub fn center(s: str, y: int, color: Color) {
+    label(s, ivec2(128 - gfx::text_width(s) ~/ 2, y), color);
+}
+
+// text with a dark edge, so it reads over the field
+fn label(s: str, pos: IVec2, color: Color) {
+    gfx::text(s, pos.add(ivec2(1, 1)), Color::Black);
+    gfx::text(s, pos, color);
+}
+
+fn panel(pos: IVec2, size: IVec2) {
+    gfx::fill_rect(pos, size, Color::Navy);
+    gfx::rect(pos, size, Color::Slate);
+}
+
+fn bar(pos: IVec2, size: IVec2, have: int, most: int, color: Color) {
+    gfx::fill_rect(pos, size, Color::Charcoal);
+    let filled = (size.x * have.max(0)) ~/ most.max(1);
+    if filled > 0 {
+        gfx::fill_rect(pos, ivec2(filled.min(size.x), size.y), color);
+    }
+}
+
+fn logo(pos: IVec2) {
+    let block = ivec2(5, 5);
+    for row in LOGO.len() {
+        let line = LOGO[row];
+        for col in line.len() {
+            if line[col] == "#" {
+                let at = pos.add(ivec2(col, row).scale(6));
+                gfx::fill_rect(at.add(ivec2(2, 2)), block, Color::Red);
+                gfx::fill_rect(at, block, Color::Yellow);
+            }
+        }
+    }
+}

@@ -1,0 +1,66 @@
+module fx;
+
+use std::math::{IVec2, TAU, Vec2, ivec2};
+
+const MOST = 150; // bound visual work independently of the size of the horde
+const SHAKE_DECAY = 0.85;
+const DRAG = 0.93;
+
+struct Part {
+    pos: Vec2,
+    vel: Vec2,
+    life: int,
+    color: Color,
+}
+
+// sparks and screen shake, which change how the run looks and nothing about how it plays
+pub struct Fx {
+    parts: [Part],
+    shake: float,
+}
+
+impl Fx {
+    pub fn new() -> Self {
+        Self { parts = [], shake = 0.0 }
+    }
+
+    pub fn burst(self, pos: Vec2, n: int, color: Color) {
+        for _ in n.min(MOST - self.parts.len()) {
+            let heading = Vec2::from_angle(float::random(TAU));
+            let vel = heading.scale(0.4 + float::random(1.6));
+            self.parts.push(Part { pos, vel, life = 10 + int::random(14), color });
+        }
+    }
+
+    pub fn shake(self, amount: float) {
+        self.shake = self.shake.max(amount);
+    }
+
+    // how far to nudge the camera this frame
+    pub fn offset(self) -> IVec2 {
+        if self.shake < 0.5 {
+            return IVec2::zero();
+        }
+        let reach = self.shake.to_int() * 2 + 1;
+        ivec2(int::random(reach) - reach ~/ 2, int::random(reach) - reach ~/ 2)
+    }
+
+    pub fn update(self) {
+        self.shake *= SHAKE_DECAY;
+        let parts = self.parts;
+        let kept = 0;
+        for part in parts {
+            part.pos = part.pos.add(part.vel);
+            part.vel = part.vel.scale(DRAG);
+            part.life -= 1;
+            if part.life > 0 { parts[kept] = part; kept += 1; }
+        }
+        while parts.len() > kept { parts.pop(); }
+    }
+
+    pub fn draw(self) {
+        for part in self.parts {
+            gfx::pixel(part.pos.to_ivec2(), part.color);
+        }
+    }
+}

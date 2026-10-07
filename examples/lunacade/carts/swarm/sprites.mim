@@ -1,0 +1,68 @@
+module sprites;
+
+// where each picture is on the sheet. the player and the enemies have a second frame right after
+// their first, and the small enemies sit in a row in this order. the brute and the lich are
+// bigger than a sprite, and theirs is the sprite their art starts at
+pub enum Sprite {
+    Player,
+    Gem,
+    BigGem,
+    Heart,
+    Bolt,
+    Lob,
+    Grass,
+    Flower,
+    Rock,
+    Specks,
+    Bat,
+    Slime,
+    Skull,
+    Wisp,
+    Imp,
+    Brute,
+    Lich,
+    Wand,
+    Whip,
+    Orbit,
+    Bomb,
+    Spark,
+    Aura,
+    Speed,
+    Might,
+    Haste,
+    Magnet,
+}
+
+impl Sprite {
+    pub fn id(self) -> int {
+        match self {
+            Sprite::Player => 0,
+            Sprite::Gem => 3,
+            Sprite::BigGem => 4,
+            Sprite::Heart => 5,
+            Sprite::Bolt => 6,
+            Sprite::Lob => 7,
+            Sprite::Grass => 8,
+            Sprite::Flower => 9,
+            Sprite::Rock => 10,
+            Sprite::Specks => 11,
+            Sprite::Bat => 16,
+            Sprite::Slime => 18,
+            Sprite::Skull => 20,
+            Sprite::Wisp => 22,
+            Sprite::Imp => 24,
+            Sprite::Brute => 96,
+            Sprite::Lich => 100,
+            Sprite::Wand => 26,
+            Sprite::Whip => 27,
+            Sprite::Orbit => 28,
+            Sprite::Bomb => 29,
+            Sprite::Spark => 30,
+            Sprite::Aura => 31,
+            Sprite::Speed => 32,
+            Sprite::Might => 33,
+            Sprite::Haste => 34,
+            Sprite::Magnet => 35,
+        }
+    }
+}

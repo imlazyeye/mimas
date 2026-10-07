@@ -1,0 +1,147 @@
+module horde;
+
+use std::math::Vec2;
+
+use enemies::{Enemy, EnemyKind};
+use grid::{Grid, SIDE};
+
+// what a dead enemy leaves behind, for the run to turn into gems and sparks
+pub struct Drop {
+    pub pos: Vec2,
+    pub worth: int,
+    pub boss: bool,
+}
+
+// every enemy alive, and the grid that finds the ones near a spot
+pub struct Horde {
+    pub foes: [Enemy],
+    pub grid: Grid,
+    pub drops: [Drop],
+    pub kills: int,
+    pub issued: int,
+    pub boss: Enemy?,
+    reach: float,
+}
+
+impl Horde {
+    pub fn new() -> Self {
+        Self {
+            foes = [], grid = Grid::new(), drops = [], kills = 0, issued = 0, boss = null,
+            // Derive the broad-phase padding once; a new enemy kind can have a wider reach.
+            reach = EnemyKind::*::REACH.max() ?? 0.0,
+        }
+    }
+
+    pub fn len(self) -> int {
+        self.foes.len()
+    }
+
+    pub fn spawn(self, kind: EnemyKind, pos: Vec2, tough: float) -> Enemy {
+        let foe = Enemy::new(self.issued, kind, pos, tough);
+        self.issued += 1;
+        self.foes.push(foe);
+        foe
+    }
+
+    // moves everyone, drops the dead, and files the rest in a grid around the player
+    pub fn update(self, center: Vec2) {
+        self.grid.reset(center);
+        let foes = self.foes;
+        let kept = 0;
+        // Stable compaction preserves spawn order (and collision tie-breaking) without
+        // allocating a new crowd array each frame. Pop the stale references after the scan.
+        for foe in foes {
+            if foe.hp <= 0.0 continue;
+            foe.update(center);
+            // a straggler comes back around the other side, so the crowd never thins out
+            let off = center.sub(foe.pos);
+            if off.x.abs() > 300.0 || off.y.abs() > 300.0 {
+                foe.pos = center.add(off.scale(0.5));
+            }
+            self.grid.insert(foe);
+            foes[kept] = foe;
+            kept += 1;
+        }
+        while foes.len() > kept { foes.pop(); }
+    }
+
+    // the living enemies that overlap a circle
+    pub fn touching(self, at: Vec2, r: float) -> [Enemy] {
+        let grid = self.grid;
+        let (left, top, right, bottom) = grid.bounds(at, r + self.reach);
+        let found: [Enemy] = [];
+        for row in top..=bottom {
+            for col in left..=right {
+                for foe in grid.cells[row * SIDE + col] {
+                    let reach = r + foe.kind.REACH;
+                    if foe.hp > 0.0 && foe.pos.distance_squared(at) < reach * reach {
+                        found.push(foe);
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    // A projectile or player needs only the first hit, so stop instead of collecting every
+    // overlap. skip avoids a piercing bolt's previous target without hiding other overlaps.
+    pub fn first_touching(self, at: Vec2, r: float, skip: int?) -> Enemy? {
+        let grid = self.grid;
+        let (left, top, right, bottom) = grid.bounds(at, r + self.reach);
+        for row in top..=bottom {
+            for col in left..=right {
+                for foe in grid.cells[row * SIDE + col] {
+                    let reach = r + foe.kind.REACH;
+                    if foe.hp > 0.0 && foe.id != skip && foe.pos.distance_squared(at) < reach * reach {
+                        return foe;
+                    }
+                }
+            }
+        }
+        null
+    }
+
+    // the closest living enemy within range, if there is one (`skip` is ids to pass over)
+    pub fn nearest(self, at: Vec2, range: float, skip: [int]?) -> Enemy? {
+        let best: Enemy? = null;
+        let best_d = range * range;
+        let grid = self.grid;
+        let (left, top, right, bottom) = grid.bounds(at, range);
+        for row in top..=bottom {
+            for col in left..=right {
+                for foe in grid.cells[row * SIDE + col] {
+                    let d = foe.pos.distance_squared(at);
+                    if d < best_d && foe.hp > 0.0 && (skip == null || foe.id !in skip!) {
+                        best = foe;
+                        best_d = d;
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    // `push` shoves it away from `from`, the spot the blow came from
+    pub fn hurt(self, foe: Enemy, dmg: float, from: Vec2, push: float) {
+        if foe.hp <= 0.0 {
+            return;
+        }
+        foe.hp -= dmg;
+        foe.flash = 4;
+        let away = foe.pos.sub(from);
+        let heft = push * 8.0 / foe.kind.SIZE.to_float();
+        foe.knock = foe.knock.add(away.scale(heft / away.length().max(1.0)));
+        if foe.hp <= 0.0 {
+            self.kills += 1;
+            self.drops.push(Drop { pos = foe.pos, worth = foe.kind.XP, boss = foe.kind.boss() });
+        }
+    }
+
+    pub fn draw(self) {
+        for foe in self.foes {
+            if foe.hp > 0.0 {
+                foe.draw();
+            }
+        }
+    }
+}

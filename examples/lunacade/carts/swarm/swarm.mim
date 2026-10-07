@@ -1,0 +1,165 @@
+use offers::Offer;
+use run::{Event, Run};
+use ui;
+
+// Frame counts at 60 Hz: wait after a death/win, debounce upgrade confirmation, and hold the
+// stress-start chord for half a second. These are scene time, not the run's survival clock.
+const RESTART_DELAY = 60;
+const CHOOSE_DELAY = 20;
+const STRESS_HOLD = 30;
+
+struct Choices {
+    offers: [Offer],
+    cursor: int,
+}
+
+/// Primary controller struct to drive the game.
+struct Game {
+    /// The currently selected Scene.
+    scene: Scene,
+    /// Active data for the current run.
+    run: Run,
+    /// Ticks since the current scene has started.
+    scene_tick: int,
+    /// The longest a user has gotten through a run.
+    best: int,
+    /// Frames X and Y have been held together on the title. This is used to spawn the debug stress
+    /// test.
+    debug_signal: int,
+}
+
+impl Game {
+    /// Creates a new Game with default values for the title screen.
+    fn new() -> Self {
+        Self {
+            scene = Scene::Title,
+            run = Run::new(false),
+            scene_tick = 0,
+            debug_signal = 0,
+            best = 0,
+        }
+    }
+
+    /// Per-tick update for the game.
+    fn update(self) {
+        self.scene_tick += 1;
+        match self.scene {
+            Scene::Title => self.title(),
+            Scene::Playing => self.play(),
+            Scene::LevelUp(choices) => self.choose(choices),
+            Scene::Paused => {
+                const ANY = [Button::Start, Button::A, Button::B, Button::X, Button::Y];
+                for button in ANY {
+                    if input::pressed(button) {
+                        self.enter(Scene::Playing);
+                        break;
+                    }
+                }
+            },
+            Scene::Dead | Scene::Won => {
+                if self.scene_tick > RESTART_DELAY && input::pressed(Button::Start) {
+                    self.enter(Scene::Title);
+                }
+            },
+        }
+    }
+
+    /// Per tick draw callback for the game.
+    fn draw(self) {
+        if self.scene == Scene::Title {
+            ui::title(self.scene_tick, self.best, self.debug_signal);
+            return;
+        }
+
+        // draw the world
+        self.run.draw();
+
+        // render the ui
+        ui::hud(self.run);
+        match self.scene {
+            Scene::LevelUp(choices) => ui::level_up(self.run, choices.offers, choices.cursor),
+            Scene::Paused => ui::paused(self.run),
+            Scene::Dead => ui::finished("YOU DIED", Color::Red, self.run, self.scene_tick > RESTART_DELAY),
+            Scene::Won => ui::finished("THE LICH IS DEAD", Color::Lime, self.run, self.scene_tick > RESTART_DELAY),
+            Scene::Title | Scene::Playing => {},
+        }
+    }
+
+    /// Executes the logic for the title menu.
+    fn title(self) {
+        let both = input::held(Button::X) && input::held(Button::Y);
+        self.debug_signal = if both self.debug_signal + 1 else 0;
+        if self.debug_signal >= STRESS_HOLD {
+            self.begin(true);
+        } else if input::pressed(Button::Start) {
+            self.begin(false);
+        }
+    }
+
+    /// Executes the logic for an active run.
+    fn play(self) {
+        // the stress run can't pause, since the scripted input presses Start at random
+        if input::pressed(Button::Start) && !self.run.stress {
+            self.enter(Scene::Paused);
+            return;
+        }
+
+        // process signals from the run
+        match self.run.update() {
+            Event::Nothing => {},
+            Event::LevelUp => {
+                let offers = Offer::roll(self.run.player, self.run.weapons);
+                self.enter(Scene::LevelUp(Choices { offers, cursor = 0 }));
+            },
+            Event::Died => {
+                self.best = self.best.max(self.run.t);
+                self.enter(Scene::Dead);
+            },
+            Event::Won => {
+                self.best = self.best.max(self.run.t);
+                self.enter(Scene::Won);
+            },
+        }
+    }
+
+    fn choose(self, choices: Choices) {
+        let n = choices.offers.len();
+        if input::pressed(Button::Down) {
+            choices.cursor = (choices.cursor + 1) % n;
+        }
+        if input::pressed(Button::Up) {
+            choices.cursor = (choices.cursor + n - 1) % n;
+        }
+        // a short wait, so a button that was already down doesn't pick for the player
+        let pressed = input::pressed(Button::A) || input::pressed(Button::Start);
+        if self.scene_tick > CHOOSE_DELAY && pressed {
+            choices.offers[choices.cursor].apply(self.run.player, self.run.weapons);
+            self.enter(Scene::Playing);
+        }
+    }
+
+    fn begin(self, stress: bool) {
+        self.run = Run::new(stress);
+        self.enter(Scene::Playing);
+    }
+
+    fn enter(self, scene: Scene) {
+        self.scene = scene;
+        self.scene_tick = 0;
+        self.debug_signal = 0;
+    }
+}
+
+/// The state the game can find itself within.
+enum Scene {
+    Title,
+    Playing,
+    LevelUp(Choices), // offers and cursor exist only while choosing an upgrade
+    Paused,
+    Dead,
+    Won,
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());

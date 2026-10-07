@@ -1,0 +1,271 @@
+module @;
+
+use std::math::{IVec2, Vec2, ivec2};
+use sprites::Sprite;
+
+// what sets one kind of enemy apart from the next. every kind is its own type, and
+// `EnemyKind::*::new()` is one of each, which is where the waves find the kinds to send
+pub pact EnemyKind {
+    /// The total HP this enemy starts with.
+    const HP: float;
+    /// How fast this enemy can move.
+    const SPEED: float;
+    /// How far this enemy can reach to attack.
+    const REACH: float;
+    /// The damage this enemy can do to the player.
+    const DAMAGE: int;
+    /// How much XP this enemy drops.
+    const XP: int;
+    /// The sprite this enemy should use. Assumed to have two frames, one after another!
+    const ART: sprites::Sprite;
+    /// The art's square size in pixels: 8 uses a sprite, larger sizes blit from ART's slot.
+    const SIZE: int;
+    /// The color that should be remapped during hit flashes.
+    const HIT_COLOR_REMAP: Color;
+    /// Dictates how many votes the enemy gets to be selected at a given minute. These can increase
+    /// as they go on. For example, `[(0, 5), (10, 10)]` would result in 5 votes from the start, but
+    /// would increase to 10 votes at minute 10 and beyond.
+    const VOTES: [(int, int)];
+
+    /// Builds a new instance of this enemy kind.
+    fn new() -> Self;
+
+    /// The movement force this enemy should use, often slightly offset as time moves on to create
+    /// different movement patterns.
+    fn stride(self, age: int) -> (float, float) {
+        (0.0, self.SPEED)
+    }
+
+    /// Whether defeating this kind ends the run.
+    fn boss(self) -> bool {
+        false
+    }
+}
+
+/// A quick enemy that comes in packs.
+pub struct Bat;
+impl EnemyKind for Bat {
+    const HP = 3.0;
+    const SPEED = 1.1;
+    const REACH = 4.0;
+    const DAMAGE = 4;
+    const XP = 1;
+    const ART = Sprite::Bat;
+    const SIZE = 8;
+    const HIT_COLOR_REMAP = Color::Plum;
+    const VOTES = [(0, 2)];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn stride(self, age: int) -> (float, float) {
+        ((age.to_float() * 0.3).sin() * 0.9, Self::SPEED)
+    }
+}
+
+/// A slow guy that just approaches the player.
+pub struct Slime;
+impl EnemyKind for Slime {
+    const HP = 10.0;
+    const SPEED = 0.45;
+    const REACH = 5.0;
+    const DAMAGE = 6;
+    const XP = 2;
+    const ART = Sprite::Slime;
+    const SIZE = 8;
+    const HIT_COLOR_REMAP = Color::Green;
+    const VOTES = [(0, 2)];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+/// A tougher version of the Slime.
+pub struct Skull;
+impl EnemyKind for Skull {
+    const HP = 16.0;
+    const SPEED = 0.65;
+    const REACH = 5.0;
+    const DAMAGE = 8;
+    const XP = 3;
+    const ART = Sprite::Skull;
+    const SIZE = 8;
+    const HIT_COLOR_REMAP = Color::White;
+    const VOTES = [(1, 2)];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+// Drifts from side to side as it approaches the player.
+pub struct Wisp;
+impl EnemyKind for Wisp {
+    const HP = 12.0;
+    const SPEED = 0.8;
+    const REACH = 5.0;
+    const DAMAGE = 8;
+    const XP = 4;
+    const ART = Sprite::Wisp;
+    const SIZE = 8;
+    const HIT_COLOR_REMAP = Color::Cyan;
+    const VOTES = [(2, 2)];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn stride(self, age: int) -> (float, float) {
+        ((age.to_float() * 0.07).sin() * 0.6, Self::SPEED)
+    }
+}
+
+// Crouches for a while and then lunges at the player.
+pub struct Imp;
+impl EnemyKind for Imp {
+    const HP = 14.0;
+    const SPEED = 0.7;
+    const REACH = 5.0;
+    const DAMAGE = 10;
+    const XP = 5;
+    const ART = Sprite::Imp;
+    const SIZE = 8;
+    const HIT_COLOR_REMAP = Color::Red;
+    const VOTES = [(3, 2)];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn stride(self, age: int) -> (float, float) {
+        let lunge = age % 150 > 110;
+        (0.0, if lunge Self::SPEED * 3.5 else Self::SPEED * 0.6)
+    }
+}
+
+/// Big ol' tough guy that slowly approaches the player.
+pub struct Brute;
+impl EnemyKind for Brute {
+    const HP = 90.0;
+    const SPEED = 0.4;
+    const REACH = 9.0;
+    const DAMAGE = 16;
+    const XP = 20;
+    const ART = Sprite::Brute;
+    const SIZE = 16;
+    const HIT_COLOR_REMAP = Color::Silver;
+    const VOTES = [(5, 1)];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+/// The final boss! Tough as hell! Hurts!
+pub struct Lich;
+impl EnemyKind for Lich {
+    const HP = 2400.0;
+    const SPEED = 0.5;
+    const REACH = 14.0;
+    const DAMAGE = 24;
+    const XP = 500;
+    const ART = Sprite::Lich;
+    const SIZE = 24;
+    const HIT_COLOR_REMAP = Color::Plum;
+    const VOTES = [];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn boss(self) -> bool {
+        true
+    }
+}
+
+/// An instantiated enemy with an EnemyKind attached to it.
+pub struct Enemy {
+    /// Unique ID for this specific instance.
+    pub id: int,
+    /// The EnemyKind this enemy is based upon.
+    pub kind: EnemyKind,
+    /// The enemy's position in the world.
+    pub pos: Vec2,
+    /// How much health the enemy has left.
+    pub hp: float,
+    /// Max HP scales with the toughness modifier that grows over time. This is cached so that the
+    /// UI can render health bars.
+    pub max_hp: float,
+    /// When >0 this applies a tint to the enemy to show that it's been hit. Counts down until its
+    /// back at 0.
+    pub flash: int,
+    /// Cannot take damage while active. Used to prevent physical objects from triggering damage
+    /// every single tick.
+    pub iframes: int,
+    /// How many ticks the enemy has been alive, used for various effects, offset by a random value
+    /// between 0-60 for variation.
+    pub age: int,
+    /// A vector of momentum that has been applied to this enemy after it's been hit.
+    pub knock: Vec2,
+    /// Whether or not this enemy is flipped in the direction its facing.
+    pub flipped: bool,
+}
+
+impl Enemy {
+    // `tough` scales its health, which is how the waves get harder
+    pub fn new(id: int, kind: EnemyKind, pos: Vec2, tough: float) -> Self {
+        let hp = kind.HP * tough;
+        Self {
+            id,
+            kind,
+            pos,
+            hp,
+            max_hp = hp,
+            flash = 0,
+            iframes = 0,
+            age = int::random(60),
+            knock = Vec2::zero(),
+            flipped = false,
+        }
+    }
+
+    /// Per-tick update to approach the player.
+    pub fn update(self, target: Vec2) {
+        self.age += 1;
+        let to = target.sub(self.pos);
+        let (sway, speed) = self.kind.stride(self.age);
+        let step = to.add(to.perp().scale(sway)).scale(speed / to.length().max(1.0));
+        self.pos = self.pos.add(step).add(self.knock);
+        self.knock = self.knock.scale(0.85);
+        self.flipped = to.x < 0.0;
+        if self.flash > 0 {
+            self.flash -= 1;
+        }
+        if self.iframes > 0 {
+            self.iframes -= 1;
+        }
+    }
+
+    /// Draws the enemy to the screen.
+    pub fn draw(self) {
+        let frame = (self.age ~/ 10) % 2;
+        let at = self.pos.to_ivec2();
+        let art = self.kind.ART.id();
+        let size = self.kind.SIZE;
+        if self.flash > 0 {
+            gfx::remap(self.kind.HIT_COLOR_REMAP, Color::Yellow);
+        }
+        if size == 8 {
+            gfx::sprite(art + frame, at.sub(ivec2(4, 4)), self.flipped);
+        } else {
+            let half = size ~/ 2;
+            let src = IVec2::from_index(art, 16).scale(8).add(ivec2(frame * size, 0));
+            gfx::blit(src, ivec2(size, size), at.sub(ivec2(half, half)));
+        }
+        if self.flash > 0 {
+            gfx::reset_remap();
+        }
+    }
+}

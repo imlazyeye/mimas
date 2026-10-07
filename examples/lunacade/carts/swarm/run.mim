@@ -1,0 +1,124 @@
+module run;
+
+use std::math::{IVec2, ivec2, vec2};
+
+use fx::Fx;
+use gems::Gems;
+use ground;
+use horde::Horde;
+use player::Player;
+use waves::Waves;
+use weapons::{Weapon, Wand};
+
+// the run starts in the middle of a field with no edges
+const START = 100000.0;
+
+// what a frame of the run turned up, for the scenes to react to
+pub enum Event {
+    Nothing,
+    LevelUp,
+    Died,
+    Won,
+}
+
+// one run's worth of state, so starting over is making a new one
+pub struct Run {
+    pub t: int,
+    // the stress start, which has a crowd from the first frame and can't hurt the player
+    pub stress: bool,
+    pub player: Player,
+    pub weapons: [Weapon],
+    pub horde: Horde,
+    pub gems: Gems,
+    pub waves: Waves,
+    pub fx: Fx,
+}
+
+impl Run {
+    pub fn new(stress: bool) -> Self {
+        let run = Self {
+            t = 0,
+            stress,
+            player = Player::new(vec2(START, START), stress),
+            weapons = [Wand::new()],
+            horde = Horde::new(),
+            gems = Gems::new(),
+            waves = Waves::new(),
+            fx = Fx::new(),
+        };
+        if stress {
+            // every weapon at once, which is the most the console will ever be asked to do
+            run.weapons = Weapon::*::new();
+            for weapon in run.weapons {
+                weapon.level_up();
+                weapon.level_up();
+            }
+            run.waves.crowd(run.horde, run.player);
+            print(f"enemies {run.horde.len()}");
+        }
+        run
+    }
+
+    pub fn update(self) -> Event {
+        self.t += 1;
+        let p = self.player;
+        p.update();
+        self.horde.update(p.pos);
+        self.bites();
+        for weapon in self.weapons {
+            weapon.update(p, self.horde, self.fx);
+        }
+        self.reap();
+        self.waves.update(self.horde, p, self.t, self.stress);
+        self.fx.update();
+        if self.stress && self.t % 60 == 0 {
+            print(f"enemies {self.horde.len()}");
+        }
+        if p.hp <= 0 {
+            return Event::Died;
+        }
+        if let lich? = self.horde.boss {
+            if lich.hp <= 0.0 {
+                return Event::Won;
+            }
+        }
+        if p.gain(self.gems.update(p)) Event::LevelUp else Event::Nothing
+    }
+
+    pub fn draw(self) {
+        let p = self.player;
+        let view = p.pos.to_ivec2().sub(ivec2(128, 72));
+        ground::draw(view.add(self.fx.offset()));
+        self.gems.draw();
+        self.horde.draw();
+        p.draw();
+        for weapon in self.weapons {
+            weapon.draw(p);
+        }
+        self.fx.draw();
+        gfx::camera(IVec2::zero());
+    }
+
+    // whatever is touching the player bites
+    fn bites(self) {
+        let p = self.player;
+        if p.hurt > 0 || p.god { return; }
+        if let foe? = self.horde.first_touching(p.pos, 4.0, null) {
+            if p.hit(foe.kind.DAMAGE) {
+                self.fx.shake(4.0);
+                self.fx.burst(p.pos, 8, Color::Red);
+            }
+        }
+    }
+
+    // turns what the dead left behind into gems and sparks
+    fn reap(self) {
+        for drop in self.horde.drops {
+            self.gems.drop(drop.pos, drop.worth);
+            self.fx.burst(drop.pos, if drop.boss 40 else 5, Color::White);
+        }
+        if !self.horde.drops.is_empty() {
+            self.horde.drops = [];
+        }
+    }
+}

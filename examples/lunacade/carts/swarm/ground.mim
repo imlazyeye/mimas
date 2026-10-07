@@ -1,0 +1,41 @@
+module ground;
+
+use std::math::{IVec2, ivec2};
+
+use sprites::Sprite;
+
+const TILE_SHIFT = 4;
+const TILE = 1 << TILE_SHIFT;
+const COLS = luna::WIDTH ~/ TILE + 1;
+const ROWS = luna::HEIGHT ~/ TILE + 1;
+
+// paints the field around the camera and leaves the camera there. nothing is stored, since every
+// tile's look comes from a hash of where it is, and that's what makes the field go on forever
+pub fn draw(camera: IVec2) {
+    gfx::clear(Color::Teal);
+    gfx::camera(camera);
+    // Arithmetic shifts floor division by sixteen, including negative world coordinates.
+    let first_x = camera.x >> TILE_SHIFT;
+    let first_y = camera.y >> TILE_SHIFT;
+    // One extra row/column covers partially visible tiles as the camera scrolls.
+    for ty in first_y..first_y + ROWS {
+        for tx in first_x..first_x + COLS {
+            // Coordinate hash, not random state: revisiting a tile gives the same scenery.
+            // The prime multipliers break up nearby coordinates; thresholds below choose
+            // decoration density out of 211 possible values (26 decorated, the rest plain).
+            let h = (tx * 92837 + ty * 689287 + tx * ty * 31) % 211;
+            if h < 0 { h += 211; } // remainder can be negative; density needs 0..210
+            let x = tx * TILE + h % 9;
+            let y = ty * TILE + h % 7;
+            if h < 8 {
+                gfx::sprite(Sprite::Grass.id(), ivec2(x, y));
+            } else if h < 11 {
+                gfx::sprite(Sprite::Flower.id(), ivec2(x, y));
+            } else if h < 14 {
+                gfx::sprite(Sprite::Rock.id(), ivec2(x, y));
+            } else if h < 26 {
+                gfx::sprite(Sprite::Specks.id(), ivec2(x, y));
+            }
+        }
+    }
+}

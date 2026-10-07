@@ -1,0 +1,64 @@
+module grid;
+
+use std::math::Vec2;
+
+use enemies::Enemy;
+
+pub const CELL = 32;
+pub const SIDE = 18;
+
+// buckets the enemies around the player into square cells, so a weapon looks at the few
+// enemies near it and never at the whole crowd (the keys are cells, so it's arrays and not a
+// dict, since a dict can only be keyed by a string)
+pub struct Grid {
+    pub left: int,
+    pub top: int,
+    pub cells: [[Enemy]],
+    // Only these buckets need clearing next frame. Both lists retain their allocations.
+    used: [int],
+}
+
+impl Grid {
+    pub fn new() -> Self {
+        let blank: [Enemy] = [];
+        // new_filled deep-copies the filler: buckets are independent arrays.
+        Self { left = 0, top = 0, cells = array::new_filled(blank, SIDE * SIDE), used = [] }
+    }
+
+    // empties the cells and centers the grid on a spot
+    pub fn reset(self, center: Vec2) {
+        // Avoid rebuilding all 324 buckets per frame, or scanning the empty ones.
+        while self.used.len() > 0 {
+            let bucket = self.cells[self.used.pop()!];
+            while bucket.len() > 0 { bucket.pop(); }
+        }
+        let center = center.to_ivec2();
+        self.left = center.x - SIDE * CELL ~/ 2;
+        self.top = center.y - SIDE * CELL ~/ 2;
+    }
+
+    // enemies past the edge are left out, and nothing there can be hit anyway
+    pub fn insert(self, foe: Enemy) {
+        let x = foe.pos.x - self.left;
+        let y = foe.pos.y - self.top;
+        // Reject negative offsets before integer division, which truncates toward zero.
+        if x >= 0.0 && x < SIDE * CELL && y >= 0.0 && y < SIDE * CELL {
+            let col = x.to_int() ~/ CELL;
+            let row = y.to_int() ~/ CELL;
+            let slot = row * SIDE + col;
+            let bucket = self.cells[slot];
+            if bucket.len() == 0 { self.used.push(slot); }
+            bucket.push(foe);
+        }
+    }
+
+    // Inclusive bucket bounds for the circle's box. Queries walk the buckets directly rather
+    // than allocating a flattened list of candidates before filtering it a second time.
+    pub fn bounds(self, at: Vec2, r: float) -> (int, int, int, int) {
+        let left = ((at.x - r - self.left).to_int() ~/ CELL).clamp(0, SIDE - 1);
+        let top = ((at.y - r - self.top).to_int() ~/ CELL).clamp(0, SIDE - 1);
+        let right = ((at.x + r - self.left).to_int() ~/ CELL).clamp(0, SIDE - 1);
+        let bottom = ((at.y + r - self.top).to_int() ~/ CELL).clamp(0, SIDE - 1);
+        (left, top, right, bottom)
+    }
+}

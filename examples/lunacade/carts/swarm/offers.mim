@@ -1,0 +1,84 @@
+module offers;
+
+// Type imports must resolve before signatures; keep const imports separate for this resolver.
+use player::{Passive, Player};
+use player::{MAX_RANK, PASSIVES};
+use sprites::Sprite;
+use weapons::Weapon;
+
+// how many weapons a player can carry
+pub const MOST_WEAPONS = 4;
+const CHOICES = 3;
+const HEAL = 35;
+
+// one choice on the level up screen. each kind carries what it needs, and a match over an
+// offer has to deal with every kind, so adding one means the compiler lists what to update
+pub enum Offer {
+    // a weapon the player doesn't have yet
+    New(Weapon),
+    // the weapon in this slot of the list, one level up
+    Grow(int),
+    Boost(Passive),
+    Heal,
+}
+
+impl Offer {
+    // up to three different offers from what's left to improve, with a heal if that's not enough
+    pub fn roll(p: Player, weapons: [Weapon]) -> [Offer] {
+        let pool: [Offer] = [];
+        if weapons.len() < MOST_WEAPONS {
+            let held = for weapon in weapons collect weapon.NAME;
+            pool.extend(for weapon in Weapon::*::new() {
+                if weapon.NAME !in held collect Offer::New(weapon);
+            });
+        }
+        for slot in weapons.len() {
+            if !weapons[slot].maxed() { pool.push(Offer::Grow(slot)); }
+        }
+        for passive in PASSIVES {
+            if p.ranks[passive.slot()] < MAX_RANK { pool.push(Offer::Boost(passive)); }
+        }
+        // Remove each selected offer: sampling without replacement cannot offer it twice.
+        let picked = for _ in pool.len().min(CHOICES) collect pool.remove(int::random(pool.len()));
+        if picked.len() < CHOICES {
+            picked.push(Offer::Heal);
+        }
+        picked
+    }
+
+    pub fn title(self, weapons: [Weapon]) -> str {
+        match self {
+            Offer::New(weapon) => f"NEW: {weapon.NAME}",
+            Offer::Grow(slot) => f"{weapons[slot].NAME} LV {weapons[slot].level() + 1}",
+            Offer::Boost(passive) => passive.name(),
+            Offer::Heal => "SNACK",
+        }
+    }
+
+    pub fn detail(self, weapons: [Weapon]) -> str {
+        match self {
+            Offer::New(weapon) => weapon.perk(1),
+            Offer::Grow(slot) => weapons[slot].perk(weapons[slot].level() + 1),
+            Offer::Boost(passive) => passive.perk(),
+            Offer::Heal => f"GET {HEAL} HEALTH BACK",
+        }
+    }
+
+    pub fn icon(self, weapons: [Weapon]) -> Sprite {
+        match self {
+            Offer::New(weapon) => weapon.ICON,
+            Offer::Grow(slot) => weapons[slot].ICON,
+            Offer::Boost(passive) => passive.icon(),
+            Offer::Heal => Sprite::Heart,
+        }
+    }
+
+    pub fn apply(self, p: Player, weapons: [Weapon]) {
+        match self {
+            Offer::New(weapon) => weapons.push(weapon),
+            Offer::Grow(slot) => weapons[slot].level_up(),
+            Offer::Boost(passive) => p.boost(passive),
+            Offer::Heal => p.heal(HEAL),
+        }
+    }
+}

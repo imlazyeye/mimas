@@ -1,0 +1,73 @@
+module gems;
+
+use std::math::{Vec2, ivec2};
+
+use player::Player;
+use sprites::Sprite;
+
+// past this many, a new gem is added to the last one instead
+const MOST = 120;
+const PICKUP = 5.0; // collect before normalizing the pull vector, including zero distance
+const MAGNET = 24.0; // base attraction radius in pixels, enlarged by magnet ranks
+const PULL_SPEED = 3.0; // pixels per simulation frame once attracted
+
+struct Gem {
+    pos: Vec2,
+    worth: int,
+    // set once the player's magnet has caught it, which it keeps even if the player moves off
+    pulled: bool,
+}
+
+pub struct Gems {
+    list: [Gem],
+}
+
+impl Gems {
+    pub fn new() -> Self {
+        Self { list = [] }
+    }
+
+    pub fn drop(self, pos: Vec2, worth: int) {
+        if self.list.len() >= MOST {
+            self.list[MOST - 1].worth += worth;
+        } else {
+            self.list.push(Gem { pos, worth, pulled = false });
+        }
+    }
+
+    // pulls gems in and returns the xp of the ones the player picked up
+    pub fn update(self, p: Player) -> int {
+        let reach = MAGNET * p.stats.magnet;
+        let reach2 = reach * reach;
+        let gained = 0;
+        let list = self.list;
+        let kept = 0;
+        // Preserve drop order while reusing the bounded list's storage.
+        for gem in list {
+            let to = p.pos.sub(gem.pos);
+            let d2 = to.length_squared();
+            if d2 < PICKUP * PICKUP {
+                gained += gem.worth;
+                continue;
+            }
+            if d2 < reach2 {
+                gem.pulled = true;
+            }
+            if gem.pulled {
+                gem.pos = gem.pos.add(to.scale(PULL_SPEED / d2.sqrt()));
+            }
+            list[kept] = gem;
+            kept += 1;
+        }
+        while list.len() > kept { list.pop(); }
+        gained
+    }
+
+    pub fn draw(self) {
+        for gem in self.list {
+            let corner = gem.pos.to_ivec2().sub(ivec2(4, 4));
+            let sprite = if gem.worth > 4 Sprite::BigGem else Sprite::Gem;
+            gfx::sprite(sprite.id(), corner);
+        }
+    }
+}
