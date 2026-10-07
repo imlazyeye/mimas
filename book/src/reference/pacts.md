@@ -129,6 +129,64 @@ fn announce(thing: Greet) {
 }
 ```
 
+## Reaching every implementer
+
+Pacts offer a method of reaching all of their implementers at runtime, which enables many options for extendability. Since mimas does not have generics, there's no way to collect "types" and operate upon them. Instead, pacts can invoke their own items across all of their implementers and collect the results into an array. This is done with the "each" accessor (`::*::`):
+
+```mimas
+pact Enemy {
+    fn make() -> Self;
+}
+
+struct Goblin { hp: int }
+struct Rat { hp: int }
+
+impl Enemy for Goblin {
+    fn make() -> Self {
+        Self { hp = 5 }
+    }
+}
+
+impl Enemy for Rat {
+    fn make() -> Self {
+        Self { hp = 10 }
+    }
+}
+
+let all_enemies: [Enemy] = Enemy::*::make(); // contains a Goblin and a Rat
+```
+
+This also works for collecting the constants on implementers.
+
+```mimas
+pact Mod {
+    const NAME: str;
+}
+
+fn check_mod_present(name: str) -> bool {
+    name in Mod::*::NAME
+}
+```
+
+A `Self` return comes back as the pact, so `Enemy::*::make()` is an `[Enemy]`, and a function that returns nothing gives `[()]`. A pact with no implementers gives an empty array.
+
+```admonish warning title="Order is not specified"
+Nothing promises which implementer is called first or where its result lands in the array, and the order may change between versions of mimas. If a script needs to tell the results apart, have the function return something that says which implementer it came from.
+```
+
+Only associated functions and constants can be reached this way. A method has no receiver here:
+
+```mimas
+# pact Enemy { fn hp(self) -> int; }
+Enemy::*::hp(); // compile error: `hp` can't be called on every implementer of `Enemy`
+```
+
+```admonish note title="Arguments are evaluated once"
+The IR deconstructs the `Pact::*::foo()` pattern such that arguments are evaluated once and reused for every call.
+```
+
+The path starts from the pact's name, which can be imported or written through its module (`enemies::Enemy::*::make()`). It can't start from a value of that type, since a value's type may implement several pacts and the name is what picks one.
+
 ## Binding multiple pacts
 
 An annotation can require several pacts at once with `+`:
@@ -171,6 +229,8 @@ pact Named {
     fn name(self) -> str;
 }
 ```
+
+Reading the constant off [every implementer](#reaching-every-implementer) with `Named::*::NAME` works too, since no single value has to be picked.
 
 **Methods that take `Self` can't be called through a pact.** `Self` in a parameter means "the same type as the receiver", and a value known only by its pact doesn't say what that is -- `a.plus(b)` with both typed `Plus` could pair a `V` with a `W`. The call is rejected wherever the receiver is only known by its bound, even when the arguments happen to match:
 

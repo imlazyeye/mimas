@@ -6,6 +6,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Added
 
+- `Pact::*::member` reaches a member on every implementer of a pact and collects the results into an array. An associated function is called once per implementer, and a constant is read from each. See [Reaching every implementer](https://mim.as/reference/pacts.html#reaching-every-implementer).
 - mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). Each input runs on top of the ones before it, and a trailing expression prints with its type.
 - `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel".
 - `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write.
