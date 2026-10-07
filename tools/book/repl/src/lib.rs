@@ -8,7 +8,7 @@ use solve::Modules;
 use vm::{Session, Vm};
 use wasm_bindgen::prelude::*;
 
-/// A session over std alone, keeping what each input prints until the input is done.
+/// A session over the sandboxed std, keeping what each input prints until the input is done.
 #[wasm_bindgen]
 pub struct Repl {
     session: Session,
@@ -30,7 +30,7 @@ impl Repl {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Repl {
         let mut vm = Vm::new();
-        let library = vm.install_library(library::std);
+        let library = vm.install_library(library::sandboxed);
         let printed = Rc::new(RefCell::new(String::new()));
         let sink = Rc::clone(&printed);
         vm.fixture::<Output>().set(move |line| {

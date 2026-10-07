@@ -34,6 +34,17 @@ use vm::api::Api;
 /// Single entry point passed to `Vm::install_library`. Each `install` call registers its module's
 /// natives explicitly (into both the solver metadata and the arena callable table).
 pub fn std<'gc>(api: &mut Api<'_, 'gc>) {
+    install(api, false);
+}
+
+/// Installs everything [`std`] does except the `fs`, `process` and `sys` modules, for hosts that
+/// run scripts they didn't write. It only removes what reaches the machine, so a script can still
+/// spin or allocate until the host stops it (see `Vm::set_fuel`).
+pub fn sandboxed<'gc>(api: &mut Api<'_, 'gc>) {
+    install(api, true);
+}
+
+pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>, sandboxed: bool) {
     let adts = api.library.registry().next_id;
     let natives = api.library.natives().count();
     prelude::install(api);
@@ -43,11 +54,15 @@ pub fn std<'gc>(api: &mut Api<'_, 'gc>) {
     methods::int::install(api);
     methods::str::install(api);
     methods::bool::install(api);
-    std_lib::fs::install(api);
+    if !sandboxed {
+        std_lib::fs::install(api);
+    }
     std_lib::math::install(api);
     std_lib::parse::install(api);
-    std_lib::process::install(api);
-    std_lib::sys::install(api);
+    if !sandboxed {
+        std_lib::process::install(api);
+        std_lib::sys::install(api);
+    }
 
     let adts = adts..api.library.registry().next_id;
     let natives = natives..api.library.natives().count();
