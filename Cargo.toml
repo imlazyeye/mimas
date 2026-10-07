@@ -3,8 +3,10 @@ resolver = "2"
 members = ["crates/*", "examples/*"]
 # bevy is huge, so its crate + the examples stay out of the default workspace build. mimas pulls
 # crates/bevy in only through its optional `bevy` feature. the book's web repl is its own workspace
-# too, since it builds for wasm with its own lockfile.
-exclude = ["examples/bevy", "crates/bevy", "tools/book/repl"]
+# too, since it builds for wasm with its own lockfile. lunacade is its own workspace for the same
+# reasons (it also needs profiles), and the `examples/*` glob would mistake its manifest for a
+# member.
+exclude = ["examples/bevy", "examples/lunacade", "crates/bevy", "tools/book/repl"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

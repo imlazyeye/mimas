@@ -1,0 +1,23 @@
+use std::math::ivec2;
+
+struct Hello {
+    x: int,
+}
+
+impl Hello {
+    fn update(self) {
+        self.x = (self.x + 1) % luna::WIDTH;
+    }
+
+    fn draw(self) {
+        gfx::clear(Color::Navy);
+        gfx::sprite(0, ivec2(self.x, 68));
+        gfx::text("hello", ivec2(4, 4), Color::White);
+    }
+}
+
+print("hello from the cart");
+
+let hello = Hello { x = 0 };
+luna::update(|| hello.update());
+luna::draw(|| hello.draw());

@@ -1,0 +1,108 @@
+use std::math::{IVec2, ivec2};
+
+// one screen that draws everything the console can, for a person to look over. the test compares
+// it to expected.txt, so a change to how anything draws shows up as a change to that file
+
+// sprite 2 is drawn here instead of in sprites.txt, as a stripe from corner to corner
+for i in 8 {
+    gfx::set_sheet_pixel(ivec2(16 + i, i), Color::Cyan);
+}
+
+fn text() {
+    gfx::text(" !\"#$%&'()*+,-./0123456789:;<=>?", ivec2(2, 2), Color::White);
+    gfx::text("@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_", ivec2(2, 8), Color::White);
+    gfx::text("`abcdefghijklmnopqrstuvwxyz{|}~é", ivec2(2, 14), Color::White);
+    gfx::text("TWO\nLINES", ivec2(140, 2), Color::Lime);
+    // underlined by the width it reports
+    let w = gfx::text("WIDTH", ivec2(180, 2), Color::Yellow);
+    gfx::line(ivec2(180, 9), ivec2(180 + w - 1, 9), Color::Red);
+    gfx::text_centered("CENTERED\nON THE SCREEN", 124, Color::Cyan);
+}
+
+fn shapes() {
+    let corner = ivec2(4, 26);
+    gfx::line(corner, ivec2(34, 26), Color::Red);
+    gfx::line(corner, ivec2(34, 34), Color::Orange);
+    gfx::line(corner, ivec2(34, 56), Color::Yellow);
+    gfx::line(corner, ivec2(12, 56), Color::Lime);
+    gfx::line(corner, ivec2(4, 56), Color::Green);
+
+    gfx::rect(ivec2(44, 26), ivec2(20, 12), Color::White);
+    gfx::rect(ivec2(44, 42), ivec2(20, 1), Color::White);
+    gfx::rect(ivec2(44, 46), ivec2(1, 10), Color::White);
+    gfx::rect(ivec2(48, 46), ivec2(1, 1), Color::White);
+    gfx::fill_rect(ivec2(70, 26), ivec2(20, 12), Color::Sky);
+
+    for (r, x) in [98, 102, 108, 116, 126, 138].enumerate() {
+        gfx::circle(ivec2(x, 32), r, Color::Yellow);
+        gfx::fill_circle(ivec2(x, 48), r, Color::Orange);
+    }
+    for i in 8 {
+        gfx::pixel(ivec2(150 + i * 2, 26 + i % 2), Color::White);
+    }
+}
+
+fn sprites() {
+    gfx::sprite(0, ivec2(4, 64));
+    gfx::sprite(0, ivec2(16, 64), true);
+    gfx::sprite(0, ivec2(28, 64), false, true);
+    gfx::sprite(0, ivec2(40, 64), true, true);
+
+    gfx::remap(Color::Red, Color::Blue);
+    gfx::sprite(0, ivec2(56, 64));
+    gfx::reset_remap();
+
+    // black is skipped, then nothing is, then plum is
+    gfx::fill_rect(ivec2(68, 62), ivec2(40, 12), Color::Teal);
+    gfx::sprite(1, ivec2(70, 64));
+    gfx::transparent(null);
+    gfx::sprite(1, ivec2(82, 64));
+    gfx::transparent(Color::Plum);
+    gfx::sprite(1, ivec2(94, 64));
+    gfx::transparent(Color::Black);
+
+    gfx::blit(IVec2::zero(), ivec2(16, 8), ivec2(112, 64));
+    gfx::sprite(2, ivec2(132, 64));
+    // a remap of black doesn't fill in the holes
+    gfx::remap(Color::Black, Color::Red);
+    gfx::sprite(1, ivec2(144, 64));
+    gfx::reset_remap();
+    // half off each side of the screen
+    gfx::sprite(1, ivec2(252, 64));
+    gfx::sprite(1, ivec2(-4, 76));
+}
+
+fn state() {
+    gfx::camera(ivec2(1000, 1000));
+    gfx::fill_rect(ivec2(1016, 1084), ivec2(12, 8), Color::Orange);
+    gfx::text("CAMERA", ivec2(1032, 1085), Color::White);
+    gfx::camera(IVec2::zero());
+
+    gfx::rect(ivec2(79, 83), ivec2(32, 12), Color::Silver);
+    gfx::clip(ivec2(80, 84), ivec2(30, 10));
+    gfx::fill_rect(ivec2(70, 80), ivec2(60, 20), Color::Green);
+    gfx::circle(ivec2(95, 89), 12, Color::Yellow);
+    gfx::text("CLIPPED TEXT", ivec2(76, 86), Color::White);
+    gfx::unclip();
+
+    // a copy of a pixel from the sky rectangle
+    gfx::pixel(ivec2(120, 88), gfx::pixel_at(ivec2(70, 26)));
+    gfx::pixel(ivec2(122, 88), gfx::sheet_pixel(ivec2(16, 0)));
+
+    for i in 16 {
+        gfx::fill_rect(ivec2(4 + i * 10, 104), ivec2(8, 8), Color::from_int(i));
+    }
+}
+
+luna::draw(|| {
+    // the clear covers the whole screen whatever the camera and clip are
+    gfx::camera(ivec2(40, 40));
+    gfx::clip(ivec2(10, 10), ivec2(4, 4));
+    gfx::clear(Color::Navy);
+    gfx::camera(IVec2::zero());
+    gfx::unclip();
+    text();
+    shapes();
+    sprites();
+    state();
+});

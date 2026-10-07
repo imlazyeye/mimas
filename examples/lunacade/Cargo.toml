@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["core"]
+
+# the mimas crates are path dependencies outside this workspace, so `package."*"` optimizes them
+# in tests and dev runs too
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# since the console is for the web, being small is a priority
+[profile.release]
+opt-level = "z"
+strip = true
+codegen-units = 1
+lto = "fat"
+
+# but the vm should still be fast
+[profile.release.package.mimas-vm]
+opt-level = 3
