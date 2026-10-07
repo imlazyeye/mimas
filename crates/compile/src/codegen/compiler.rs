@@ -1,11 +1,10 @@
 use shared::IdVec;
 
 use colored::Colorize;
-use parse::Literal;
 use shared::{Location, Ty};
 use solve::{
     ResolvedDeclKind, ResolvedModule,
-    components::{DecId, Vis},
+    components::{ConstValue, DecId, Vis},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -96,12 +95,11 @@ impl Compiler {
                             .unwrap_or_else(|| unreachable!("item `{name}` is not a callable fn"));
                         out.functions.insert(name, f);
                     }
-                    // dicts and structs have no constant form, see `Constant::emit_const_dec`
-                    ResolvedDeclKind::Constant(lit)
-                        if !matches!(lit, Literal::Dictionary(_) | Literal::Struct(_)) =>
-                    {
+                    ResolvedDeclKind::Constant(ConstValue::Literal(lit)) => {
                         out.constants.insert(name, Constant::from_literal(ir, lit));
                     }
+                    // has no folded value to export (see `ConstValue::Expr`)
+                    ResolvedDeclKind::Constant(ConstValue::Expr(_)) => {}
                     ResolvedDeclKind::Adt(adt) => {
                         let resolved = &ir.resolutions.adts[adt];
                         let fields = resolved.fields.clone();

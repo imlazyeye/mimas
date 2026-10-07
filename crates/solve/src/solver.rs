@@ -224,6 +224,7 @@ impl Solver {
         run_phase(self, Self::hoist_pacts, &mut saved_ribs)?;
         run_phase(self, Self::hoist_callables, &mut saved_ribs)?;
         run_phase(self, Self::hoist_constants, &mut saved_ribs)?;
+        run_phase(self, Self::solve_types, &mut saved_ribs)?;
 
         // fixpoint: solve_consts. each round may resolve more consts (e.g. a const that references
         // another module's const reduces only once that other const is bound). re-run while the
@@ -239,7 +240,6 @@ impl Solver {
             prev = curr;
         }
 
-        run_phase(self, Self::solve_types, &mut saved_ribs)?;
         run_phase(self, Self::solve_bodies, &mut saved_ribs)?;
 
         // body solving is the last chance for an impl-associated or block-scoped const to gain
@@ -410,8 +410,8 @@ impl Solver {
         })
     }
 
-    /// Number of `Constant` decls whose literal value has been reduced. Used by the solve-consts
-    /// fixpoint loop to detect "no progress this round -> stop."
+    /// Number of `Constant` decls whose value is known. Used by the solve-consts fixpoint loop
+    /// to detect "no progress this round -> stop."
     fn resolved_constants(&self) -> usize {
         self.decs
             .iter()
@@ -419,9 +419,9 @@ impl Solver {
             .count()
     }
 
-    /// Solve a single `const` item's rhs and, if reducible, populate `DeclKind::Constant`'s
-    /// payload with the literal. No-op for non-const items. Shared by the top-level fixpoint,
-    /// impl associated consts, and block-scoped consts during body visits.
+    /// Solve a single `const` item's rhs and, once every constant it names has a value, populate
+    /// `DeclKind::Constant`'s payload with its own. No-op for non-const items. Shared by the
+    /// top-level fixpoint, impl associated consts, and block-scoped consts during body visits.
     pub(crate) fn solve_const(&mut self, con: &Const, id: NodeId) -> Result<Ty> {
         let Const {
             left,
@@ -447,20 +447,16 @@ impl Solver {
             })?;
         }
 
-        if !self.is_const_expr(right) {
-            Err(NonConstantValue {
-                src: self.src(right.location()),
-                at: right.location().into(),
-                value: crate::errors::elide(right.to_string()),
-            })?;
-        }
-
-        if let (Some(lit), Some(dec)) = (
-            self.reduce_const_expr(right)?,
-            self.node_decs.get(&id).copied(),
-        ) && let DecKind::Constant(slot) = &mut self.decs[dec].kind
+        let value = match self.reduce_const_expr(right)? {
+            Some(lit) => Some(ConstValue::Literal(lit)),
+            None => self
+                .const_ready(right)?
+                .then(|| ConstValue::Expr(right.clone())),
+        };
+        if let (Some(value), Some(dec)) = (value, self.node_decs.get(&id).copied())
+            && let DecKind::Constant(slot) = &mut self.decs[dec].kind
         {
-            *slot = Some(lit);
+            *slot = Some(value);
         }
 
         Ok(ty)
@@ -1095,7 +1091,7 @@ impl Solver {
                     let dec_id = self.dec_id(
                         &ident,
                         c.ty.clone(),
-                        DecKind::Constant(Some(lit)),
+                        DecKind::Constant(Some(ConstValue::Literal(lit))),
                         Vis::Public,
                     );
                     self.native_constants.insert(dec_id, id);
@@ -1824,8 +1820,8 @@ impl Solver {
         let _ = self.register_sub(vid, ty);
     }
 
-    /// Const-folds an expr using the solver's dec/lit tables to resolve Ident leaves. Returns
-    /// the literal iff every leaf either reduces syntactically or is a const-bound ident whose
+    /// Const-folds an expr using the solver's dec/lit tables to resolve name leaves. Returns
+    /// the literal iff every leaf either reduces syntactically or is a const-bound name whose
     /// value is already known. Errors (e.g. divide-by-zero) propagate up as diagnostics --
     /// reduce returns raw location-tagged errors and we materialize them with source here.
     pub(crate) fn reduce_const_expr(&self, expr: &Expr) -> Result<Option<Literal>> {
@@ -1837,46 +1833,71 @@ impl Solver {
         .map_err(|e| e.into_diag(self))
     }
 
-    pub(crate) fn is_const_expr(&self, expr: &Expr) -> bool {
-        match expr.kind() {
-            ExprKind::Ident(_) => self
-                .node_decs
-                .get(&expr.id())
-                .is_some_and(|&dec| self.decs[dec].kind.is_constant()),
-            ExprKind::Literal(parse::Literal::Array(elems) | parse::Literal::Tuple(elems)) => {
-                elems.iter().all(|e| self.is_const_element(e))
-            }
-            ExprKind::Literal(_) => true,
-            ExprKind::Grouping(g) => self.is_const_expr(&g.inner),
-            ExprKind::Unary(u) => self.is_const_expr(&u.right),
-            ExprKind::Evaluation(e) => self.is_const_expr(&e.left) && self.is_const_expr(&e.right),
-            ExprKind::Equality(e) => self.is_const_expr(&e.left) && self.is_const_expr(&e.right),
-            ExprKind::Logical(l) => self.is_const_expr(&l.left) && self.is_const_expr(&l.right),
-            _ => false,
-        }
-    }
-
-    // const array/tuple elements must encode as a bytecode `Constant` (scalars or nested
-    // arrays/tuples of scalars). dict/struct consts only exist as use-site allocations
-    // (emit_const_dec), so they can't appear inside one -- directly or through a const ref.
-    fn is_const_element(&self, expr: &Expr) -> bool {
-        match expr.kind() {
-            ExprKind::Literal(parse::Literal::Dictionary(_) | parse::Literal::Struct(_)) => false,
-            ExprKind::Literal(parse::Literal::Array(es) | parse::Literal::Tuple(es)) => {
-                es.iter().all(|e| self.is_const_element(e))
-            }
-            ExprKind::Ident(_) => {
-                self.node_decs
+    /// Whether every constant the const expr `expr` names has its value yet. Errors when `expr`
+    /// can never be a constant.
+    fn const_ready(&self, expr: &Expr) -> Result<bool> {
+        let non_const = || NonConstantValue {
+            src: self.src(expr.location()),
+            at: expr.location().into(),
+            value: crate::errors::elide(expr.to_string()),
+        };
+        let (parts, folds): (Vec<&Expr>, bool) = match expr.kind() {
+            ExprKind::Ident(_) | ExprKind::Access(Access::DoubleColon { .. }) => {
+                match self
+                    .node_decs
                     .get(&expr.id())
-                    .is_some_and(|&dec| match &self.decs[dec].kind {
-                        DecKind::Constant(Some(
-                            parse::Literal::Dictionary(_) | parse::Literal::Struct(_),
-                        )) => false,
-                        kind => kind.is_constant(),
-                    })
+                    .map(|dec| &self.decs[*dec].kind)
+                {
+                    Some(DecKind::Constant(value)) => return Ok(value.is_some()),
+                    // a variant or a struct with nothing in it
+                    Some(DecKind::Variant { .. }) => (vec![], false),
+                    Some(DecKind::Adt(adt))
+                        if self.adts[*adt].as_singular().is_some_and(Variant::is_empty) =>
+                    {
+                        (vec![], false)
+                    }
+                    _ => Err(non_const())?,
+                }
             }
-            _ => self.is_const_expr(expr),
+            ExprKind::Literal(Literal::Array(members) | Literal::Tuple(members)) => {
+                (members.iter().collect(), false)
+            }
+            ExprKind::Literal(Literal::Dictionary(fields)) => {
+                (fields.iter().map(|(_, value)| value).collect(), false)
+            }
+            ExprKind::Literal(Literal::Struct(s)) => {
+                (s.fields.iter().map(|(_, value)| value).collect(), false)
+            }
+            ExprKind::Literal(_) => (vec![], false),
+            // a tuple struct or tuple variant (its callee is typed as the adt it builds)
+            ExprKind::Call(call)
+                if self
+                    .node_to_vid
+                    .get(&call.left.id())
+                    .is_some_and(|vid| matches!(Ty::Vid(*vid).normalized(self), Ty::Adt(_))) =>
+            {
+                (call.arguments.iter().map(|arg| &arg.value).collect(), false)
+            }
+            ExprKind::Grouping(g) => (vec![&g.inner], false),
+            ExprKind::Unary(u) => (vec![&u.right], true),
+            ExprKind::Evaluation(e) => (vec![&e.left, &e.right], true),
+            ExprKind::Equality(e) => (vec![&e.left, &e.right], true),
+            ExprKind::Logical(l) => (vec![&l.left, &l.right], true),
+            _ => Err(non_const())?,
+        };
+        if folds && self.reduce_const_expr(expr)?.is_some() {
+            return Ok(true);
         }
+        for part in parts {
+            if !self.const_ready(part)? {
+                return Ok(false);
+            }
+        }
+        // an operator over constants that have nothing to fold
+        if folds {
+            Err(non_const())?
+        }
+        Ok(true)
     }
 
     pub(crate) fn impl_target(&self) -> Option<AdtId> {

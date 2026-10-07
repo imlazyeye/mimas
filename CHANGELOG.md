@@ -9,6 +9,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - `Pact::*::member` reaches a member on every implementer of a pact and collects the results into an array. An associated function is called once per implementer, and a constant is read from each. See [Reaching every implementer](https://mim.as/reference/pacts.html#reaching-every-implementer).
 - mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). Each input runs on top of the ones before it, and a trailing expression prints with its type.
 - A pact constant can be read through a value that is only known by its pact (`thing.NAME` with `thing: Named`), which picks the value's own impl at runtime the way a method call does. It used to be a compile error.
+- Constants can be enum variants, tuple structs and structs without fields (`const DOT = Shape::Dot;`, `const CIRCLE = Shape::Circle(4);`), as long as what they hold is constant. Constant arrays and tuples can now hold enum variants, structs and dicts, and a constant can be set from another one through a path (`const MINE = shapes::DOT;`). Each read gives its own value, so changing it never changes the constant. See [Enums, structs and collections](https://mim.as/reference/variables.html#enums-structs-and-collections).
 - `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel".
 - `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write.
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
@@ -33,6 +34,9 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - `!=` between an `int` and a `float` could be `true` when the two were equal (`i != f` with `let i = 1;` and `let f = 1.0;`).
 - A struct named through a module path and used as a value (`let u = lib::Unit;`, or `let make = lib::Pair;` for a tuple struct) iced the compiler.
 - A top-level `const` in a module couldn't use a name its file imported with `use` (`use lib::R; pub const X = R + 1;` reported an undefined variable).
+- A top-level constant holding a struct could fail with a type mismatch when a field was an option or a result. With `x: int?`, `const A = P { x = null };` followed by `const B = P { x = 1 };` was rejected, because constants were checked before the struct's field types were known.
+- A struct or dict as a parameter default (`fn spawn(at: Point = Point { x = 0 })`) iced the compiler. It's now a compile error. A default has to be a number, string, bool, `null`, or an array or tuple of those.
+- A constant set to a comparison of two arrays or tuples compared how they were written, not their values, so `const SAME = [X] == [1];` was `false` with `const X = 1;`. It's now `true`. Setting a constant to a comparison of structs or dicts had the same problem and is now a compile error.
 
 ## [0.3.0] - 2026-09-26
 

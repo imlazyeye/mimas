@@ -228,13 +228,23 @@ pub struct Dec {
     pub module: AdtId,
 }
 
+/// What a constant is worth.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConstValue {
+    /// A folded bool, number, string or null, or an array or tuple of those.
+    Literal(parse::Literal),
+    /// Anything else (a dict, a struct, an enum variant, or a collection holding one). The
+    /// constant's own expr is kept and built again at each read.
+    Expr(parse::Expr),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecKind {
     Local,
     Item {
         defaults: Vec<Option<parse::Literal>>,
     },
-    Constant(Option<parse::Literal>),
+    Constant(Option<ConstValue>),
     Variant {
         parent: AdtId,
         layout: AdtId,
@@ -251,7 +261,7 @@ impl DecKind {
 
     pub fn const_value(&self) -> Option<&parse::Literal> {
         match self {
-            DecKind::Constant(Some(lit)) => Some(lit),
+            DecKind::Constant(Some(ConstValue::Literal(lit))) => Some(lit),
             _ => None,
         }
     }

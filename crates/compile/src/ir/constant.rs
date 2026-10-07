@@ -1,7 +1,7 @@
 use itertools::Itertools;
-use parse::{Expr, ExprKind, Literal};
+use parse::{ExprKind, Literal};
 use shared::StrId;
-use solve::{components::DecId, utils::reduce_simple};
+use solve::components::{ConstValue, DecId};
 
 use super::{Inst, Ir, IrDisplay};
 
@@ -83,14 +83,6 @@ impl Constant {
         }
     }
 
-    pub(crate) fn from_dec(ir: &mut Ir, dec: DecId) -> Self {
-        let solve::ResolvedDeclKind::Constant(lit) = &ir.resolutions.decs[dec].kind else {
-            unreachable!("Constant::from_dec called on non-constant dec {dec:?}");
-        };
-        let lit = lit.clone();
-        Self::from_literal(ir, lit)
-    }
-
     pub(crate) fn from_literal(ir: &mut Ir, lit: Literal) -> Self {
         match lit {
             Literal::True => Self::Bool(true),
@@ -102,61 +94,35 @@ impl Constant {
             Literal::String(s) => Self::Str(ir.intern_str(&s)),
             // arrays and tuples share the same runtime shape -- both lower to a `NewArray` + pushes
             // at use sites today (see `Literal::emit`), so the const form mirrors that.
-            Literal::Array(a) | Literal::Tuple(a) => {
-                Self::Array(a.iter().map(|e| Self::from_expr(ir, e)).collect())
-            }
-            // dicts and structs allocate distinct runtime types; the `const` site can't inline
-            // them as a bytecode Constant. callers should use `Self::emit_const_dec` (which
-            // routes through `Literal::emit`) instead of trying to fold to a `Constant`.
-            Literal::Dictionary(_) | Literal::Struct(_) => unreachable!(
-                "Constant::from_literal: dict/struct have no scalar constant form -- use emit_const_dec",
+            Literal::Array(a) | Literal::Tuple(a) => Self::Array(
+                a.iter()
+                    .map(|member| match member.kind() {
+                        ExprKind::Literal(lit) => Self::from_literal(ir, lit.clone()),
+                        _ => unreachable!("a folded array holds folded members"),
+                    })
+                    .collect(),
             ),
+            Literal::Dictionary(_) | Literal::Struct(_) => {
+                unreachable!("dicts and structs never fold, see `ConstValue::Expr`")
+            }
         }
     }
 
-    /// Emit a use-site reference to a const dec. Scalar/array/tuple literals lower to a
-    /// `LoadConst` inst; dict/struct literals lower to a fresh runtime allocation at the
-    /// use site (same `NewDict`/`NewInstance` path as inline literals would take). `id` is
-    /// the use-site's node id, needed by `Literal::Struct` to resolve the ADT type.
-    pub(crate) fn emit_const_dec(
-        ir: &mut Ir,
-        dec: DecId,
-        id: parse::NodeId,
-    ) -> Option<crate::InstId> {
-        let solve::ResolvedDeclKind::Constant(lit) = &ir.resolutions.decs[dec].kind else {
+    /// Emit a use-site reference to a const dec. A folded value lowers to a `LoadConst` inst, and
+    /// anything else lowers to a fresh runtime allocation at the use site (the constant's own
+    /// expr, lowered again).
+    pub(crate) fn emit_const_dec(ir: &mut Ir, dec: DecId) -> Option<crate::InstId> {
+        use super::Lower;
+
+        let solve::ResolvedDeclKind::Constant(value) = &ir.resolutions.decs[dec].kind else {
             unreachable!("emit_const_dec called on non-constant dec {dec:?}");
         };
-        let lit = lit.clone();
-        match &lit {
-            Literal::Dictionary(_) | Literal::Struct(_) => {
-                use super::Emit;
-                lit.emit(id, ir)
-            }
-            _ => {
+        match value.clone() {
+            ConstValue::Literal(lit) => {
                 let constant = Self::from_literal(ir, lit);
                 Some(ir.current().constant(constant))
             }
-        }
-    }
-
-    // inside a const array, each element is: ident-to-const, nested array, or a reducible expr.
-    // safe to unwrap both layers: solve has already verified every element folds (`is_const_expr`)
-    // and would have surfaced any divide-by-zero / overflow as a diagnostic before IR runs.
-    fn from_expr(ir: &mut Ir, expr: &Expr) -> Self {
-        match expr.kind() {
-            ExprKind::Ident(_) => Self::from_dec(ir, ir.node_dec(expr.id())),
-            ExprKind::Literal(Literal::Array(inner)) => {
-                Self::Array(inner.iter().map(|e| Self::from_expr(ir, e)).collect())
-            }
-            _ => Self::from_literal(
-                ir,
-                // solve already vetted every element; reduce_simple is source-free and
-                // either succeeds or the expr is malformed (which would've failed type-check).
-                // both unwraps lean on that.
-                reduce_simple(expr)
-                    .expect("solve verified every const array element folds")
-                    .expect("solve verified every const array element folds to Some"),
-            ),
+            ConstValue::Expr(expr) => expr.lower(ir),
         }
     }
 

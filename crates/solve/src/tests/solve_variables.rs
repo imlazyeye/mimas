@@ -370,7 +370,178 @@ test_fail!(
     "const B: int = (-9223372036854775807 - 1) ~/ -1;"
 );
 
+test_ty!(
+    const_struct_in_array,
+    "struct P {
+         x: int,
+     }
+     const A = [P { x = 1 }];
+     const B = (P { x = 2 }, 3);",
+    "A[0].x" => Int,
+    "B.0.x + B.1" => Int,
+);
+
+test_ty!(
+    const_enum_variants,
+    "enum Shape {
+         Dot,
+         Circle(int),
+         Pair(int, Shape),
+     }
+     const R = 3;
+     const DOT = Shape::Dot;
+     const CIRCLE = Shape::Circle(R + 1);
+     const NESTED = Shape::Pair(1, Shape::Circle(2));
+     const ALIAS = CIRCLE;
+     const ALL = [Shape::Dot, CIRCLE, Shape::Circle(9)];
+     const PAIR = (DOT, 4);",
+    "DOT == Shape::Dot" => Bool,
+    "ALIAS == CIRCLE" => Bool,
+    "NESTED == DOT" => Bool,
+    "ALL[2] == DOT" => Bool,
+    "PAIR.1" => Int,
+);
+
+test_ty!(
+    const_enum_variant_before_its_arg,
+    "enum Shape {
+         Circle(int),
+     }
+     const CIRCLE = Shape::Circle(R);
+     const R = 3;",
+    "CIRCLE == Shape::Circle(3)" => Bool,
+);
+
 test_fail!(
-    const_struct_in_array_ices,
-    "struct P { x: int } const A = [P { x = 1 }];"
+    const_enum_variant_non_const_arg,
+    "enum Shape {
+         Circle(int),
+     }
+     fn radius() -> int {
+         4
+     }
+     const CIRCLE = Shape::Circle(radius());",
+    "enum Shape {
+         Circle(int),
+     }
+     let r = 4;
+     const CIRCLE = Shape::Circle(r);",
+);
+
+test_fail!(
+    const_enum_variant_without_its_members,
+    "enum Shape {
+         Circle(int),
+     }
+     const CIRCLE = Shape::Circle;",
+);
+
+test_ty!(
+    const_variant_with_optional_member,
+    "enum Shape {
+         Dot,
+         Maybe(Shape?),
+         Res(int!),
+     }
+     const NONE = Shape::Maybe(null);
+     const SOME = Shape::Maybe(Shape::Dot);
+     const RES = Shape::Res(1);",
+    "NONE == SOME" => Bool,
+    "RES == Shape::Res(2)" => Bool,
+);
+
+test_ty!(
+    const_struct_with_optional_field,
+    "struct P {
+         x: int?,
+     }
+     const A = P { x = null };
+     const B = P { x = 1 };",
+    "A.x == B.x" => Bool,
+);
+
+test_ty!(
+    const_tuple_and_unit_structs,
+    "struct Wrap(int);
+     struct Bat;
+     const R = 2;
+     const W = Wrap(R + 1);
+     const B = Bat;
+     const BOTH = (W, B);",
+    "W == Wrap(3)" => Bool,
+    "B == Bat" => Bool,
+    "BOTH.0 == W" => Bool,
+);
+
+test_ty!(
+    const_through_a_path,
+    "enum Shape {
+         Dot,
+         Circle(int),
+     }
+     impl Shape {
+         const ORIGIN = Shape::Dot;
+     }
+     const O = Shape::ORIGIN;
+     const BOTH = [O, Shape::ORIGIN];",
+    "O == Shape::Dot" => Bool,
+    "BOTH[1] == O" => Bool,
+);
+
+test_fail!(
+    const_operator_over_built_consts,
+    "enum Shape {
+         Dot,
+     }
+     const DOT = Shape::Dot;
+     const SAME = DOT == Shape::Dot;",
+    "struct P {
+         x: int,
+     }
+     const A = P { x = 1 };
+     const SAME = A == A;",
+);
+
+test_fail!(
+    const_ctor_without_its_members,
+    "struct Wrap(int);
+     const MAKE = Wrap;",
+);
+
+test_fail!(
+    const_non_const_field,
+    "struct P {
+         x: int,
+     }
+     fn one() -> int {
+         1
+     }
+     const A = [P { x = one() }];",
+);
+
+test_fail!(
+    const_div_by_zero_in_variant,
+    "enum Shape {
+         Circle(int),
+     }
+     const A = [Shape::Circle(1 ~/ 0)];",
+);
+
+test_fail!(
+    default_without_a_folded_form,
+    "enum Shape {
+         Dot,
+     }
+     fn count(shapes: [Shape] = [Shape::Dot]) -> int {
+         shapes.len()
+     }",
+    "struct P {
+         x: int,
+     }
+     fn get(p: P = P { x = 1 }) -> int {
+         p.x
+     }",
+    "fn get(d: ~{int} = ~{ a = 1 }) -> int {
+         d.len()
+     }",
 );
