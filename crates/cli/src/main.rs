@@ -41,10 +41,11 @@ fn main() {
         Some(Commands::Repl { path }) => repl(path, input.color),
         Some(Commands::Docs {
             output_path,
-            manifest_path,
+            renderer: _,
+            manifest,
             include_std: std,
             mdbook,
-        }) => docs(output_path, manifest_path, std, mdbook, input.color),
+        }) => docs(output_path, manifest, std, mdbook, input.color),
         None => repl(None, input.color),
     };
     std::process::exit(status_code);
@@ -279,7 +280,7 @@ fn repl(path: Option<PathBuf>, color: bool) -> i32 {
 
 fn docs(
     output_path: Option<PathBuf>,
-    manifest_path: Option<PathBuf>,
+    manifest: Option<PathBuf>,
     std: bool,
     mdbook: Option<String>,
     color: bool,
@@ -298,13 +299,32 @@ fn docs(
     });
 
     let error = "error".bright_red().bold();
-    let manifest = match manifest_path {
+    let manifest = match manifest {
         Some(path) => api::Manifest::read(&path).map(Some),
         None => api::Manifest::find(&api::Project::of(&resolve_path(None))),
     };
     let host = match manifest {
         Ok(Some(manifest)) => manifest.library,
         Ok(None) if std => std_alone(),
+        // mdbook builds the book whether or not the host has been run, so the chapter is left
+        // as it is rather than failing the build
+        Err(problem) if mdbook.is_some() => {
+            let warning = "warning".bright_yellow().bold();
+            eprintln!("{warning}: {problem}, so the chapter is left as it is");
+            let input: Vec<serde_json::Value> = match serde_json::from_reader(std::io::stdin()) {
+                Ok(input) => input,
+                Err(problem) => {
+                    eprintln!("{error}: {problem}");
+                    return 1;
+                }
+            };
+            let Some(book) = input.into_iter().nth(1) else {
+                eprintln!("{error}: mdbook sent no book");
+                return 1;
+            };
+            println!("{book}");
+            return 0;
+        }
         Ok(None) => {
             eprintln!(
                 "{error}: no manifest found. Run your host with `cargo run` to write one, or pass \

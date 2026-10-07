@@ -70,10 +70,15 @@ pub enum Commands {
         #[clap(parse(from_os_str), required_unless_present = "mdbook")]
         output_path: Option<PathBuf>,
 
-        /// The path to the manifest to build the documentation off of. Defaults to the newest one
-        /// written by a binary of the cargo package you're in.
-        #[clap(parse(from_os_str))]
-        manifest_path: Option<PathBuf>,
+        /// The renderer mdBook asks about with `supports <renderer>` before running a
+        /// preprocessor, which is always supported.
+        #[clap(hide = true)]
+        renderer: Option<String>,
+
+        /// The manifest to build the documentation off of. Defaults to the newest one written by
+        /// a binary of the cargo package you're in.
+        #[clap(long, value_name = "PATH", parse(from_os_str))]
+        manifest: Option<PathBuf>,
 
         /// Includes the standard library, which is left out otherwise. Without a manifest, this
         /// documents the standard library alone.
@@ -81,8 +86,8 @@ pub enum Commands {
         include_std: bool,
 
         /// Runs as an mdBook preprocessor instead, adding the pages under the chapter at this path
-        /// (i.e. `api.md`), ahead of any it already lists, along with a table of them. The
-        /// manifest is always the default one.
+        /// (i.e. `api.md`), ahead of any it already lists, along with a table of them. A
+        /// `--manifest` that can't be read leaves the book as it is, with a warning.
         #[clap(long, value_name = "CHAPTER")]
         mdbook: Option<String>,
     },
