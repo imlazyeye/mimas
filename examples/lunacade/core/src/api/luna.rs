@@ -71,7 +71,7 @@ luna::draw(|| gfx::clear(Color::Navy));
 ```",
         |luna| &luna.draw,
     );
-    luna.add(tick);
+    luna.add(frame);
     let doc = "The screen's width in pixels.";
     luna.constant("WIDTH", Ty::Int, Literal::Int(WIDTH as i64), doc);
     let doc = "The screen's height in pixels.";
@@ -90,6 +90,6 @@ luna::draw(|| gfx::clear(Color::Navy));
 /// });
 /// ```
 #[native]
-fn tick<'gc>(ctx: Ctx<'gc>) -> i64 {
+fn frame<'gc>(ctx: Ctx<'gc>) -> i64 {
     ctx.fixture::<Luna>().tick.get() as i64
 }

@@ -1,0 +1,484 @@
+module board;
+
+// Signed piece codes keep occupancy, color and evaluation as integer operations in the VM.
+// Zero is empty, White is positive, Black is negative, and OFF is outside the playable board.
+pub const PAWN = 1;
+pub const KNIGHT = 2;
+pub const BISHOP = 3;
+pub const ROOK = 4;
+pub const QUEEN = 5;
+pub const KING = 6;
+pub const OFF = 7;
+
+pub const WHITE = 1;
+pub const BLACK = -1;
+
+pub const WIDTH = 8;
+pub const STRIDE = 10;
+pub const FIRST = 21;
+const MAILBOX_SIZE = 120;
+const TOP_RANK_END = FIRST + WIDTH;
+const BOTTOM_RANK_START = FIRST + (WIDTH - 1) * STRIDE;
+const WHITE_PAWN_HOME = FIRST + (WIDTH - 2) * STRIDE;
+const BLACK_PAWN_HOME_END = FIRST + STRIDE + WIDTH;
+
+// A 10 by 12 mailbox puts a8 at 21 and h1 at 98. One border file and two border ranks
+// catch even a knight's longest step, so move generation needs no coordinate bounds checks.
+// The square numbers fit in seven bits. Moves are [kind | target:7 | origin:7]; an ordinary
+// move has kind zero. Keep this scalar encoding: allocating a Move for every candidate would
+// add garbage-collection work to the search's hottest path.
+const SQUARE_BITS = 7;
+const SQUARE_MASK = (1 << SQUARE_BITS) - 1;
+pub const KIND_SHIFT = SQUARE_BITS * 2;
+pub const DOUBLE = 1;
+pub const EN_PASSANT = 2;
+pub const PROMOTE = 3;
+pub const CASTLE = 4;
+const DOUBLE_MOVE = DOUBLE << KIND_SHIFT;
+const EN_PASSANT_MOVE = EN_PASSANT << KIND_SHIFT;
+const PROMOTION_MOVE = PROMOTE << KIND_SHIFT;
+const CASTLE_MOVE = CASTLE << KIND_SHIFT;
+
+const WHITE_SHORT = 1;
+const WHITE_LONG = 2;
+const BLACK_SHORT = 4;
+const BLACK_LONG = 8;
+const WHITE_CASTLES = WHITE_SHORT | WHITE_LONG;
+const BLACK_CASTLES = BLACK_SHORT | BLACK_LONG;
+const ALL_CASTLES = WHITE_CASTLES | BLACK_CASTLES;
+
+// Captures sort ascending: a larger victim gets a more negative key, then a smaller attacker
+// wins ties. Eight exceeds every piece code; fifty puts queen promotions ahead of captures.
+const VICTIM_WEIGHT = 8;
+const PROMOTION_PRIORITY = 50;
+
+// Undo keeps two integers per ply instead of allocating an object per searched move. The first
+// packs [en-passant square | castling rights:4 | captured piece + 8:4]; the second is the score.
+const CAPTURE_BIAS = 8;
+const NIBBLE_MASK = 15;
+const RIGHTS_SHIFT = 4;
+const EP_SHIFT = 8;
+
+const BACK_RANK = [ROOK, KNIGHT, BISHOP, QUEEN, KING, BISHOP, KNIGHT, ROOK];
+// Centipawns: a pawn is 100. Kings are scored by position; mate is handled by the search.
+const WORTH = [0, 100, 320, 330, 500, 900, 0];
+const STEPS = [
+    [],
+    [],
+    [-21, -19, -12, -8, 8, 12, 19, 21], // knight: two ranks and a file, or the reverse
+    [-11, -9, 9, 11],                  // bishop diagonals
+    [-10, -1, 1, 10],                  // rook files and ranks
+    [-11, -10, -9, -1, 1, 9, 10, 11],  // queen rays
+    [-11, -10, -9, -1, 1, 9, 10, 11],  // king: the same directions, one square each
+];
+const LEAPERS = [KNIGHT, KING];
+const SLIDERS = [BISHOP, ROOK];
+
+pub fn origin(m: int) -> int {
+    m & SQUARE_MASK
+}
+
+pub fn target(m: int) -> int {
+    (m >> SQUARE_BITS) & SQUARE_MASK
+}
+
+pub struct Board {
+    // Read occupancy here; change it through make/unmake so score, rights and king caches agree.
+    pub sq: [int],
+    pub side: int,
+    // 1 and 2 are white's castles to the king's side and the queen's, 4 and 8 are black's
+    pub rights: int,
+    // the square a pawn just skipped, or 0
+    pub ep: int,
+    // White's material and positional bonuses minus Black's, maintained incrementally.
+    pub score: int,
+    pub cells: [int],
+    // King locations change only in make/unmake. Caching them avoids a 64-square scan in each
+    // legality/check test; the search copy owns its two scalars independently of the live game.
+    white_king: int,
+    black_king: int,
+    undo: [int],
+    // Evaluation lookup: signed piece + KING selects a row, then mailbox square selects a value.
+    table: [[int]],
+    // the castles that are still on after a move touches a square
+    keeps: [int],
+}
+
+impl Board {
+    pub fn new() -> Self {
+        let sq = array::new_filled(OFF, MAILBOX_SIZE);
+        // new_filled deep-copies its filler, so the thirteen evaluation rows are independent.
+        let table = array::new_filled(array::new_filled(0, MAILBOX_SIZE), KING * 2 + 1);
+        let cells: [int] = [];
+        for row in WIDTH {
+            for col in WIDTH {
+                let at = FIRST + row * STRIDE + col;
+                let mirrored = FIRST + (WIDTH - 1 - row) * STRIDE + col;
+                cells.push(at);
+                sq[at] = match row {
+                    0 => -BACK_RANK[col],
+                    1 => -PAWN,
+                    6 => PAWN,
+                    7 => BACK_RANK[col],
+                    _ => 0,
+                };
+                for piece in 1..KING + 1 {
+                    let value = WORTH[piece] + PLACES[piece - 1][row * WIDTH + col];
+                    table[KING + piece][at] = value;
+                    table[KING - piece][mirrored] = -value;
+                }
+            }
+        }
+        let keeps = array::new_filled(ALL_CASTLES, MAILBOX_SIZE);
+        // Leaving a king's home or touching a rook's corner permanently removes those rights.
+        keeps[21] = ALL_CASTLES & ~BLACK_LONG;  // a8
+        keeps[25] = WHITE_CASTLES;             // e8
+        keeps[28] = ALL_CASTLES & ~BLACK_SHORT; // h8
+        keeps[91] = ALL_CASTLES & ~WHITE_LONG;  // a1
+        keeps[95] = BLACK_CASTLES;             // e1
+        keeps[98] = ALL_CASTLES & ~WHITE_SHORT; // h1
+        Self {
+            sq,
+            side = WHITE,
+            rights = ALL_CASTLES,
+            ep = 0,
+            score = 0,
+            cells,
+            white_king = 95, // e1
+            black_king = 25, // e8
+            undo = [],
+            table,
+            keeps,
+        }
+    }
+
+    // a board to search on, which shares everything that never changes
+    pub fn copy(self) -> Self {
+        Self {
+            sq = for piece in self.sq collect piece,
+            side = self.side,
+            rights = self.rights,
+            ep = self.ep,
+            score = self.score,
+            cells = self.cells,
+            white_king = self.white_king,
+            black_king = self.black_king,
+            undo = [],
+            table = self.table,
+            keeps = self.keeps,
+        }
+    }
+
+    // Pseudo-legal moves: this can leave the mover's king attacked. Captures and promotions
+    // precede quiet moves; tactical_only omits quiet moves, including castling. It returns
+    // null if the opponent's king can be captured: the previous move was illegal. This lets a
+    // normal search node generate replies and validate its parent in the same board scan.
+    pub fn moves(self, tactical_only: bool) -> [int]? {
+        // Bind fields separately: a tuple literal here would allocate an array on every call.
+        let sq = self.sq;
+        let side = self.side;
+        let up = -STRIDE * side;
+        let ep = self.ep;
+        let tactical: [int] = [];
+        let keys: [int] = [];
+        let quiet: [int] = [];
+        for from in self.cells {
+            let piece = sq[from] * side;
+            if piece <= 0 {
+                continue;
+            }
+            if piece == PAWN {
+                let to = from + up;
+                let last = to < TOP_RANK_END || to >= BOTTOM_RANK_START;
+                if sq[to] == 0 {
+                    if last {
+                        tactical.push(from | (to << SQUARE_BITS) | PROMOTION_MOVE);
+                        keys.push(-PROMOTION_PRIORITY);
+                    } else if !tactical_only {
+                        quiet.push(from | (to << SQUARE_BITS));
+                        let home = if side == WHITE from >= WHITE_PAWN_HOME else from < BLACK_PAWN_HOME_END;
+                        if home && sq[to + up] == 0 {
+                            quiet.push(from | ((to + up) << SQUARE_BITS) | DOUBLE_MOVE);
+                        }
+                    }
+                }
+                for i in 2 {
+                    let to = from + up - 1 + i * 2;
+                    let target = sq[to] * side;
+                    if target < 0 && target > -OFF {
+                        if target == -KING {
+                            return null;
+                        }
+                        if last {
+                            tactical.push(from | (to << SQUARE_BITS) | PROMOTION_MOVE);
+                            keys.push(target * VICTIM_WEIGHT - PROMOTION_PRIORITY);
+                        } else {
+                            tactical.push(from | (to << SQUARE_BITS));
+                            keys.push(target * VICTIM_WEIGHT + PAWN);
+                        }
+                    } else if to == ep {
+                        tactical.push(from | (to << SQUARE_BITS) | EN_PASSANT_MOVE);
+                        keys.push(PAWN - PAWN * VICTIM_WEIGHT);
+                    }
+                }
+                continue;
+            }
+            // Bishop, rook and queen codes are contiguous; all others take one step.
+            let slides = piece > KNIGHT && piece < KING;
+            // Read-only indexing/iteration shares these const arrays; do not bind STEPS to a
+            // mutable local, which would ask mimas for a fresh copy of the entire table.
+            for step in STEPS[piece] {
+                let to = from + step;
+                loop {
+                    let target = sq[to] * side;
+                    if target != 0 {
+                        if target < 0 && target > -OFF {
+                            if target == -KING {
+                                return null;
+                            }
+                            tactical.push(from | (to << SQUARE_BITS));
+                            keys.push(target * VICTIM_WEIGHT + piece);
+                        }
+                        break;
+                    }
+                    if !tactical_only {
+                        quiet.push(from | (to << SQUARE_BITS));
+                    }
+                    if !slides {
+                        break;
+                    }
+                    to += step;
+                }
+            }
+            if piece == KING && !tactical_only {
+                let rights = if side == WHITE self.rights else self.rights >> 2;
+                // a castle's rights already say that the king and the rook are at home
+                // Test the origin and transit here; legal() or the search tests the destination.
+                if (rights & WHITE_CASTLES) != 0 && !self.attacked(from, -side) {
+                    let short = (rights & WHITE_SHORT) != 0 && sq[from + 1] == 0 && sq[from + 2] == 0;
+                    if short && !self.attacked(from + 1, -side) {
+                        quiet.push(from | ((from + 2) << SQUARE_BITS) | CASTLE_MOVE);
+                    }
+                    let long = (rights & WHITE_LONG) != 0
+                        && sq[from - 1] == 0
+                        && sq[from - 2] == 0
+                        && sq[from - 3] == 0;
+                    if long && !self.attacked(from - 1, -side) {
+                        quiet.push(from | ((from - 2) << SQUARE_BITS) | CASTLE_MOVE);
+                    }
+                }
+            }
+        }
+        // Empty/singleton capture lists are already ordered; avoid the native sort's scratch copy.
+        if keys.len() > 1 { tactical.sort_by_int(keys); }
+        if tactical.len() == 0 { return quiet; }
+        if quiet.len() > 0 { tactical.extend(quiet); }
+        tactical
+    }
+
+    // the moves that don't leave the mover's king to be taken
+    pub fn legal(self) -> [int] {
+        let side = self.side;
+        let moves? = self.moves(false) else return [];
+        for m in moves {
+            self.make(m);
+            let safe = !self.attacked(self.king(side), -side);
+            self.unmake(m);
+            if safe collect m;
+        }
+    }
+
+    pub fn make(self, m: int) {
+        let sq = self.sq;
+        let table = self.table;
+        let side = self.side;
+        // Decode here to avoid two script calls per move. The public helpers serve the UI.
+        let from = m & SQUARE_MASK;
+        let to = (m >> SQUARE_BITS) & SQUARE_MASK;
+        let kind = m >> KIND_SHIFT;
+        let piece = sq[from];
+        let taken = sq[to];
+        self.undo.push((taken + CAPTURE_BIAS) | (self.rights << RIGHTS_SHIFT) | (self.ep << EP_SHIFT));
+        self.undo.push(self.score);
+        // Incremental evaluation subtracts what leaves each square and adds what arrives.
+        // Saving the previous score makes undo exact even for promotion and castling.
+        let score = self.score - table[piece + KING][from];
+        if taken != 0 {
+            score -= table[taken + KING][to];
+        }
+        let ep = 0;
+        // Ordinary moves dominate the tree: one branch skips all four special cases.
+        if kind != 0 {
+            if kind == DOUBLE {
+                ep = from - STRIDE * side;
+            } else if kind == EN_PASSANT {
+                let at = to + STRIDE * side;
+                score -= table[KING - side][at];
+                sq[at] = 0;
+            } else if kind == PROMOTE {
+                piece = QUEEN * side;
+            } else if kind == CASTLE {
+                let short = to > from;
+                let corner = if short to + 1 else to - 2;
+                let landing = if short to - 1 else to + 1;
+                let rook = sq[corner];
+                sq[corner] = 0;
+                sq[landing] = rook;
+                score += table[rook + KING][landing] - table[rook + KING][corner];
+            }
+        }
+        sq[from] = 0;
+        sq[to] = piece;
+        if piece == KING {
+            self.white_king = to;
+        } else if piece == -KING {
+            self.black_king = to;
+        }
+        self.score = score + table[piece + KING][to];
+        self.rights = self.rights & self.keeps[from] & self.keeps[to];
+        self.ep = ep;
+        self.side = -side;
+    }
+
+    // takes back the last move made, which has to be the one handed in
+    pub fn unmake(self, m: int) {
+        let sq = self.sq;
+        let side = -self.side;
+        let from = m & SQUARE_MASK;
+        let to = (m >> SQUARE_BITS) & SQUARE_MASK;
+        let kind = m >> KIND_SHIFT;
+        self.score = self.undo.pop()!;
+        let saved = self.undo.pop()!;
+        let piece = sq[to];
+        sq[from] = if kind == PROMOTE PAWN * side else piece;
+        sq[to] = (saved & NIBBLE_MASK) - CAPTURE_BIAS;
+        if kind == EN_PASSANT {
+            sq[to + STRIDE * side] = -PAWN * side;
+        } else if kind == CASTLE {
+            let short = to > from;
+            let corner = if short to + 1 else to - 2;
+            let landing = if short to - 1 else to + 1;
+            sq[corner] = sq[landing];
+            sq[landing] = 0;
+        }
+        self.rights = (saved >> RIGHTS_SHIFT) & NIBBLE_MASK;
+        self.ep = saved >> EP_SHIFT;
+        self.side = side;
+        if piece == KING {
+            self.white_king = from;
+        } else if piece == -KING {
+            self.black_king = from;
+        }
+    }
+
+    // whether a piece of `by` could take what stands on a square
+    pub fn attacked(self, at: int, by: int) -> bool {
+        let sq = self.sq;
+        let pawn = PAWN * by;
+        // Reverse the pawn's forward step to find the two possible attacking origins.
+        let behind = at + STRIDE * by;
+        if sq[behind - 1] == pawn || sq[behind + 1] == pawn {
+            return true;
+        }
+        for piece in LEAPERS {
+            let attacker = piece * by;
+            for step in STEPS[piece] {
+                if sq[at + step] == attacker {
+                    return true;
+                }
+            }
+        }
+        let queen = QUEEN * by;
+        for piece in SLIDERS {
+            let attacker = piece * by;
+            for step in STEPS[piece] {
+                let to = at + step;
+                let found = sq[to];
+                while found == 0 {
+                    to += step;
+                    found = sq[to];
+                }
+                if found == attacker || found == queen {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn king(self, side: int) -> int {
+        if side == WHITE self.white_king else self.black_king
+    }
+
+    pub fn in_check(self) -> bool {
+        self.attacked(self.king(self.side), -self.side)
+    }
+}
+
+// Positional bonuses in centipawns, added to WORTH, with White's eighth rank first. Black
+// mirrors the ranks and negates the result when Board::new builds its evaluation table. These
+// are Tomasz Michniewski's simplified-evaluation tables; this small engine uses the middlegame
+// king table throughout rather than adding a game-phase/endgame model.
+// https://chessprogramming.org/Simplified_Evaluation_Function
+const PLACES = [
+    [
+        0, 0, 0, 0, 0, 0, 0, 0,
+        50, 50, 50, 50, 50, 50, 50, 50,
+        10, 10, 20, 30, 30, 20, 10, 10,
+        5, 5, 10, 25, 25, 10, 5, 5,
+        0, 0, 0, 20, 20, 0, 0, 0,
+        5, -5, -10, 0, 0, -10, -5, 5,
+        5, 10, 10, -20, -20, 10, 10, 5,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    ],
+    [
+        -50, -40, -30, -30, -30, -30, -40, -50,
+        -40, -20, 0, 0, 0, 0, -20, -40,
+        -30, 0, 10, 15, 15, 10, 0, -30,
+        -30, 5, 15, 20, 20, 15, 5, -30,
+        -30, 0, 15, 20, 20, 15, 0, -30,
+        -30, 5, 10, 15, 15, 10, 5, -30,
+        -40, -20, 0, 5, 5, 0, -20, -40,
+        -50, -40, -30, -30, -30, -30, -40, -50,
+    ],
+    [
+        -20, -10, -10, -10, -10, -10, -10, -20,
+        -10, 0, 0, 0, 0, 0, 0, -10,
+        -10, 0, 5, 10, 10, 5, 0, -10,
+        -10, 5, 5, 10, 10, 5, 5, -10,
+        -10, 0, 10, 10, 10, 10, 0, -10,
+        -10, 10, 10, 10, 10, 10, 10, -10,
+        -10, 5, 0, 0, 0, 0, 5, -10,
+        -20, -10, -10, -10, -10, -10, -10, -20,
+    ],
+    [
+        0, 0, 0, 0, 0, 0, 0, 0,
+        5, 10, 10, 10, 10, 10, 10, 5,
+        -5, 0, 0, 0, 0, 0, 0, -5,
+        -5, 0, 0, 0, 0, 0, 0, -5,
+        -5, 0, 0, 0, 0, 0, 0, -5,
+        -5, 0, 0, 0, 0, 0, 0, -5,
+        -5, 0, 0, 0, 0, 0, 0, -5,
+        0, 0, 0, 5, 5, 0, 0, 0,
+    ],
+    [
+        -20, -10, -10, -5, -5, -10, -10, -20,
+        -10, 0, 0, 0, 0, 0, 0, -10,
+        -10, 0, 5, 5, 5, 5, 0, -10,
+        -5, 0, 5, 5, 5, 5, 0, -5,
+        0, 0, 5, 5, 5, 5, 0, -5,
+        -10, 5, 5, 5, 5, 5, 0, -10,
+        -10, 0, 5, 0, 0, 0, 0, -10,
+        -20, -10, -10, -5, -5, -10, -10, -20,
+    ],
+    [
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -30, -40, -40, -50, -50, -40, -40, -30,
+        -20, -30, -30, -40, -40, -30, -30, -20,
+        -10, -20, -20, -20, -20, -20, -20, -10,
+        20, 20, 0, 0, 0, 0, 20, 20,
+        20, 30, 10, 0, 0, 10, 30, 20,
+    ],
+];

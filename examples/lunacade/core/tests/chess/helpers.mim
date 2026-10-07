@@ -1,0 +1,56 @@
+// Appended to the board module only by the tests, so fixtures can initialize private caches.
+// Rows are ordinary eight-character chess diagrams, rank eight first, with '.' for empty.
+pub fn test_position(rows: [str], side: int, rights: int, ep: int) -> Board {
+    let position = Board::new();
+    position.side = side;
+    position.rights = rights;
+    position.ep = ep;
+    position.score = 0;
+    position.white_king = 0;
+    position.black_king = 0;
+    for row in WIDTH {
+        for col in WIDTH {
+            let piece = match rows[row][col] {
+                "P" => PAWN, "N" => KNIGHT, "B" => BISHOP,
+                "R" => ROOK, "Q" => QUEEN, "K" => KING,
+                "p" => -PAWN, "n" => -KNIGHT, "b" => -BISHOP,
+                "r" => -ROOK, "q" => -QUEEN, "k" => -KING,
+                "." => 0,
+                _ => panic("bad chess diagram"),
+            };
+            let at = FIRST + row * STRIDE + col;
+            position.sq[at] = piece;
+            if piece == KING { position.white_king = at; }
+            if piece == -KING { position.black_king = at; }
+            if piece != 0 { position.score += position.table[piece + KING][at]; }
+        }
+    }
+    if position.white_king == 0 || position.black_king == 0 { panic("diagram needs both kings"); }
+    position
+}
+
+pub fn test_restore(position: Board) {
+    let before = position.copy();
+    let undo_size = position.undo.len();
+    let side = position.side;
+    for m in position.legal() {
+        position.make(m);
+        if position.attacked(position.king(side), -side) { panic("legal move leaves king attacked"); }
+        // Recompute from occupied squares, independently of incremental make/unmake updates.
+        let score = 0;
+        for at in position.cells {
+            let piece = position.sq[at];
+            if piece != 0 { score += position.table[piece + KING][at]; }
+            if piece == KING && position.king(WHITE) != at { panic("stale white king cache"); }
+            if piece == -KING && position.king(BLACK) != at { panic("stale black king cache"); }
+        }
+        if score != position.score { panic("incremental evaluation changed"); }
+        position.unmake(m);
+        if position.sq != before.sq || position.side != before.side
+            || position.rights != before.rights || position.ep != before.ep
+            || position.score != before.score || position.undo.len() != undo_size
+            || position.king(WHITE) != before.king(WHITE) || position.king(BLACK) != before.king(BLACK) {
+            panic("make/unmake failed to restore the position");
+        }
+    }
+}

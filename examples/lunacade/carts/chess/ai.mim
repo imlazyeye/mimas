@@ -1,0 +1,224 @@
+module ai;
+
+use board::Board;
+
+// Negamax always scores for the side to move, then negates the child's score for its parent.
+// King capture is an illegal-parent sentinel, not a legal chess move. It must beat mate scores,
+// which in turn must beat every material/positional evaluation. LIMIT bounds the search window.
+const WON = 30000;
+const MATE = 29000;
+const LIMIT = 32000;
+const MATE_WINDOW = 100; // maximum ply distance treated as a forced mate
+
+// Iterative deepening completes depths 1..6. Four extra tactical plies reduce the horizon
+// effect: stopping just after a capture would otherwise miss the immediate recapture. A side
+// in check must also search quiet evasions; the same hard cap bounds those extensions.
+const DEEPEST = 6;
+const CAPTURES = 4;
+
+// Coarse work units per frame, not a clock or exact node count. Move generation costs much more
+// than closing a node, so it is weighted by OPEN. The console's fuel cap is the separate hard
+// limit; this slice lets input and drawing continue while the search stack survives across frames.
+const SLICE = 1000;
+const OPEN = 8;
+
+// Two seconds at 60 Hz before the box plays the best move from its completed passes.
+const PATIENCE = 120;
+
+// One resumable alpha-beta node. alpha is the best lower bound found by the parent; beta is
+// the score the opponent can already avoid. Reaching beta makes the remaining moves irrelevant.
+struct Ply {
+    moves: [int],
+    next: int,
+    alpha: int,
+    beta: int,
+    best: int,
+    depth: int,
+}
+
+// a search that runs a little each frame. a frame has to finish, so the search can't be a fn
+// that calls itself and only comes back with the answer, and the positions it's part way
+// through are kept here instead
+pub struct Search {
+    board: Board,
+    plies: [Ply],
+    at: int,
+    roots: [int],
+    // where the best move is in the roots
+    first: int,
+    frames: int,
+    // how deep the last finished pass went, and the move it liked
+    pub depth: int,
+    pub best: int,
+    pub score: int,
+    pub positions: int,
+    pub done: bool,
+}
+
+impl Search {
+    // The caller already computed these legal replies when it tested for mate/stalemate.
+    // Take that fresh array directly instead of generating and filtering it a second time.
+    pub fn new(board: Board, roots: [int]) -> Self {
+        // equal moves are told apart by which comes first, so this is what varies the box's play
+        roots.shuffle();
+        let best? = roots.first() else panic("cannot search a position with no legal moves");
+        // One reusable node per normal/capture ply, with room for the root and final leaf.
+        let plies = for _ in DEEPEST + CAPTURES + 2 collect Ply {
+            moves = [],
+            next = 0,
+            alpha = 0,
+            beta = 0,
+            best = 0,
+            depth = 0,
+        };
+        let search = Self {
+            board = board.copy(),
+            plies,
+            at = 0,
+            roots,
+            first = 0,
+            frames = 0,
+            depth = 0,
+            best,
+            score = 0,
+            positions = 0,
+            done = false,
+        };
+        search.deepen();
+        search
+    }
+
+    pub fn think(self) {
+        self.frames += 1;
+        let spent = 0;
+        while spent < SLICE && !self.done {
+            spent += self.step();
+        }
+        // Stop only after at least one complete pass. If interrupted, the previous pass's best
+        // move was searched first, so best remains a legal, usable answer at the frame deadline.
+        if self.frames >= PATIENCE && self.depth > 0 {
+            self.done = true;
+        }
+    }
+
+    // starts a pass one ply deeper than the last, with the last one's best move in front
+    fn deepen(self) {
+        let root = self.plies[0];
+        root.moves = self.roots;
+        root.next = 0;
+        root.alpha = -LIMIT;
+        root.beta = LIMIT;
+        root.best = -LIMIT;
+        root.depth = self.depth + 1;
+        self.at = 0;
+    }
+
+    // tries the next move of the position the search is in, or leaves it when it has none left
+    fn step(self) -> int {
+        let node = self.plies[self.at];
+        if node.next < node.moves.len() {
+            self.board.make(node.moves[node.next]);
+            node.next += 1;
+            return self.open(node.depth - 1, -node.beta, -node.alpha);
+        }
+        if self.at == 0 {
+            self.depth = node.depth;
+            let roots = self.roots;
+            roots[self.first] = roots[0];
+            roots[0] = self.best;
+            self.first = 0;
+            let forced = self.score > MATE - MATE_WINDOW || self.score < MATE_WINDOW - MATE;
+            if forced || self.depth == DEEPEST || roots.len() == 1 {
+                self.done = true;
+            } else {
+                self.deepen();
+            }
+            return 1;
+        }
+        let score = node.best;
+        // Every child left the mover's king attacked. Prefer shorter mates (and postpone losses)
+        // by incorporating the root distance; no legal moves without check means stalemate.
+        if score <= -WON {
+            score = if self.board.in_check() self.at - MATE else 0;
+        }
+        self.at -= 1;
+        self.close(score);
+        1
+    }
+
+    // The board has the candidate move applied, but at still names its parent. Immediate
+    // cutoffs close that parent directly; entering a child increments at before storing it.
+    fn open(self, depth: int, alpha: int, beta: int) -> int {
+        let board = self.board;
+        self.positions += 1;
+        let best = -LIMIT;
+        let checked = false;
+        if depth <= 0 {
+            // A regular node's move generator detects an attack on the previous mover's king.
+            // Frontier cutoffs can return before generating moves, so validate that king first.
+            // The cached squares make this cheaper than building/sorting a discarded move list.
+            let mover = -board.side;
+            if board.attacked(board.king(mover), board.side) {
+                self.close(WON);
+                return 1;
+            }
+            checked = board.in_check();
+            if depth <= -CAPTURES {
+                // A hard cap keeps check/capture sequences inside the preallocated stack and
+                // frame budget. Recognize mate here rather than evaluating a mated king.
+                let score = if checked && board.legal().is_empty() {
+                    self.at + 1 - MATE
+                } else {
+                    board.score * board.side
+                };
+                self.close(score);
+                return if checked OPEN else 1;
+            }
+            // "Stand pat": outside the normal depth, evaluation is the alternative to another
+            // capture. beta cuts off moves the parent will reject; alpha narrows the next window.
+            // A checked side cannot decline to move: include its quiet evasions below instead.
+            if !checked {
+                best = board.score * board.side;
+                if best >= beta {
+                    self.close(best);
+                    return 1;
+                }
+                alpha = alpha.max(best);
+            }
+        }
+        let moves? = board.moves(depth <= 0 && !checked) else {
+            self.close(WON);
+            return OPEN;
+        };
+        self.at += 1;
+        let node = self.plies[self.at];
+        node.moves = moves;
+        node.next = 0;
+        node.alpha = alpha;
+        node.beta = beta;
+        node.best = best;
+        node.depth = depth;
+        OPEN
+    }
+
+    // takes back the move that led to a position and hands its score to the position before
+    fn close(self, score: int) {
+        let node = self.plies[self.at];
+        let m = node.moves[node.next - 1];
+        self.board.unmake(m);
+        score = -score;
+        if score > node.best {
+            node.best = score;
+            node.alpha = node.alpha.max(score);
+            if self.at == 0 {
+                self.best = m;
+                self.first = node.next - 1;
+                self.score = score;
+            }
+            if score >= node.beta {
+                // Mark the node exhausted; step() unwinds it on the next slice iteration.
+                node.next = node.moves.len();
+            }
+        }
+    }
+}

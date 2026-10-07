@@ -46,3 +46,5 @@ mimas::write_api(&library, "scripts/api.json".as_ref())?;
 ```
 
 `mimas check`, `mimas build` and the [language server](../introduction/lsp.md#host-apis) find the manifest on their own, checking a project's scripts against the newest one written by a binary of its package. Until the host has run, they warn and fall back to the standard library alone. After you change your host's API, run it again to update the manifest. A manifest only works with the version of mimas that wrote it.
+
+Scripts alongside workspace members, rather than inside a package, use the newest JSON manifest in the workspace's `target/mimas` directory. These can be manually named exports such as `lunacade.json`. Both lookups ask Cargo for its actual target directory, so `CARGO_TARGET_DIR` and Cargo's `target-dir` setting also work. Discovery stops at the nearest Cargo manifest or Git repository boundary.

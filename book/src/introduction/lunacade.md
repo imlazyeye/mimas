@@ -1,6 +1,6 @@
 # lunacade
 
-lunacade is a fantasy console for mimas, a small imaginary machine whose games are mimas programs. These programs are called carts. A cart draws on a 256 by 144 screen with 16 colors and reads a d-pad, four buttons, Start and a mouse. Five example carts ship with it, from Pong to a survivors-like called Swarm.
+lunacade is a fantasy console for mimas, a small imaginary machine whose games are mimas programs. These programs are called carts. A cart draws on a 256 by 144 screen with 16 colors and reads a d-pad, four buttons, Start and a mouse. Six example carts ship with it, from Pong to a survivors-like called Swarm and a game of chess against the console.
 
 You can play them, edit them and make your own in the browser at [mim.as/lunacade](../lunacade/). Like the rest of mimas it's young, and it has rough edges.
 
@@ -133,7 +133,7 @@ A cart's `update` and `draw` run to completion every frame, and a heavy frame ma
 
 ## The example carts
 
-Pong, Snake, Breakout and Asteroids are each one script. Swarm is a survivors-like split into modules, and it's written to be read. Its six weapons implement a `Weapon` [pact](../reference/pacts.md), what a level-up offers is an `Offer` enum with payloads that gets matched exhaustively, and looking for the nearest enemy gives back an option. Hold X and Y together on its title screen for half a second to start a run with 300 enemies already on the field and a player who can't be hurt.
+Pong, Snake, Breakout and Asteroids are each one script. Swarm is a survivors-like split into modules, and it's written to be read. Its six weapons implement a `Weapon` [pact](../reference/pacts.md), what a level-up offers is an `Offer` enum with payloads that gets matched exhaustively, and looking for the nearest enemy gives back an option. Hold X and Y together on its title screen for half a second to start a run with 300 enemies already on the field and a player who can't be hurt. Chess puts you against a search that's written in the cart. A frame has to run to completion, so the search keeps the positions it's part way through in a struct and does a slice of the work each frame, for up to two seconds a move. The box looks three or four plies ahead, and follows captures a few plies past that. A pawn always promotes to a queen, and the cart doesn't know the draws by repetition or by fifty moves.
 
 They're in `examples/lunacade/carts`, and the page has them all. A new cart on the page starts as the one in `carts/new`.
 

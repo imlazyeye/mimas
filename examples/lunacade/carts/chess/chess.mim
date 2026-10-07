@@ -1,0 +1,376 @@
+use std::math::{IVec2, ivec2};
+
+// chess: white against the box.
+//
+// A classical mailbox/negamax engine, with a resumable search for the console.
+// References for the board/search techniques and the evaluation tables:
+//   10x12 mailbox: https://chessprogramming.org/10x12_Board
+//   Negamax search: https://chessprogramming.org/Negamax
+//   Evaluation tables by Tomasz Michniewski:
+//   https://chessprogramming.org/Simplified_Evaluation_Function
+//
+// board is the position, the moves a side has and how to make one and take it back. ai is the
+// search, which runs a slice at a time across the frames the box spends thinking. this file is
+// the scenes, the cursor and what's drawn.
+//
+// a pawn that reaches the last rank is always a queen, and a game is never drawn by repeating
+// a position or by fifty quiet moves.
+
+use ai::Search;
+use board::{Board, EN_PASSANT, FIRST, KIND_SHIFT, KING, OFF, STRIDE, WHITE, WIDTH, origin, target};
+
+const LEFT = 12;
+const TOP = 10;
+const CELL = 16;
+const PANEL = 150;
+// Six 16 by 32 pieces per row: White at y=0, Black at y=32. Their feet sit inside a
+// 16 by 16 board square; the extra height extends above it. Captures use 8 by 8 miniatures.
+const PIECE_HEIGHT = 32;
+const SMALL_PIECES = 128; // sheet row 64: White icons, followed by Black at row 72
+const SMALL_BLACK = 16;  // an 8-pixel sheet row contains sixteen 8 by 8 sprite slots
+
+// Timings are simulation frames at the console's target of 60 Hz.
+const RESIGN = 180;       // three seconds to confirm resignation
+const RESTART_DELAY = 60; // leave the final position visible for at least one second
+const REPEAT_DELAY = 14;  // initial d-pad delay, followed by one step every four frames
+const REPEAT_RATE = 4;
+const CURSOR_HOME = FIRST + 6 * STRIDE + 4; // e2, in front of White's king
+const CAPTURE_STEP = 7; // the visible part of each padded 8 by 8 icon is at most seven pixels
+const DIRECTIONS = [
+    (Button::Up, -STRIDE), (Button::Down, STRIDE), (Button::Left, -1), (Button::Right, 1),
+];
+
+enum Scene {
+    Title,
+    Playing,
+    Over(str),
+}
+
+// Everything that belongs to one game lives together. Replacing this value resets all move,
+// search and input state while preserving the Game captured by the console callbacks.
+struct Round {
+    board: Board,
+    // what white can play, which is empty while it's the box's turn to move
+    legal: [int],
+    search: Search?,
+    cursor: int,
+    // the square of the piece in hand, the last move, and the square of a king in check
+    picked: int?,
+    last: int?,
+    check: int?,
+    // every piece taken so far
+    lost: [int],
+    yours: str,
+    boxes: str,
+    depth: int,
+    positions: int,
+    resign: int,
+    // frames a direction has been held
+    hold: int,
+}
+
+impl Round {
+    fn new() -> Self {
+        let board = Board::new();
+        Self {
+            board,
+            legal = board.legal(),
+            search = null,
+            cursor = CURSOR_HOME,
+            picked = null,
+            last = null,
+            check = null,
+            lost = [],
+            yours = "",
+            boxes = "",
+            depth = 0,
+            positions = 0,
+            resign = 0,
+            hold = 0,
+        }
+    }
+}
+
+struct Game {
+    scene: Scene,
+    age: int,
+    round: Round,
+}
+
+impl Game {
+    fn new() -> Self {
+        Self { scene = Scene::Title, age = 0, round = Round::new() }
+    }
+
+    fn update(self) {
+        self.age += 1;
+        let start = input::pressed(Button::Start);
+        match self.scene {
+            Scene::Title => {
+                if start { self.scene = Scene::Playing; }
+            },
+            Scene::Playing => self.play(start),
+            Scene::Over(_) => {
+                if self.age > RESTART_DELAY && start {
+                    self.round = Round::new();
+                    self.scene = Scene::Title;
+                    self.age = 0;
+                }
+            },
+        }
+    }
+
+    fn play(self, start: bool) {
+        let round = self.round;
+        let board = round.board;
+        // Preserve simultaneous directions, with a delay before keyboard auto-repeat.
+        let held = for (button, step) in DIRECTIONS {
+            if input::held(button) collect step;
+        };
+        round.hold = if held.is_empty() 0 else round.hold + 1;
+        if round.hold == 1 || (round.hold > REPEAT_DELAY && round.hold % REPEAT_RATE == 0) {
+            for step in held {
+                if board.sq[round.cursor + step] != OFF {
+                    round.cursor += step;
+                }
+            }
+        }
+
+        // the mouse only takes the cursor when it moves or clicks, so it doesn't fight the d-pad
+        let click = false;
+        if let spot? = input::mouse() {
+            let at = spot.sub(ivec2(LEFT, TOP));
+            if at.x >= 0 && at.x < CELL * WIDTH && at.y >= 0 && at.y < CELL * WIDTH {
+                click = input::mouse_pressed(Mouse::Left);
+                if click || input::mouse_moved() {
+                    round.cursor = FIRST + at.y ~/ CELL * STRIDE + at.x ~/ CELL;
+                }
+            }
+        }
+
+        round.resign = (round.resign - 1).max(0);
+        if start {
+            if round.resign > 0 {
+                self.finish("YOU RESIGNED");
+                return;
+            }
+            round.resign = RESIGN;
+        }
+
+        if let search? = round.search {
+            search.think();
+            if search.done {
+                round.search = null;
+                round.depth = search.depth;
+                round.positions = search.positions;
+                self.commit(search.best);
+            }
+            return;
+        }
+
+        if input::pressed(Button::B) || input::mouse_pressed(Mouse::Right) {
+            round.picked = null;
+        }
+        if input::pressed(Button::A) || click {
+            let at = round.cursor;
+            for m in round.legal {
+                if origin(m) == round.picked && target(m) == at {
+                    self.commit(m);
+                    return;
+                }
+            }
+            round.picked = if board.sq[at] > 0 && at != round.picked at else null;
+        }
+    }
+
+    // plays a move for whichever side is to move, and works out what that leaves the other with
+    fn commit(self, m: int) {
+        let round = self.round;
+        let board = round.board;
+        let mover = board.side;
+        let to = target(m);
+        let taken = if (m >> KIND_SHIFT) == EN_PASSANT { -mover } else { board.sq[to] };
+        board.make(m);
+        if taken != 0 {
+            round.lost.push(taken);
+        }
+        round.last = m;
+        round.picked = null;
+        let text = f"{name(origin(m))}-{name(to)}";
+        if mover == WHITE {
+            round.yours = text;
+        } else {
+            round.boxes = text;
+        }
+        round.check = if board.in_check() board.king(board.side) else null;
+
+        let replies = board.legal();
+        if replies.is_empty() {
+            if round.check == null {
+                self.finish("STALEMATE");
+            } else if mover == WHITE {
+                self.finish("CHECKMATE, YOU WIN");
+            } else {
+                self.finish("CHECKMATE, THE BOX WINS");
+            }
+            return;
+        }
+        if mover == WHITE {
+            round.legal = [];
+            round.search = Search::new(board, replies);
+        } else {
+            round.legal = replies;
+        }
+    }
+
+    fn finish(self, verdict: str) {
+        let round = self.round;
+        round.search = null;
+        round.legal = [];
+        round.picked = null;
+        round.resign = 0;
+        self.scene = Scene::Over(verdict);
+        self.age = 0;
+    }
+
+    fn draw(self) {
+        let round = self.round;
+        gfx::clear(Color::Black);
+        // Plum (hex 1) marks alpha in this sheet, so Black (hex 0) remains an opaque outline.
+        gfx::transparent(Color::Plum);
+        let cell = ivec2(CELL, CELL);
+        if let Scene::Title = self.scene {
+            gfx::text_centered("C H E S S", 24, Color::Yellow);
+            for piece in 1..KING + 1 {
+                let x = 64 + piece * CELL;
+                let top = ivec2(x, 44);
+                let bottom = ivec2(x, 76);
+                gfx::fill_rect(top, cell, if piece % 2 == 0 Color::Teal else Color::Silver);
+                gfx::fill_rect(bottom, cell, if piece % 2 == 0 Color::Silver else Color::Teal);
+                stamp(piece, top);
+                stamp(-piece, bottom);
+            }
+            gfx::text_centered("YOU PLAY WHITE AGAINST THE BOX", 94, Color::Silver);
+            if self.age % 40 < 26 {
+                gfx::text_centered("PRESS START", 112, Color::Yellow);
+            }
+            return;
+        }
+
+        let sq = round.board.sq;
+        let from = if let m? = round.last origin(m) else null;
+        let to = if let m? = round.last target(m) else null;
+        for at in round.board.cells {
+            let col = at % STRIDE - 1;
+            let row = (at - FIRST) ~/ STRIDE;
+            let pos = square(at);
+            let dark = (col + row) % 2 == 1;
+            let color = if at == round.picked {
+                Color::Lime
+            } else if at == round.check {
+                Color::Red
+            } else if at == from || at == to {
+                if dark Color::Blue else Color::Sky
+            } else if dark {
+                Color::Teal
+            } else {
+                Color::Silver
+            };
+            gfx::fill_rect(pos, cell, color);
+            if row == WIDTH - 1 {
+                gfx::text("ABCDEFGH"[col], ivec2(pos.x + 6, TOP + CELL * WIDTH + 1), Color::Slate);
+            }
+            if col == 0 {
+                gfx::text(f"{WIDTH - row}", ivec2(4, pos.y + 5), Color::Slate);
+            }
+        }
+        for m in round.legal {
+            if origin(m) == round.picked {
+                let at = target(m);
+                if sq[at] == 0 {
+                    gfx::fill_circle(square(at).add(ivec2(7, 7)), 2, Color::Green);
+                } else {
+                    gfx::rect(square(at), cell, Color::Green);
+                }
+            }
+        }
+        // Half-second cursor cycle, with white/black halves that read on either board color.
+        let blink = if self.age % 30 < 15 Color::White else Color::Black;
+        gfx::rect(square(round.cursor), cell, blink);
+        // Paint the board and its markers first, then pieces from rank eight to rank one.
+        // Tall pieces overlap the square above them and can cover its cursor border.
+        for at in round.board.cells {
+            if sq[at] != 0 {
+                stamp(sq[at], square(at));
+            }
+        }
+
+        gfx::text("CHESS", ivec2(PANEL, 6), Color::Yellow);
+        if let Scene::Over(verdict) = self.scene {
+            gfx::text(verdict, ivec2(PANEL, 18), Color::Yellow);
+        } else if round.search != null {
+            // Advance the status dots every quarter-second.
+            let thinking = "THE BOX IS THINKING" + ".".repeat(self.age ~/ 15 % 4);
+            gfx::text(thinking, ivec2(PANEL, 18), Color::Sky);
+        } else if round.check != null {
+            gfx::text("CHECK, YOUR MOVE", ivec2(PANEL, 18), Color::Red);
+        } else {
+            gfx::text("YOUR MOVE", ivec2(PANEL, 18), Color::White);
+        }
+        gfx::text(f"YOU  {round.yours}\nBOX  {round.boxes}", ivec2(PANEL, 32), Color::Silver);
+        let yours = 0;
+        let boxes = 0;
+        for piece in round.lost {
+            if piece < 0 {
+                stamp(piece, ivec2(PANEL + yours * CAPTURE_STEP, 50), small = true);
+                yours += 1;
+            } else {
+                stamp(piece, ivec2(PANEL + boxes * CAPTURE_STEP, 60), small = true);
+                boxes += 1;
+            }
+        }
+        if round.depth > 0 {
+            let looked = f"IT LOOKED {round.depth} PLIES DEEP\nAT {round.positions} POSITIONS";
+            gfx::text(looked, ivec2(PANEL, 78), Color::Slate);
+        }
+        let help = "D-PAD OR MOUSE POINTS\nA PICKS UP AND PUTS DOWN\nB LETS GO";
+        gfx::text(help, ivec2(PANEL, 106), Color::Slate);
+        if let Scene::Over(_) = self.scene {
+            if self.age > RESTART_DELAY && self.age % 40 < 26 {
+                gfx::text("PRESS START", ivec2(PANEL, 128), Color::Yellow);
+            }
+        } else if round.resign > 0 {
+            gfx::text("START AGAIN TO RESIGN", ivec2(PANEL, 128), Color::Red);
+        } else {
+            gfx::text("START RESIGNS", ivec2(PANEL, 128), Color::Slate);
+        }
+    }
+}
+
+// the top left corner of a square on the screen
+fn square(at: int) -> IVec2 {
+    ivec2(LEFT + (at % STRIDE - 1) * CELL, TOP + ((at - FIRST) ~/ STRIDE) * CELL)
+}
+
+// a square the way a player says it, like E4
+fn name(at: int) -> str {
+    f"{"ABCDEFGH"[at % STRIDE - 1]}{WIDTH - (at - FIRST) ~/ STRIDE}"
+}
+
+// Both colors are drawn in the sheet: no palette swaps are needed. Anchor the tall board
+// pieces by their bases, while the capture icons use the usual top-left sprite position.
+fn stamp(piece: int, pos: IVec2, small = false) {
+    let kind = piece.abs() - 1;
+    if small {
+        let row = if piece < 0 SMALL_BLACK else 0;
+        gfx::sprite(SMALL_PIECES + row + kind, pos);
+    } else {
+        let row = if piece < 0 PIECE_HEIGHT else 0;
+        gfx::blit(ivec2(kind * CELL, row), ivec2(CELL, PIECE_HEIGHT),
+            pos.sub(ivec2(0, PIECE_HEIGHT - CELL)));
+    }
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());

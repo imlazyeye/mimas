@@ -113,3 +113,24 @@ fn swarm_stress() {
     println!("swarm stress: {crowd} enemies at most");
     assert!(crowd >= 300, "the crowd peaked at {crowd} enemies");
 }
+
+#[test]
+fn chess_thinks() {
+    let Some((_, dir)) = carts().into_iter().find(|(name, _)| name == "chess") else {
+        println!("no chess cart, skipping its opening move");
+        return;
+    };
+    // Start, then A on the king's pawn, up twice and A again, all before the scripted input begins
+    let presses = [
+        (Button::Start, 5),
+        (Button::A, 20),
+        (Button::Up, 24),
+        (Button::Up, 28),
+        (Button::A, 32),
+    ];
+    let holds = presses.map(|(button, frame)| Hold {
+        button,
+        frames: frame..=frame + 1,
+    });
+    play(&dir, &holds, 120).unwrap_or_else(|message| panic!("chess: {message}"));
+}
