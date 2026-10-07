@@ -29,6 +29,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - The branches of an `if` or `match`, and the values a loop breaks with or collects, can be different types that share a pact. They used to be a type mismatch, even under a pact annotation.
 - `Self` in a type mismatch reads as the type it stands for. Two different types could show as "expected Self but found Self".
 - Calling a pact method with `?.` on an optional pact value (`thing?.name()` with `thing: Named?`) iced the compiler.
+- `==` between two arrays or two tuples gave an array holding each element's comparison instead of a `bool`, and could panic the host when that result was used. It now compares them structurally, as `!=` already did.
+- `!=` between an `int` and a `float` could be `true` when the two were equal (`i != f` with `let i = 1;` and `let f = 1.0;`).
 
 ## [0.3.0] - 2026-09-26
 

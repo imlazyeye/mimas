@@ -527,12 +527,13 @@ pub fn bin<'gc>(this: Val<'gc>, ctx: Ctx<'gc>, other: Val<'gc>, op: BinOp) -> Rt
         (BinOp::LessEqual, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() <= b.as_str()),
         (BinOp::GreaterThan, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() > b.as_str()),
         (BinOp::GreaterEqual, Val::Str(a), Val::Str(b)) => Val::Bool(a.as_str() >= b.as_str()),
-        (BinOp::NotEqual, left, right) => Val::Bool(left != right),
         (op, Val::Bool(a), Val::Bool(b)) => bool_bin(op, a, b)?,
         (op, Val::Float(a), Val::Float(b)) => float_bin(op, a, b)?,
         (op, Val::Float(a), Val::Int(b)) => float_bin(op, a, b as f64)?,
         (op, Val::Int(a), Val::Float(b)) => float_bin(op, a as f64, b)?,
         (op, Val::Int(a), Val::Int(b)) => int_bin(op, a, b)?,
+        (BinOp::Identity, left, right) => Val::Bool(left == right),
+        (BinOp::NotEqual, left, right) => Val::Bool(left != right),
         (op, Val::Array(a), Val::Array(b)) => {
             let n = a.0.borrow().len();
             let mut out = Vec::with_capacity(n);
@@ -562,7 +563,6 @@ pub fn bin<'gc>(this: Val<'gc>, ctx: Ctx<'gc>, other: Val<'gc>, op: BinOp) -> Rt
             }
             Val::Array(ctx.new_array(out))
         }
-        (BinOp::Identity, left, right) => Val::Bool(left == right),
         _ => Err(RtErr::invalid_bin(this, op, other))?,
     })
 }

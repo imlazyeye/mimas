@@ -358,6 +358,44 @@ test_vm!(
 );
 
 test_vm!(
+    array_structural_eq,
+    "[1, 2, 3] == [1, 2, 3]" => Bool(true),
+    "[1, 2, 3] == [1, 2, 4]" => Bool(false),
+    "[1, 2] == [1]" => Bool(false),
+    "[[1, 2], [3, 4]] == [[1, 2], [3, 4]]" => Bool(true),
+    "[[1, 2], [3, 4]] == [[1, 2], [3, 5]]" => Bool(false),
+);
+
+test_vm!(
+    tuple_structural_eq,
+    r#"(1, "a") == (1, "a")"# => Bool(true),
+    r#"(1, "a") == (1, "b")"# => Bool(false),
+    r#"(1, "a") != (1, "b")"# => Bool(true),
+);
+
+test_vm!(
+    array_eq_is_a_bool,
+    "let a = [1] == [1];
+     let b = [1] == [2];",
+    "a == true" => Bool(true),
+    "b == false" => Bool(true),
+    "if a 1 else 0" => Int(1),
+);
+
+test_vm!(
+    int_float_eq_bound,
+    "let i = 1;
+     let f = 1.0;
+     let g = 2.0;",
+    "i == f" => Bool(true),
+    "f == i" => Bool(true),
+    "i != f" => Bool(false),
+    "f != i" => Bool(false),
+    "i == g" => Bool(false),
+    "g != i" => Bool(true),
+);
+
+test_vm!(
     array_structural_inequality,
     "[1, 2, 3] != [1, 2, 3]" => Bool(false),
 );
