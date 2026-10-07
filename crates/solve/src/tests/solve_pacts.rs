@@ -589,3 +589,120 @@ test_ty!(
      }",
     "check(V { x = 1 }, W { y = 2 })" => Bool,
 );
+
+// issue #59: a bound could be holding any implementer, so it never passes as one of them
+test_fail!(
+    pact_value_returned_as_concrete,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     struct Circle { r: int }
+     impl Draw for Square {}
+     impl Draw for Circle {}
+     fn f(d: Draw) -> Square { d }"
+);
+
+test_fail!(
+    pact_value_bound_as_concrete,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     impl Draw for Square {}
+     let d: Draw = Square { s = 1 };
+     let sq: Square = d;"
+);
+
+test_fail!(
+    pact_value_passed_as_concrete,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     impl Draw for Square {}
+     fn side(sq: Square) -> int { sq.s }
+     let d: Draw = Square { s = 1 };
+     side(d);"
+);
+
+test_fail!(
+    widened_array_element_as_concrete,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     struct Circle { r: int }
+     impl Draw for Square {}
+     impl Draw for Circle {}
+     let xs = [Square { s = 1 }, Circle { r = 2 }];
+     let sq: Square = xs[1];"
+);
+
+test_ty!(
+    pact_if_branches_widen_to_shared_pact,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     struct Circle { r: int }
+     impl Draw for Square {}
+     impl Draw for Circle {}
+     let x: Draw = if true Square { s = 1 } else Circle { r = 2 };",
+    "x.d()" => Int,
+);
+
+test_ty!(
+    pact_match_arms_widen_to_shared_pact,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     struct Circle { r: int }
+     impl Draw for Square {}
+     impl Draw for Circle {}
+     let x = match 1 { 0 => Square { s = 1 }, _ => Circle { r = 2 } };",
+    "x.d()" => Int,
+);
+
+test_ty!(
+    pact_static_ctor_branches_widen,
+    "pact Draw { fn make() -> Self; fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     struct Circle { r: int }
+     impl Draw for Square { fn make() -> Self { Square { s = 1 } } }
+     impl Draw for Circle { fn make() -> Self { Circle { r = 2 } } }
+     let x = if true Square::make() else Circle::make();",
+    "x.d()" => Int,
+);
+
+test_fail!(
+    if_branches_without_shared_pact_rejected,
+    "struct A { x: int }
+     struct B { y: int }
+     let x = if true A { x = 1 } else B { y = 2 };"
+);
+
+test_ty!(
+    wider_bound_fulfills_narrower,
+    "pact Draw { fn d(self) -> int { 0 } }
+     pact Name { fn n(self) -> int { 1 } }
+     struct Square { s: int }
+     impl Draw for Square {}
+     impl Name for Square {}
+     fn render(d: Draw) -> int { d.d() }
+     fn both(v: Draw + Name) -> int { render(v) }",
+    "both(Square { s = 1 })" => Int,
+);
+
+test_fail!(
+    narrower_bound_rejected_as_wider,
+    "pact Draw { fn d(self) -> int { 0 } }
+     pact Name { fn n(self) -> int { 1 } }
+     struct Square { s: int }
+     impl Draw for Square {}
+     impl Name for Square {}
+     fn both(v: Draw + Name) -> int { 0 }
+     fn render(d: Draw) -> int { both(d) }"
+);
+
+test_ty!(
+    pact_collect_widens_to_shared_pact,
+    "pact Draw { fn d(self) -> int { 0 } }
+     struct Square { s: int }
+     struct Circle { r: int }
+     impl Draw for Square {}
+     impl Draw for Circle {}
+     let xs = for i in 4 {
+         if i == 0 { collect Square { s = i }; } else { collect Circle { r = i }; }
+     };",
+    "xs[0].d()" => Int,
+);

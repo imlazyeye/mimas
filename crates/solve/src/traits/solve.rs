@@ -1352,11 +1352,10 @@ impl Solve for If {
             // back from the second query as a bare vid)
             else_expr.query(solver)?;
             let ty = if let Err(e) = else_expr.fulfill_ty(positive_ty.clone(), solver) {
-                if let Some(ty) = Ty::coerce_option(else_expr.query(solver)?, positive_ty, solver) {
-                    ty
-                } else {
-                    Err(e)?
-                }
+                let found = else_expr.query(solver)?;
+                Ty::coerce_option(found.clone(), positive_ty.clone(), solver)
+                    .or_else(|| Ty::coerce_pacts(found, positive_ty, solver))
+                    .ok_or(e)?
             } else {
                 positive_ty.clone()
             };
@@ -1809,7 +1808,10 @@ impl Solve for Match {
                     // see `If`
                     body.query(solver)?;
                     if let Err(e) = body.fulfill_ty(acc.clone(), solver) {
-                        Ty::coerce_option(body.query(solver)?, acc, solver).ok_or(e)?
+                        let found = body.query(solver)?;
+                        Ty::coerce_option(found.clone(), acc.clone(), solver)
+                            .or_else(|| Ty::coerce_pacts(found, acc, solver))
+                            .ok_or(e)?
                     } else {
                         acc
                     }

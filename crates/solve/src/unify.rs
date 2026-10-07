@@ -44,16 +44,13 @@ impl Unification {
 
             // `Self` fulfills its own pact's bound (it's some implementer), but a bound never
             // fulfills `Self`, as the value could be any implementer, not necessarily the
-            // receiver's type. Direction actually matters here, unlike the adt/pact
-            // rule below.
+            // receiver's type.
             (Ty::Skolem(pid), Ty::Pacts(pids)) if pids.iter().all(|p| *p == *pid) => {
                 Ok(Substitution::None)
             }
 
-            (Ty::Adt(aid), Ty::Pacts(pids))
-            | (Ty::Pacts(pids), Ty::Adt(aid))
-            | (Ty::Identity(aid), Ty::Pacts(pids))
-            | (Ty::Pacts(pids), Ty::Identity(aid)) => {
+            // one way only: a bound could be holding any implementer, so it never fulfills an adt
+            (Ty::Adt(aid) | Ty::Identity(aid), Ty::Pacts(pids)) => {
                 if pids
                     .iter()
                     .all(|pid| solver.pact_impls.contains(&(*pid, *aid)))
@@ -62,6 +59,13 @@ impl Unification {
                 } else {
                     Err(potential_err)
                 }
+            }
+
+            // a wider bound fulfills a narrower one
+            (Ty::Pacts(found), Ty::Pacts(expected))
+                if expected.iter().all(|pid| found.contains(pid)) =>
+            {
+                Ok(Substitution::None)
             }
 
             // fn types unify structurally -- param names and the synthesized is_ctor flag
