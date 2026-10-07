@@ -52,6 +52,17 @@ test_vm!(
 );
 
 test_vm!(
+    module_unit_struct_by_path,
+    files {
+        lib => "module @;
+                pub struct Unit;
+                pub fn bare() -> Unit { Unit }",
+        main => "let u = lib::Unit;
+                 let TEST_VALUE = u == lib::bare();",
+    } => Bool(true),
+);
+
+test_vm!(
     nested_module_decl,
     files {
         util => "module game::util; pub const SCALE: int = 3;",
