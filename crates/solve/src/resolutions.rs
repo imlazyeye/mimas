@@ -143,6 +143,7 @@ pub struct ResolvedAdt {
     pub fields: Vec<String>,
     pub implements: Vec<PactId>,
     pub methods: IndexMap<String, DecId>,
+    pub constants: IndexMap<String, DecId>,
     pub dispatch_ids: Vec<AdtId>,
 }
 
@@ -170,6 +171,13 @@ impl ResolvedAdt {
             .map(|(name, field)| (name.clone(), field.dec))
             .collect();
 
+        let constants = adt
+            .impls
+            .iter()
+            .filter(|(_, field)| matches!(solver.decs[field.dec].kind, DecKind::Constant(_)))
+            .map(|(name, field)| (name.clone(), field.dec))
+            .collect();
+
         let dispatch_ids = if adt.flags.contains(AdtFlags::IS_ENUM) {
             adt.variants.values().filter_map(Variant::layout).collect()
         } else {
@@ -188,6 +196,7 @@ impl ResolvedAdt {
             fields,
             implements,
             methods,
+            constants,
             dispatch_ids,
         }
     }

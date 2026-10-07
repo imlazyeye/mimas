@@ -115,3 +115,45 @@ fn hover_shows_a_module_function_and_its_doc() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn each_path_resolves_its_member() {
+    let root = tree(
+        "each",
+        &[(
+            "a.mim",
+            "pact Shape {
+                 fn sides() -> int;
+             }
+             struct Square;
+             impl Shape for Square {
+                 fn sides() -> int {
+                     4
+                 }
+             }
+             let all = Shape::*::sides();",
+        )],
+    );
+    let a = root.join("a.mim");
+    let mut workspace = Workspace::new(HostApi::Off);
+    open(&mut workspace, &a);
+    let project = workspace.project(&a).unwrap();
+    let references = project
+        .references(&a, at(&a, "sides() -> int;"), true)
+        .unwrap();
+    assert_eq!(references.len(), 2, "{references:?}");
+    let hover = workspace
+        .analysis(&a)
+        .unwrap()
+        .hover(&a, at(&a, "sides();"))
+        .unwrap();
+    let Contents::MarkupContent(content) = hover.contents else {
+        panic!("{:?}", hover.contents);
+    };
+    assert!(
+        content.value.contains("fn sides() -> [int]"),
+        "{}",
+        content.value
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

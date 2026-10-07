@@ -260,3 +260,42 @@ fn unfinished_inputs() {
          }"
     ));
 }
+
+#[test]
+fn each_impls_are_fixed_at_compile() {
+    let mut session = session(&[]);
+    quiet(
+        &mut session,
+        "pact Shape {
+             fn sides() -> int;
+         }",
+    );
+    quiet(&mut session, "struct Square;");
+    quiet(
+        &mut session,
+        "impl Shape for Square {
+             fn sides() -> int {
+                 4
+             }
+         }",
+    );
+    quiet(
+        &mut session,
+        "fn old() -> [int] {
+             Shape::*::sides()
+         }",
+    );
+    assert_eq!(echo(&mut session, "old()"), "[4]: [int]");
+    quiet(&mut session, "struct Triangle;");
+    quiet(
+        &mut session,
+        "impl Shape for Triangle {
+             fn sides() -> int {
+                 3
+             }
+         }",
+    );
+    assert_eq!(echo(&mut session, "3 in Shape::*::sides()"), "true: bool");
+    assert_eq!(echo(&mut session, "4 in Shape::*::sides()"), "true: bool");
+    assert_eq!(echo(&mut session, "old()"), "[4]: [int]");
+}

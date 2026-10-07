@@ -229,7 +229,15 @@ impl Emit for Access {
                     ResolvedDeclKind::Pact(_) => todo!(),
                 }
             }
-            Access::Each { .. } => todo!(),
+            // only a constant gets here (a fn is lowered by its call)
+            Access::Each { left, right } => {
+                let array = ir.current().new_array();
+                for dec in ir.each_impl(left.id(), &right.lexeme) {
+                    let value = Constant::emit_const_dec(ir, dec, id)?;
+                    ir.current().push(array, value);
+                }
+                Some(array)
+            }
             Access::Square { left, key, kind } => {
                 // tainted plain accesses ride an upstream `?`, so they must null-check at runtime
                 // just like an explicit `?[i]` -- else a mid-chain null faults instead of flowing
@@ -475,6 +483,19 @@ impl Emit for Call {
             Some(Ty::Fn(h)) => h.clone(),
             _ => unreachable!("solver typed callee as something other than Adt or Fn"),
         };
+
+        // one call per implementer known here (a session can add another after this is compiled),
+        // all sharing the same lowered args
+        if let ExprKind::Access(Access::Each { left, right }) = self.left.kind() {
+            let args = fill_call_args(ir, &fn_ty, &[], &self.arguments, None)?;
+            let array = ir.current().new_array();
+            for dec in ir.each_impl(left.id(), &right.lexeme) {
+                let body = ir.item_body_for(dec);
+                let value = ir.current().call_direct(body, args.clone());
+                ir.current().push(array, value);
+            }
+            return Some(array);
+        }
 
         if let ExprKind::Access(Access::Dot {
             left,
