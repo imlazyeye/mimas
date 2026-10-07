@@ -184,7 +184,9 @@ fn from_dir_hello() {
 fn from_dir_parts_only() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("from_dir_parts_only");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    for folder in ["sub/deeper", ".hidden"] {
+        std::fs::create_dir_all(dir.join(folder)).unwrap();
+    }
     for name in [
         "main.mim",
         "util.mim",
@@ -192,13 +194,25 @@ fn from_dir_parts_only() {
         "notes.txt",
         "cart.toml",
         "sub/inner.mim",
+        "sub/sprites.txt",
+        "sub/deeper/deep.mim",
+        ".hidden/secret.mim",
     ] {
         std::fs::write(dir.join(name), name).unwrap();
     }
     let cart = Cart::from_dir(&dir).unwrap();
     let paths: Vec<_> = cart.files.keys().map(String::as_str).collect();
-    assert_eq!(paths, ["main.mim", "sprites.txt", "util.mim"]);
-    assert_eq!(cart.files["util.mim"], "util.mim");
+    assert_eq!(
+        paths,
+        [
+            "main.mim",
+            "sprites.txt",
+            "sub/deeper/deep.mim",
+            "sub/inner.mim",
+            "util.mim"
+        ]
+    );
+    assert_eq!(cart.files["sub/inner.mim"], "sub/inner.mim");
     std::fs::remove_dir_all(&dir).unwrap();
     assert!(Cart::from_dir(&dir).is_err());
 }
@@ -213,5 +227,43 @@ fn json_shape() {
         serde_json::to_string(&cart)
             .unwrap()
             .starts_with(r#"{"files":{"main.mim""#)
+    );
+}
+
+#[test]
+fn modules_in_folders() {
+    let cart = cart(&[
+        (
+            "main.mim",
+            "use util;
+             use deep;
+             print(util::double(21));
+             print(deep::N);",
+        ),
+        (
+            "lib/util.mim",
+            "module @;
+             pub fn double(n: int) -> int {
+                 n * 2
+             }",
+        ),
+        (
+            "lib/inner/deep.mim",
+            "module @;
+             pub const N = 4;",
+        ),
+    ]);
+    assert_eq!(run(&cart), ["42", "4"]);
+}
+
+#[test]
+fn script_in_a_folder() {
+    let cart = cart(&[("game/main.mim", "print(1);"), ("util.mim", "module @;")]);
+    let problems = problems(&cart);
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].file, "game/main.mim");
+    assert_eq!(
+        problems[0].message,
+        "a cart's script sits at its top, not in a folder"
     );
 }

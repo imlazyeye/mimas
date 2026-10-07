@@ -12,7 +12,7 @@ The page has the console on one side, with a picker for the example carts under 
 
 | Tab | What it does |
 | :-- | :-- |
-| Code | Edits a cart's files. It checks the cart as you type, marks the errors, and runs the cart again a moment after the code checks clean (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it now). |
+| Code | Edits a cart's files, listed as a tree with a folder for each part of a path. It checks the cart as you type, marks the errors, and runs the cart again a moment after the code checks clean (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it now). |
 | Sprites | A pixel editor for `sprites.txt`. |
 
 The [Cart API](./lunacade-api.md) chapter is the reference for everything a cart can call. Edits are saved in your browser for each cart. Share compresses the whole cart into the part of the link after the `#`. Nothing is sent to a server, and the page sets no cookies. The page needs WebAssembly, and it loads its code editor and the font of its title from CDNs.
@@ -24,10 +24,10 @@ A cart is a folder of files, or the same files on the page.
 | File | What it is |
 | :-- | :-- |
 | One `.mim` file | The cart's script, under any name. Its top-level code registers `luna::update` and `luna::draw`. |
-| Other `.mim` files | [Modules](../reference/modules.md) that the script can use. |
+| Other `.mim` files | [Modules](../reference/modules.md) that the script can use, at the top of the cart or in folders. |
 | `sprites.txt` | The sprite sheet, as text. It's optional. |
 
-A cart has one script, which is the `.mim` file that doesn't open with `module`. That's how `mimas run` picks the script out of a folder, and a cart with a second script or with none is an error. Here's a whole script:
+A cart has one script, which is the `.mim` file that doesn't open with `module`. That's how `mimas run` picks the script out of a folder, and a cart with a second script or with none is an error. The script sits at the top of the cart. Modules can sit in folders, which only group them: a module's name comes from its `module` line, or from its file name with `module @;`, so `lib/util.mim` is still `util`. On the page, naming a new module `enemies/boss` puts it in a folder. Here's a whole script:
 
 ```mimas ignore
 use std::math::{IVec2, ivec2};

@@ -1,6 +1,7 @@
-// The code editor: CodeMirror with a small mimas mode, the file tabs on top and the list of
-// problems underneath. Checking and running belong to app.js, which hears about every edit
-// through `store.setFile`. The packages come from esm.sh through the import map in index.html.
+// The code editor: the cart's files as a tree on the left, CodeMirror with a small mimas mode
+// and the list of problems on the right. Checking and running belong to app.js, which hears
+// about every edit through `store.setFile`. The packages come from esm.sh through the import map
+// in index.html.
 
 import { EditorState } from '@codemirror/state';
 import {
@@ -25,7 +26,8 @@ import { tagHighlighter, tags } from '@lezer/highlight';
 import { button, h } from './dom.js';
 
 const MODULE = 'module @;\n';
-const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// a module's name, with a folder for each part before a slash
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*(?:\/[A-Za-z_][A-Za-z0-9_]*)*$/;
 const MAX_ROWS = 50;
 
 const KEYWORDS = new Set([
@@ -116,8 +118,8 @@ const theme = EditorView.theme(
 );
 
 export function mountEditor(el, store) {
-    // the files bar, with the buttons for adding a module and for renaming or deleting this one
-    const fileList = h('div', { class: 'mb-filelist', role: 'group', 'aria-label': 'Files' });
+    // the file tree, with the buttons for adding a module and for renaming or deleting this one
+    const tree = h('div', { class: 'mb-tree', role: 'group', 'aria-label': 'Files' });
     const add = button('+', () => openName('add'), { class: 'mb-add', title: 'Add a module' });
     const rename = button('Rename', () => openName('rename'));
     const remove = button('Delete', () => {
@@ -132,13 +134,12 @@ export function mountEditor(el, store) {
     });
     remove.addEventListener('blur', disarm);
     const actions = h('div', { class: 'mb-fileactions' }, rename, remove);
-    const bar = h('div', { class: 'mb-files' }, fileList, add, actions);
 
     // the form that names a new module or renames one
     const nameInput = h('input', {
         type: 'text',
-        placeholder: 'module name',
-        maxlength: 40,
+        placeholder: 'name, like enemies/boss',
+        maxlength: 80,
         spellcheck: 'false',
         autocomplete: 'off',
         'aria-label': 'Module name',
@@ -171,16 +172,26 @@ export function mountEditor(el, store) {
         hidden: true,
     });
     el.classList.add('mb-host');
-    el.replaceChildren(h('div', { class: 'mb-editor' }, bar, nameBar, body, problems));
+    const side = h(
+        'div',
+        { class: 'mb-side' },
+        h('div', { class: 'mb-actions' }, add, actions),
+        nameBar,
+        tree,
+    );
+    const main = h('div', { class: 'mb-main' }, body, problems);
+    el.replaceChildren(h('div', { class: 'mb-editor' }, side, main));
 
     let path = null;
     let naming = null;
     let applying = false;
     let armed = 0;
-    let tabsKey = null;
+    let treeKey = null;
     let problemsKey = null;
     const states = new Map();
     const buttons = new Map();
+    const folders = new Map();
+    const closed = new Set();
 
     const view = new EditorView({ parent: body });
 
@@ -219,8 +230,12 @@ export function mountEditor(el, store) {
         view.setState(states.get(path) ?? makeState(path ?? '', text));
         view.contentDOM.setAttribute('aria-label', path === null ? 'Code' : `Code of ${path}`);
         view.contentDOM.contentEditable = path === null ? 'false' : 'true';
+        // the folders on the way to the file open up
+        for (let cut = (path ?? '').indexOf('/'); cut > 0; cut = path.indexOf('/', cut + 1)) {
+            closed.delete(path.slice(0, cut + 1));
+        }
         markProblems();
-        renderTabs();
+        renderTree();
     }
 
     // an edit that came from somewhere else (the sprite editor writes sprites.txt)
@@ -233,7 +248,7 @@ export function mountEditor(el, store) {
         }
     }
 
-    // the files in the order of the tabs: the script, the modules, sprites.txt, the rest
+    // the files in the order of the tree: the script, the modules, sprites.txt, the rest
     function ordered() {
         const files = store.cart.files;
         const rank = (file) =>
@@ -242,6 +257,46 @@ export function mountEditor(el, store) {
         return [...ranks.keys()].sort(
             (a, b) => ranks.get(a) - ranks.get(b) || (a < b ? -1 : a > b ? 1 : 0),
         );
+    }
+
+    // the folders directly under `prefix`, each a `details` holding its own branch, then the
+    // files there
+    function branch(paths, prefix) {
+        const inside = paths.filter((file) => file.startsWith(prefix));
+        const dirs = inside
+            .map((file) => file.slice(prefix.length).split('/'))
+            .filter((parts) => parts.length > 1)
+            .map((parts) => parts[0]);
+        const nodes = [...new Set(dirs)].sort().map((name) => {
+            const dir = `${prefix}${name}/`;
+            const details = h(
+                'details',
+                { class: 'mb-folder', open: !closed.has(dir) },
+                h('summary', {}, name),
+                ...branch(inside, dir),
+            );
+            details.addEventListener('toggle', () => {
+                if (details.open) closed.delete(dir);
+                else closed.add(dir);
+            });
+            folders.set(dir, details);
+            return details;
+        });
+        for (const file of inside) {
+            const name = file.slice(prefix.length);
+            if (name.includes('/')) continue;
+            const tab = button(
+                name,
+                () => {
+                    if (file !== path) show(file);
+                    view.focus();
+                },
+                { class: 'mb-file' },
+            );
+            buttons.set(file, tab);
+            nodes.push(tab);
+        }
+        return nodes;
     }
 
     // a file the cart doesn't have (the one shown, while another cart opens) is not a module
@@ -254,32 +309,29 @@ export function mountEditor(el, store) {
         return ordered()[0] ?? null;
     }
 
-    // the tabs and the problems
+    // the tree and the problems
 
-    function renderTabs() {
+    function renderTree() {
         const paths = ordered();
         const key = paths.join('\n');
-        if (key !== tabsKey) {
-            tabsKey = key;
+        if (key !== treeKey) {
+            treeKey = key;
             buttons.clear();
-            for (const file of paths) {
-                const tab = button(
-                    file,
-                    () => {
-                        if (file !== path) show(file);
-                        view.focus();
-                    },
-                    { class: 'mb-file' },
-                );
-                buttons.set(file, tab);
-            }
-            fileList.replaceChildren(...buttons.values());
+            folders.clear();
+            tree.replaceChildren(...branch(paths, ''));
         }
         const broken = new Set(store.diagnostics.map((d) => d.file));
         for (const [file, tab] of buttons) {
             tab.setAttribute('aria-pressed', file === path);
             tab.classList.toggle('has-error', broken.has(file));
-            tab.title = broken.has(file) ? 'This file has problems' : '';
+            tab.title = broken.has(file) ? `${file} has problems` : file;
+        }
+        for (const [dir, details] of folders) {
+            details.open = !closed.has(dir);
+            details.classList.toggle(
+                'has-error',
+                [...broken].some((file) => file.startsWith(dir)),
+            );
         }
         actions.hidden = !isModule(path);
     }
@@ -367,8 +419,13 @@ export function mountEditor(el, store) {
             closeName();
             return;
         }
+        // a cart is only files, so a folder is there once a file is in it
+        if (name.endsWith('/') && NAME.test(name.slice(0, -1))) {
+            nameNote.textContent = `A folder comes with its first file. Name that too, like ${name}main.`;
+            return;
+        }
         if (!NAME.test(name)) {
-            nameNote.textContent = 'Use letters, digits and underscores.';
+            nameNote.textContent = 'Use letters, digits and underscores, with / for a folder.';
             return;
         }
         if (Object.hasOwn(files, target)) {
@@ -415,12 +472,12 @@ export function mountEditor(el, store) {
         } else if (changed !== path) {
             states.delete(changed);
         }
-        renderTabs();
+        renderTree();
     });
 
     store.on('diagnostics', () => {
         markProblems();
-        renderTabs();
+        renderTree();
         renderProblems();
     });
 

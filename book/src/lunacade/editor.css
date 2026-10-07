@@ -1,5 +1,6 @@
-/* The code editor: the file tabs, the CodeMirror view and the list of problems. The editor's own
-   colors are set in editor.js, and the token colors come from the book's highlight css. */
+/* The code editor: the file tree on the left, the CodeMirror view and the list of problems on
+   the right. The editor's own colors are set in editor.js, and the token colors come from the
+   book's highlight css. */
 
 .mb-host {
     display: flex;
@@ -10,58 +11,35 @@
 .mb-editor {
     display: flex;
     flex: 1 1 0;
-    flex-direction: column;
     min-width: 0;
     min-height: 0;
 }
 
 /* the files */
 
-.mb-files {
+.mb-side {
+    display: flex;
+    flex: 0 0 11rem;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--surface);
+}
+
+.mb-actions {
     display: flex;
     flex: none;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    overflow-x: auto;
+    gap: 4px;
+    padding: 4px 6px;
     border-bottom: 1px solid var(--surface);
 }
 
-.mb-filelist {
-    display: flex;
-    gap: 2px;
-}
-
-.mb-files button,
+.mb-actions button,
 .mb-namebar button {
     flex: none;
-    padding: 2px 10px;
-    font-size: 13px;
+    padding: 2px 8px;
+    font-size: 12px;
     white-space: nowrap;
-}
-
-.mb-file {
-    border-color: transparent;
-    background: none;
-    color: var(--muted);
-    font-family: var(--mono);
-}
-
-.mb-file[aria-pressed="true"] {
-    border-color: var(--line);
-    background: var(--surface);
-    color: var(--text);
-}
-
-.mb-file.has-error::after {
-    content: "";
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    margin-left: 6px;
-    border-radius: 50%;
-    background: #f7768e;
-    vertical-align: middle;
 }
 
 .mb-fileactions {
@@ -75,24 +53,91 @@
     flex: none;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
+    gap: 4px;
+    padding: 6px;
     border-bottom: 1px solid var(--surface);
-    font-size: 13px;
+    font-size: 12px;
 }
 
 .mb-namebar input {
-    flex: 0 1 18ch;
+    flex: 1 1 100%;
     min-width: 0;
     padding: 2px 8px;
-    font: 13px var(--mono);
+    font: 12px var(--mono);
 }
 
 .mb-namenote {
+    flex: 1 1 100%;
     color: var(--orange);
 }
 
+.mb-tree {
+    flex: 1 1 0;
+    overflow: auto;
+    padding: 4px 0;
+    font: 13px var(--mono);
+}
+
+.mb-folder > summary {
+    padding: 2px 8px;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.mb-folder > summary:hover {
+    color: var(--text);
+}
+
+.mb-folder > :not(summary) {
+    margin-left: 12px;
+}
+
+.mb-file {
+    display: block;
+    width: 100%;
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mb-file:hover {
+    color: var(--text);
+}
+
+.mb-file[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--text);
+}
+
+.mb-file.has-error::after,
+.mb-folder.has-error > summary::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: #f7768e;
+    vertical-align: middle;
+}
+
 /* the text */
+
+.mb-main {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
 
 .mb-body {
     display: flex;

@@ -18,18 +18,30 @@ pub struct CartBuild<'a> {
 }
 
 impl Cart {
-    /// Reads a cart from a folder.
+    /// Reads a cart from a folder: its `sprites.txt` and the `.mim` files in it and in its
+    /// folders, leaving out everything else. A file's path in the cart is relative to the folder,
+    /// with `/` between the parts.
     pub fn from_dir(dir: &Path) -> io::Result<Self> {
-        let mut files = BTreeMap::new();
-        for entry in std::fs::read_dir(dir)? {
-            let path = entry?.path();
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if (name == "sprites.txt" || name.ends_with(".mim")) && path.is_file() {
-                files.insert(name.to_owned(), std::fs::read_to_string(&path)?);
+        fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, String>) -> io::Result<()> {
+            for entry in std::fs::read_dir(dir)? {
+                let path = entry?.path();
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                let key = format!("{prefix}{name}");
+                if path.is_dir() {
+                    if !name.starts_with('.') {
+                        walk(&path, &format!("{key}/"), files)?;
+                    }
+                } else if name.ends_with(".mim") || key == "sprites.txt" {
+                    files.insert(key, std::fs::read_to_string(&path)?);
+                }
             }
+            Ok(())
         }
+
+        let mut files = BTreeMap::new();
+        walk(dir, "", &mut files)?;
         Ok(Self { files })
     }
 
@@ -57,8 +69,9 @@ impl Cart {
     }
 
     /// Checks everything about the cart that doesn't need the compiler, and gives every problem
-    /// it finds. A cart has one script among its `.mim` files. A `sprites.txt` is up to 128 lines
-    /// of up to 128 hex digits, and the lines it doesn't have are black.
+    /// it finds. A cart has one script among its `.mim` files, at its top rather than in a folder.
+    /// A `sprites.txt` is up to 128 lines of up to 128 hex digits, and the lines it doesn't have
+    /// are black.
     pub fn validate(&self) -> Result<CartBuild<'_>, Vec<Diagnostic>> {
         fn sheet(text: &str) -> Result<[u8; SHEET_SIZE * SHEET_SIZE], Diagnostic> {
             let mut sheet = [0; SHEET_SIZE * SHEET_SIZE];
@@ -91,6 +104,10 @@ impl Cart {
         let mut problems = Vec::new();
         let scripts: Vec<_> = self.scripts().collect();
         match scripts[..] {
+            [(path, text)] if path.contains('/') => {
+                let message = "a cart's script sits at its top, not in a folder";
+                problems.push(Diagnostic::at(path, text, 0..0, message));
+            }
             [_] => {}
             [] => problems.push(Diagnostic::at("", "", 0..0, "a cart has no script to run")),
             _ => {
