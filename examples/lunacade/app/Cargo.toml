@@ -1,0 +1,17 @@
+[package]
+name = "lunacade"
+version = "0.3.0"
+edition = "2024"
+description = "lunacade, a fantasy console for mimas, as the page in the book drives it."
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lunacade-core = { path = "../core" }
+serde_json = "1"
+# the same version examples/bevy locks, since deploy.yml installs one wasm-bindgen cli for all of them
+wasm-bindgen = "=0.2.128"

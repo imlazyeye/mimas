@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core"]
+members = ["core", "app"]
 
 # the mimas crates are path dependencies outside this workspace, so `package."*"` optimizes them
 # in tests and dev runs too

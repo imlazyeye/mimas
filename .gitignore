@@ -16,3 +16,5 @@ tools/vscode/out/
 tools/vscode/server/
 tools/vscode/LICENSE
 tools/vscode/*.vsix
+/book/src/lunacade/wasm
+/book/src/lunacade/api.json
