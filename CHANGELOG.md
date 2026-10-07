@@ -32,6 +32,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - `==` between two arrays or two tuples gave an array holding each element's comparison instead of a `bool`, and could panic the host when that result was used. It now compares them structurally, as `!=` already did.
 - `!=` between an `int` and a `float` could be `true` when the two were equal (`i != f` with `let i = 1;` and `let f = 1.0;`).
 - A struct named through a module path and used as a value (`let u = lib::Unit;`, or `let make = lib::Pair;` for a tuple struct) iced the compiler.
+- A top-level `const` in a module couldn't use a name its file imported with `use` (`use lib::R; pub const X = R + 1;` reported an undefined variable).
 
 ## [0.3.0] - 2026-09-26
 

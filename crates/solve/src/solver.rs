@@ -225,13 +225,12 @@ impl Solver {
         run_phase(self, Self::hoist_callables, &mut saved_ribs)?;
         run_phase(self, Self::hoist_constants, &mut saved_ribs)?;
 
-        // fixpoint: hoist_uses + solve_consts. each round may resolve more consts (e.g. a const
-        // that references another module's const reduces only once that other const is bound).
-        // re-run while the count of consts-with-known-values grows, capped as a safety net.
+        // fixpoint: solve_consts. each round may resolve more consts (e.g. a const that references
+        // another module's const reduces only once that other const is bound). re-run while the
+        // count of consts-with-known-values grows, capped as a safety net.
         const FIXPOINT_CAP: usize = 16;
         let mut prev = self.resolved_constants();
         for _ in 0..FIXPOINT_CAP {
-            run_phase(self, Self::hoist_uses, &mut saved_ribs)?;
             run_phase(self, Self::solve_consts, &mut saved_ribs)?;
             let curr = self.resolved_constants();
             if curr == prev {
@@ -382,12 +381,7 @@ impl Solver {
     }
 
     fn solve_types(&mut self, ast: &Ast) -> Result<()> {
-        Self::for_each_item(ast, |item| {
-            if let ItemKind::Use(us) = item.kind() {
-                self.process_use(us, item.location())?;
-            }
-            Ok(())
-        })?;
+        self.hoist_uses(ast)?;
         Self::for_each_item(ast, |item| {
             if !matches!(item.kind(), ItemKind::Struct(_) | ItemKind::Enum(_))
                 || !self.touch_node(item.id())
@@ -406,6 +400,7 @@ impl Solver {
     }
 
     fn solve_consts(&mut self, ast: &Ast) -> Result<()> {
+        self.hoist_uses(ast)?;
         Self::for_each_item(ast, |item| {
             if let ItemKind::Const(con) = item.kind() {
                 self.solve_const(con, item.id()).map(|_| ())
@@ -415,8 +410,8 @@ impl Solver {
         })
     }
 
-    /// Number of `Constant` decls whose literal value has been reduced. Used by the hoist-uses /
-    /// solve-consts fixpoint loop to detect "no progress this round -> stop."
+    /// Number of `Constant` decls whose literal value has been reduced. Used by the solve-consts
+    /// fixpoint loop to detect "no progress this round -> stop."
     fn resolved_constants(&self) -> usize {
         self.decs
             .iter()
@@ -1672,7 +1667,7 @@ impl Solver {
                 // hoist_constants/solve_consts fixpoint
                 ItemKind::Const(con) => self.solve_const(con, item.id()).map(|_| ())?,
                 // re-runs `process_use` so the imports land in the body-solve phase's fresh
-                // import rib (hoist_uses pushed them, but its rib was popped at phase end).
+                // import rib (earlier phases pushed them, but their ribs were popped at phase end).
                 ItemKind::Use(us) => self.process_use(us, item.location())?,
                 ItemKind::Poison(poison) => poison.escaped(),
                 // all we need to do at this point is process the fn defaults
