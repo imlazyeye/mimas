@@ -12,6 +12,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - Constants can be enum variants, tuple structs and structs without fields (`const DOT = Shape::Dot;`, `const CIRCLE = Shape::Circle(4);`), as long as what they hold is constant. Constant arrays and tuples can now hold enum variants, structs and dicts, and a constant can be set from another one through a path (`const MINE = shapes::DOT;`). Each read gives its own value, so changing it never changes the constant. See [Enums, structs and collections](https://mim.as/reference/variables.html#enums-structs-and-collections).
 - `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel".
 - `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write.
+- `std::math` has `IVec2` and `IVec3`, vectors with `int` components, and `Vec2.to_ivec2` and `IVec2.to_vec2` to go between the two kinds. `vec2`, `vec3`, `ivec2` and `ivec3` are functions that create each one, so `ivec2(1, 2)` is `IVec2::new(1, 2)`.
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
 
 ### Changed
