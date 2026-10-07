@@ -8,7 +8,6 @@ use crate::{Error, Solver, errors};
 /// Raw reduction error -- carries just the location of the offending expression. The actual
 /// miette `Diagnostic` (with `NamedSource`) is materialized at the boundary by
 /// [`ReduceError::into_diag`], so this module stays free of any source-attachment plumbing.
-/// Callers that have proven no errors can fire (e.g. compile's IR lowering) just `.expect()`.
 #[derive(Debug)]
 pub enum ReduceError {
     InvalidHex(Location),
@@ -48,16 +47,16 @@ impl ReduceError {
 }
 
 /// Constant-folds an expression. The single source of truth for reduction shape -- `resolve`
-/// lets callers plug in their own meaning for `Ident` leaves (e.g. consult a const table).
+/// lets callers plug in their own meaning for name leaves (e.g. consult a const table).
 /// Restricted to leaves and arithmetic-style composites (no `Block`/`If`) because that's all
-/// const-position rhs's need; lifting that restriction means revisiting `is_const_expr` too.
+/// const-position rhs's need; lifting that restriction means revisiting `const_ready` too.
 pub fn reduce<F: Fn(&Expr) -> Option<Literal>>(
     expr: &Expr,
     resolve: &F,
 ) -> ReduceResult<Option<Literal>> {
     let lit = |e| reduce(e, resolve);
     match expr.kind() {
-        ExprKind::Ident(_) => Ok(resolve(expr)),
+        ExprKind::Ident(_) | ExprKind::Access(Access::DoubleColon { .. }) => Ok(resolve(expr)),
         ExprKind::Literal(l) => reduce_literal(l, expr.location(), resolve),
         ExprKind::Grouping(g) => lit(&g.inner),
         ExprKind::Unary(u) => {
@@ -106,7 +105,7 @@ pub fn reduce<F: Fn(&Expr) -> Option<Literal>>(
 }
 
 /// Reduce with no Ident-resolution context. Convenience wrapper for callers that don't have
-/// a const table (tests, compile's IR lowering of already-vetted const arrays).
+/// a const table (tests).
 pub fn reduce_simple(expr: &Expr) -> ReduceResult<Option<Literal>> {
     reduce(expr, &|_| None)
 }
@@ -123,30 +122,22 @@ fn reduce_literal<F: Fn(&Expr) -> Option<Literal>>(
             16,
         )
         .map_err(|_| ReduceError::InvalidHex(location))?))),
+        // an array or tuple folds to one of its folded members
         Array(a) | Tuple(a) => {
-            for e in a.iter() {
-                if reduce(e, resolve)?.is_none() {
+            let mut members = Vec::with_capacity(a.len());
+            for e in a {
+                let Some(member) = reduce(e, resolve)? else {
                     return Ok(None);
-                }
+                };
+                members.push(Expr::new(member.into(), e.location()));
             }
-            Ok(Some(lit.clone()))
+            Ok(Some(match lit {
+                Array(_) => Array(members),
+                _ => Tuple(members),
+            }))
         }
-        Dictionary(fields) => {
-            for (_, e) in fields.iter() {
-                if reduce(e, resolve)?.is_none() {
-                    return Ok(None);
-                }
-            }
-            Ok(Some(lit.clone()))
-        }
-        Struct(s) => {
-            for (_, e) in s.fields.iter() {
-                if reduce(e, resolve)?.is_none() {
-                    return Ok(None);
-                }
-            }
-            Ok(Some(lit.clone()))
-        }
+        // these have no folded form (see `ConstValue::Expr`)
+        Dictionary(_) | Struct(_) => Ok(None),
     }
 }
 

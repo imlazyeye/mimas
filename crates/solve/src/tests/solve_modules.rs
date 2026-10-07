@@ -262,3 +262,21 @@ test_multi_file_fail!(
     foo => "module @; pub const BAR: int = 0;",
     fizz => "module @; use foo; pub fn buzz() { let x = foo; }";
 );
+
+test_multi_file!(
+    const_variant_across_modules,
+    shapes => "module @;
+               pub enum Shape {
+                   Dot,
+                   Circle(int),
+               }
+               pub const R = 3;
+               pub const DOT = Shape::Dot;
+               pub const CIRCLE = Shape::Circle(R + 1);",
+    user => "module @;
+             pub const BY_PATH = shapes::DOT;
+             pub const BIGGER = shapes::Shape::Circle(shapes::R + 2);
+             pub const ALL = [shapes::CIRCLE, BY_PATH, BIGGER];";
+    "user::BY_PATH == shapes::DOT" => Bool,
+    "user::ALL[0] == shapes::CIRCLE" => Bool,
+);

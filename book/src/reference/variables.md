@@ -95,3 +95,55 @@ const NOPE = some_call();      // compile error: constants must be known at comp
 ```admonish todo
 Our constant folding could likely handle evaluating whether a function is fully knowable at compile time, but that will come in a future update.
 ```
+
+### Enums, structs and collections
+
+Enum variants, arrays, tuples, dicts, and structs can be constant too, as long as whatever they hold is constant as well. Building a tuple variant like `Shape::Circle(4)` looks like a function call but isn't one, so it is allowed.
+
+```mimas
+enum Shape {
+    Dot,
+    Circle(int),
+}
+
+const RADIUS = 4;
+const DOT = Shape::Dot;
+const CIRCLE = Shape::Circle(RADIUS * 2);
+const SHAPES = [DOT, CIRCLE, Shape::Circle(1)];
+```
+
+A constant like this works as if its value were written out wherever its name appears. Each read gives its own value, equal to every other read but separate from it, so nothing you do to a value you read can change the constant.
+
+```mimas
+struct Point {
+    x: int,
+}
+
+const ORIGIN = Point { x = 0 };
+
+let a = ORIGIN;
+let b = ORIGIN;
+a.x = 5;
+
+print(b.x);      // 0 -- `a` and `b` are two reads, so two points
+print(ORIGIN.x); // 0 -- the constant never changes
+```
+
+Only reading the constant by name does this. Once a value is in a variable it is shared like any other, so `let c = a;` makes `c` and `a` the same point.
+
+Numbers, bools, strings and `null` have none of this. They are the same value wherever they're read, and a string can't be changed in place.
+
+### Operators
+
+A constant can be set with operators, which are worked out at compile time. They work on numbers, strings and bools, and `==` and `!=` also work on arrays and tuples of those. Enum variants, structs and dicts can't be compared in a constant.
+
+```mimas
+# enum Shape { Dot, Circle(int) }
+# const DOT = Shape::Dot;
+const LIMIT = 4 * 2 + 1;
+const SAME = [LIMIT, 1] == [9, 1];   // valid -- true
+
+const NOPE = DOT == Shape::Dot;      // compile error: an enum variant can't be compared in a constant
+```
+
+This only limits what a `const` can be set to. Comparing against a constant in ordinary code, like `shape == DOT`, is fine.

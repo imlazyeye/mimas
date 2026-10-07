@@ -192,7 +192,7 @@ impl Emit for Access {
                     let candidates = pact_candidates(ir, &pids, |adt| adt.constants[name]);
                     let read = |ir: &mut Ir| {
                         pact_dispatch(ir, recv, candidates, |ir, dec| {
-                            Constant::emit_const_dec(ir, dec, id)
+                            Constant::emit_const_dec(ir, dec)
                         })
                     };
                     return if optional {
@@ -208,7 +208,7 @@ impl Emit for Access {
                     && let ResolvedDeclKind::Constant(_) = &ir.resolutions.decs[dec].kind
                 {
                     let _ = left.lower(ir)?;
-                    return Constant::emit_const_dec(ir, dec, id);
+                    return Constant::emit_const_dec(ir, dec);
                 }
 
                 // struct fields and tuple indices are positional and known at IR time, so
@@ -245,7 +245,7 @@ impl Emit for Access {
                         let body = ir.item_body_for(dec);
                         Some(ir.current().ref_body(body))
                     }
-                    ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec, id),
+                    ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec),
                     ResolvedDeclKind::Adt(adt) => {
                         let adt = *adt;
                         Some(adt_value(ir, dec, adt))
@@ -258,7 +258,7 @@ impl Emit for Access {
             Access::Each { left, right } => {
                 let array = ir.current().new_array();
                 for dec in ir.each_impl(left.id(), &right.lexeme) {
-                    let value = Constant::emit_const_dec(ir, dec, id)?;
+                    let value = Constant::emit_const_dec(ir, dec)?;
                     ir.current().push(array, value);
                 }
                 Some(array)
@@ -901,7 +901,7 @@ impl Emit for Ident {
                 Some(adt_value(ir, dec, adt))
             }
             ResolvedDeclKind::Pact(_) => todo!(),
-            ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec, id),
+            ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec),
             ResolvedDeclKind::Variant { .. } => unreachable!(
                 "bare-ident reference to a variant -- variants are reached via `Foo::Bar`, not bare names"
             ),

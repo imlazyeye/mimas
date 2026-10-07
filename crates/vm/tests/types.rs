@@ -75,3 +75,120 @@ test_vm!(
      let w = make(7);",
     "if let Wrap(x) = w { x } else { -1 }" => Int(7),
 );
+
+test_vm!(
+    const_enum_variants,
+    "enum Shape {
+         Dot,
+         Circle(int),
+         Pair(int, Shape),
+     }
+     struct Holder {
+         shape: Shape,
+     }
+     const R = 3;
+     const DOT = Shape::Dot;
+     const CIRCLE = Shape::Circle(R + 1);
+     const NESTED = Shape::Pair(1, Shape::Circle(2));
+     const ALIAS = CIRCLE;
+     const ALL = [Shape::Dot, CIRCLE, Shape::Circle(9), DOT];
+     const PAIR = (DOT, 4);
+     const HELD = Holder { shape = CIRCLE };
+     const HOLDERS = [HELD, Holder { shape = Shape::Dot }];
+     fn radius(shape: Shape) -> int {
+         match shape {
+             Shape::Dot => 0,
+             Shape::Circle(r) => r,
+             Shape::Pair(_, inner) => radius(inner),
+         }
+     }
+     fn changed() -> bool {
+         let all = ALL;
+         all[0] = CIRCLE;
+         ALL[0] != DOT
+     }",
+    "DOT == Shape::Dot" => Bool(true),
+    "radius(CIRCLE)" => Int(4),
+    "ALIAS == Shape::Circle(4)" => Bool(true),
+    "radius(NESTED)" => Int(2),
+    "radius(ALL[2])" => Int(9),
+    "ALL[3] == DOT" => Bool(true),
+    "PAIR.0 == DOT && PAIR.1 == 4" => Bool(true),
+    "radius(HELD.shape)" => Int(4),
+    "HOLDERS[1].shape == DOT" => Bool(true),
+    "changed()" => Bool(false),
+);
+
+test_vm!(
+    const_enum_variant_on_pact,
+    "enum Tint {
+         Red,
+         Shade(int),
+     }
+     pact Kind {
+         const TINT: Tint;
+     }
+     struct Bat;
+     struct Rat;
+     impl Kind for Bat {
+         const TINT = Tint::Red;
+     }
+     impl Kind for Rat {
+         const TINT = Tint::Shade(3);
+     }
+     fn tint(kind: Kind) -> Tint {
+         kind.TINT
+     }",
+    "Bat::TINT == Tint::Red" => Bool(true),
+    "tint(Rat) == Tint::Shade(3)" => Bool(true),
+    "Tint::Shade(3) in Kind::*::TINT" => Bool(true),
+);
+
+test_vm!(
+    const_array_of_const_arithmetic,
+    "const R = 4;
+     const HALVES = [R ~/ 2, R, R * 2];",
+    "HALVES[0] + HALVES[2]" => Int(10),
+);
+
+test_vm!(
+    const_structs_and_optional_members,
+    "enum Shape {
+         Dot,
+         Maybe(Shape?),
+     }
+     struct Wrap(int);
+     struct Bat;
+     struct Holder {
+         shape: Shape,
+         wrap: Wrap,
+     }
+     const R = 2;
+     const W = Wrap(R + 1);
+     const B = Bat;
+     const NONE = Shape::Maybe(null);
+     const SOME = Shape::Maybe(Shape::Dot);
+     const HELD = Holder { shape = SOME, wrap = W };
+     fn changed() -> bool {
+         let held = HELD;
+         held.wrap = Wrap(0);
+         HELD.wrap != W
+     }",
+    "W == Wrap(3)" => Bool(true),
+    "B == Bat" => Bool(true),
+    "NONE != SOME" => Bool(true),
+    "HELD == HELD" => Bool(true),
+    "HELD.shape == Shape::Maybe(Shape::Dot)" => Bool(true),
+    "changed()" => Bool(false),
+);
+
+test_vm!(
+    const_collection_equality_folds,
+    "const X = 1;
+     const SAME = [X] == [1];
+     const DIFF = (X + 1, \"a\") != (2, \"a\");
+     const NESTED = [[X], [2]] == [[1], [X + 1]];",
+    "SAME" => Bool(true),
+    "DIFF" => Bool(false),
+    "NESTED" => Bool(true),
+);

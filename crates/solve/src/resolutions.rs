@@ -10,7 +10,7 @@ use shared::{FileId, IdVec, Location, PactId, TyNames};
 
 use crate::{
     Solver,
-    components::{Adt, AdtFlags, AdtId, DecId, DecKind, Ty, TyExt, Variant, Vis},
+    components::{Adt, AdtFlags, AdtId, ConstValue, DecId, DecKind, Ty, TyExt, Variant, Vis},
 };
 
 pub struct Resolutions {
@@ -128,7 +128,7 @@ pub enum ResolvedDeclKind {
         native: Option<NativeId>,
         takes_self: bool,
     },
-    Constant(Literal),
+    Constant(ConstValue),
     Variant {
         parent: AdtId,
         layout: AdtId,
@@ -286,7 +286,7 @@ impl From<Solver> for Resolutions {
                         None => matches!(&ty, Ty::Fn(header) if header.is_method),
                     },
                 },
-                DecKind::Constant(Some(lit)) => ResolvedDeclKind::Constant(lit),
+                DecKind::Constant(Some(value)) => ResolvedDeclKind::Constant(value),
                 DecKind::Constant(None) => panic!(
                     "dec {:?} ({}) reached IR boundary as `DeclKind::Constant(None)`",
                     id, dec.name
