@@ -89,12 +89,18 @@ impl Unification<'_> {
                 Ok(())
             }
             (Ty::Never, _) if !exact => Ok(()),
+            (Ty::Adt(layout), Ty::Adt(parent))
+                if !exact && self.solver.adts[*layout].parent == Some(*parent) =>
+            {
+                Ok(())
+            }
             (Ty::Skolem(pid), Ty::Pacts(pids)) if !exact && pids.iter().all(|p| p == pid) => Ok(()),
             (Ty::Adt(aid), Ty::Pacts(pids))
                 if !exact
-                    && pids
-                        .iter()
-                        .all(|pid| self.solver.pact_impls.contains(&(*pid, *aid))) =>
+                    && pids.iter().all(|pid| {
+                        let aid = self.solver.adts[*aid].parent.unwrap_or(*aid);
+                        self.solver.pact_impls.contains(&(*pid, aid))
+                    }) =>
             {
                 Ok(())
             }

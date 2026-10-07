@@ -305,7 +305,8 @@ pub fn walk_pat(pat: &Pat, visitor: &mut impl Visitor) {
         }
         PatKind::Struct(expr, fields) => {
             walk_expr(expr, visitor);
-            for (_, pat) in fields {
+            for (name, pat) in fields {
+                visitor.ident(name);
                 walk_pat(pat, visitor);
             }
         }
@@ -317,6 +318,10 @@ pub fn walk_pat(pat: &Pat, visitor: &mut impl Visitor) {
         }
         PatKind::Variant(expr) => walk_expr(expr, visitor),
         PatKind::NullBind(pat) => walk_pat(pat, visitor),
+        PatKind::Bind(name, inner) => {
+            visitor.ident(name);
+            walk_pat(inner, visitor);
+        }
         PatKind::Ident(ident) => visitor.ident(ident),
         PatKind::Literal(_) | PatKind::Poison(_) => {}
     }

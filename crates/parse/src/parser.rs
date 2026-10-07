@@ -1690,6 +1690,10 @@ impl<'s> Parser<'s> {
             TokKind::Ident(_) => {
                 // walk path: ident (:: ident)*
                 let first = self.require_ident();
+                if self.eat(TokKind::At) {
+                    let inner = self.pattern();
+                    return self.new_pat(PatKind::Bind(first, Box::new(inner)), start);
+                }
                 let mut head_expr = self.new_expr(first.clone(), start);
                 let mut is_path = false;
                 while self.eat(TokKind::DoubleColon) {

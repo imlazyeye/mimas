@@ -14,6 +14,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write.
 - `std::math` has `IVec2` and `IVec3`, vectors with `int` components, and `Vec2.to_ivec2` and `IVec2.to_vec2` to go between the two kinds. `vec2`, `vec3`, `ivec2` and `ivec3` are functions that create each one, so `ivec2(1, 2)` is `IVec2::new(1, 2)`.
 - `int::random`, `float::random`, `bool::random`, `array.shuffle` and `array.choose` draw from a `library::Random` fixture, which a host can seed with `vm.fixture::<Random>().seed(n)` so a script gets the same numbers on every run.
+- `name @ pattern` binds the whole matched value alongside the pattern's own bindings. Over a variant pattern the binding has the variant's type (`s @ Shape::Circle(_)` makes `s.0` reachable), which is how a match arm changes a variant's fields in place. See [Patterns](https://mim.as/reference/control-flow/match.html#patterns).
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
 
 ### Changed

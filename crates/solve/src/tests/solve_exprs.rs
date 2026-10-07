@@ -363,6 +363,8 @@ test_fail!(
     if_let_bare_option,
     "let a: int? = 0;
      if let b = a {}",
+    "let a: int? = 0;
+     if let whole @ b = a {}",
 );
 
 test_fail!(

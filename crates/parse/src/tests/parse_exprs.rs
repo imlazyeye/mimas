@@ -452,6 +452,52 @@ expr_test!(
 );
 
 expr_test!(
+    if_let_at_binding,
+    "if let whole @ Pair { a } = p {}",
+    If {
+        condition: ident_expr!("p"),
+        main_body: block!(),
+        else_expr: None,
+        binding: Some(Pat::new(
+            PatKind::Bind(
+                ident!("whole"),
+                Box::new(Pat::new(
+                    PatKind::Struct(
+                        Box::new(ident_expr!("Pair")),
+                        vec![(ident!("a"), Pat::from(ident!("a")))],
+                    ),
+                    Location::default(),
+                )),
+            ),
+            Location::default(),
+        )),
+    }
+);
+
+expr_test!(
+    if_let_at_binding_over_or,
+    "if let w @ 0 | 1 = n {}",
+    If {
+        condition: ident_expr!("n"),
+        main_body: block!(),
+        else_expr: None,
+        binding: Some(Pat::new(
+            PatKind::Bind(
+                ident!("w"),
+                Box::new(Pat::new(
+                    PatKind::Or(vec![
+                        Pat::new(PatKind::Literal(Literal::Int(0)), Location::default()),
+                        Pat::new(PatKind::Literal(Literal::Int(1)), Location::default()),
+                    ]),
+                    Location::default(),
+                )),
+            ),
+            Location::default(),
+        )),
+    }
+);
+
+expr_test!(
     r#match,
     "match foo {}",
     Match::new(ident_expr!("foo"), vec![], false)

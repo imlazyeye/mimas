@@ -38,6 +38,13 @@ impl Pat {
     pub fn id(&self) -> NodeId {
         self.id
     }
+
+    pub fn unbound(&self) -> &Pat {
+        match self.kind() {
+            PatKind::Bind(_, inner) => inner.unbound(),
+            _ => self,
+        }
+    }
 }
 
 impl Located for Pat {
@@ -56,6 +63,7 @@ impl Display for Pat {
 #[derive(Debug, PartialEq, Clone)]
 pub enum PatKind {
     Ident(Ident),
+    Bind(Ident, Box<Pat>),
     Tuple(Vec<Pat>),
     Struct(Box<Expr>, Vec<(Ident, Pat)>),
     TupleVariant(Box<Expr>, Vec<Pat>),
@@ -75,6 +83,7 @@ impl Display for PatKind {
                 tup.iter().map(ToString::to_string).join(", ")
             )),
             PatKind::Ident(ident) => f.pad(&ident.to_string()),
+            PatKind::Bind(name, inner) => f.pad(&format!("{name} @ {inner}")),
             PatKind::Struct(path, fields) => f.pad(&format!(
                 "{path} {{ {} }}",
                 fields.iter().map(|(k, v)| format!("{k}: {v}")).join(", ")

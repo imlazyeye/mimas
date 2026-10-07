@@ -185,6 +185,39 @@ test_vm!(
 );
 
 test_vm!(
+    variant_binding_inherits_enum_impls,
+    r#"pact Named {
+         const KIND: str;
+         fn name(self) -> str;
+         fn describe(self) -> str { self.KIND + self.name() }
+     }
+     enum E { A { n: int }, B }
+     impl E {
+         fn n(self) -> int {
+             match self { E::A { n } => n + 1, E::B => 0 }
+         }
+     }
+     impl Named for E {
+         const KIND = "enum:";
+         fn name(self) -> str { "e" }
+     }
+     struct Other;
+     impl Named for Other {
+         const KIND = "other:";
+         fn name(self) -> str { "other" }
+     }
+     fn describe(value: Named) -> str { value.describe() }
+     let a @ E::A {} = E::A { n = 9 } else loop {};
+     let b @ E::B = E::B else loop {};"#,
+    "a.n + a.n()" => Int(19),
+    "a.KIND" => str!("enum:"),
+    "a.describe()" => str!("enum:e"),
+    "describe(a)" => str!("enum:e"),
+    "[a, Other][0].name()" => str!("e"),
+    "(if true { a } else { b }).n()" => Int(10),
+);
+
+test_vm!(
     pact_inherited_default_method,
     "pact Greet { fn name(self) -> str; fn hello(self) -> str { \"hi\" } }
      struct Dog { tag: str }

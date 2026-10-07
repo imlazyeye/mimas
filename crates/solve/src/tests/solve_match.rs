@@ -53,6 +53,71 @@ test_fail!(
     "let x = true; let _ = match x { 0 => 0, _ => 1 };",
     "let x = \"a\"; let _ = match x { true => 0, _ => 1 };",
 );
+test_ty!(
+    at_binding_types,
+    "enum E { A { n: int }, B { n: int } }
+     fn take(e: E) -> int { 1 }
+     let a @ E::A {} = E::A { n = 1 } else loop {};
+     let b @ E::B {} = E::B { n = 2 } else loop {};
+     let original: E = a;",
+    "a.n" => Int,
+    "take(a)" => Int,
+    "match original { whole @ E::A {} | E::B {} => whole }" => query!(E),
+    "[a, b]" => array!(query!(E)),
+    "[E::B { n = 2 }, a]" => array!(query!(E)),
+    "if true { a } else { if true { b } else { null } }" => option!(query!(E)),
+);
+test_ty!(
+    at_binding_preserves_mutable_tuple_slots,
+    "let pair: (int?, int) = (1, 2);
+     let whole @ (n?, _) = pair else loop {};
+     pair.0 = null;",
+    "whole" => tuple!(option!(Int), Int),
+    "n" => Int,
+);
+test_ty!(
+    match_on_a_variant_binding_checks_its_variant,
+    "enum E { A { n: int }, B { n: int } }
+     let a @ E::A {} = E::A { n = 1 } else loop {};",
+    "match a { E::A { n } => n }" => Int,
+    "match (a, 0) { (E::A { n }, _) => n }" => Int,
+    "{ let opt = if true { a } else { null };
+        match opt { E::A { n }? => n, null => 0 } }" => Int,
+);
+test_fail!(
+    match_on_a_variant_binding_rejects_the_wrong_variant,
+    "enum E { A { n: int }, B { n: int } }
+     let a @ E::A {} = E::A { n = 1 } else loop {};
+     match (a, 0) { (E::B { n }, _) => n }" => "non-exhaustive match",
+);
+test_fail!(
+    at_binding_keeps_mutable_aliases_invariant,
+    "enum E { A { n: int }, B }
+     fn replace(xs: [E]) { xs[0] = E::B; }
+     let a @ E::A {} = E::A { n = 1 } else loop {};
+     let xs = [a];
+     replace(xs);" => "mismatched types",
+    "enum E { A { n: int }, B }
+     fn replace(xs: (E, int)) { xs.0 = E::B; }
+     let a @ E::A {} = E::A { n = 1 } else loop {};
+     let xs = (a, 1);
+     replace(xs);" => "mismatched types",
+);
+test_fail!(
+    at_binding_or_alternatives_require_the_same_type,
+    "enum E { A { n: int }, B }
+     let value = (E::B, E::B);
+     match value {
+         (a @ E::A {}, _) | (_, a) => a.n,
+         _ => 0,
+     }" => "mismatched types",
+);
+test_fail!(
+    enum_does_not_narrow_to_a_variant,
+    "enum E { A { n: int }, B }
+     let a @ E::A {} = E::A { n = 1 } else loop {};
+     a = E::B;" => "mismatched types",
+);
 test_fail!(
     duplicate_struct_pattern_field,
     "struct P { x: int, y: int }
