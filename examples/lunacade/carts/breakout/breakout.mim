@@ -1,0 +1,286 @@
+use std::math::{IVec2, Vec2, ivec2, vec2};
+
+const COLS = 14;
+const ROWS = 6;
+const BRICK_W = 18;
+const BRICK_H = 8;
+const TOP = 24;
+const WALL = 2;
+const LEFT = WALL;
+const RIGHT = 256 - WALL;
+const CEILING = 10 + WALL;
+const PADDLE_Y = 132;
+const PADDLE_W = 24;
+const PADDLE_H = 3;
+const RADIUS = 2;
+const LIVES = 3;
+const LIFE_SPRITE = 0;
+const PADDLE_SPEED = 4; // pixels per 60 Hz frame
+// Sample the four corners of the ball's 4 by 4 pixel box. Read-only const iteration shares
+// this array; rebuilding it in collide() would allocate twice per simulated frame.
+const CORNERS = [-RADIUS, RADIUS - 1];
+
+enum Scene {
+    Title,
+    Serve,
+    Play,
+    Over,
+}
+
+struct Ball {
+    pos: Vec2,
+    vel: Vec2,
+    speed: float,
+}
+
+impl Ball {
+    // sends the ball up at its speed, `lean` radians off from straight up (right when positive)
+    fn aim(self, lean: float) {
+        self.vel = vec2(0.0, -self.speed).rotate(lean);
+    }
+}
+
+struct Game {
+    scene: Scene,
+    t: int,
+    score: int,
+    lives: int,
+    level: int,
+    paddle: int,
+    bricks: [bool],
+    standing: int,
+    ball: Ball,
+}
+
+impl Game {
+    fn new() -> Self {
+        let game = Self {
+            scene = Scene::Title, t = 0, score = 0, lives = 0, level = 1,
+            paddle = 0, bricks = [], standing = 0,
+            ball = Ball { pos = Vec2::zero(), vel = Vec2::zero(), speed = 0.0 },
+        };
+        game.reset();
+        game
+    }
+
+    fn update(self) {
+        self.t += 1;
+        match self.scene {
+            Scene::Title => {
+                if input::pressed(Button::Start) {
+                    self.enter(Scene::Serve);
+                }
+            }
+            Scene::Serve => {
+                self.steer();
+                self.dock();
+                let pressed = input::pressed(Button::A) || input::pressed(Button::Start);
+                if pressed || input::mouse_pressed(Mouse::Left) {
+                    self.launch();
+                }
+            }
+            Scene::Play => {
+                self.steer();
+                self.fly();
+                if self.standing == 0 {
+                    self.level += 1;
+                    self.rack();
+                    self.enter(Scene::Serve);
+                }
+            }
+            Scene::Over => {
+                if self.t > 60 && input::pressed(Button::Start) {
+                    self.reset();
+                    self.enter(Scene::Title);
+                }
+            }
+        }
+    }
+
+    fn enter(self, scene: Scene) {
+        self.scene = scene;
+        self.t = 0;
+        if scene == Scene::Serve { self.dock(); }
+    }
+
+    fn reset(self) {
+        self.score = 0;
+        self.lives = LIVES;
+        self.level = 1;
+        self.paddle = (luna::WIDTH - PADDLE_W) ~/ 2;
+        self.rack();
+    }
+
+    fn rack(self) {
+        self.bricks = array::new_filled(true, ROWS * COLS);
+        self.standing = ROWS * COLS;
+    }
+
+    // the d-pad moves the paddle, and so does the mouse once it moves
+    fn steer(self) {
+        if input::held(Button::Left) {
+            self.paddle -= PADDLE_SPEED;
+        }
+        if input::held(Button::Right) {
+            self.paddle += PADDLE_SPEED;
+        }
+        if let at? = input::mouse() {
+            if input::mouse_moved() {
+                self.paddle = at.x - PADDLE_W ~/ 2;
+            }
+        }
+        self.paddle = self.paddle.clamp(LEFT, RIGHT - PADDLE_W);
+    }
+
+    fn dock(self) {
+        let middle = self.paddle + PADDLE_W ~/ 2;
+        self.ball.pos = vec2(middle.to_float(), (PADDLE_Y - RADIUS).to_float());
+    }
+
+    fn launch(self) {
+        // Each cleared rack raises launch speed by 0.2, up to 2.8 pixels per frame.
+        self.ball.speed = (1.7 + 0.2 * (self.level - 1).to_float()).min(2.8);
+        self.ball.aim((int::random(9) - 4).to_float() * 0.08);
+        self.enter(Scene::Play);
+    }
+
+    fn fly(self) {
+        let ball = self.ball;
+        // one axis at a time, so a hit says which way to bounce
+        let pos = ball.pos;
+        let vel = ball.vel;
+        pos.x += vel.x;
+        if self.collide() {
+            pos.x -= vel.x;
+            vel.x = -vel.x;
+        }
+        pos.y += vel.y;
+        if self.collide() {
+            pos.y -= vel.y;
+            vel.y = -vel.y;
+        }
+        self.bounce_paddle();
+        if ball.pos.y - RADIUS > luna::HEIGHT {
+            self.lives -= 1;
+            self.enter(if self.lives > 0 Scene::Serve else Scene::Over);
+        }
+    }
+
+    // true if the ball's box is on a wall or a brick (the brick breaks)
+    fn collide(self) -> bool {
+        let x = self.ball.pos.x.floor().to_int();
+        let y = self.ball.pos.y.floor().to_int();
+        for dy in CORNERS {
+            for dx in CORNERS {
+                let px = x + dx;
+                let py = y + dy;
+                if px < LEFT || px >= RIGHT || py < CEILING {
+                    return true;
+                }
+                if let i? = self.brick_at(px, py) {
+                    let row = i ~/ COLS;
+                    self.bricks[i] = false;
+                    self.standing -= 1;
+                    self.score += (ROWS - row) * 10;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn brick_at(self, x: int, y: int) -> int? {
+        let inside = x >= LEFT && x < RIGHT && y >= TOP && y < TOP + ROWS * BRICK_H;
+        if !inside {
+            return null;
+        }
+        let i = (y - TOP) ~/ BRICK_H * COLS + (x - LEFT) ~/ BRICK_W;
+        if self.bricks[i] i else null
+    }
+
+    // where the ball lands on the paddle sets how far it leans, and every hit speeds it up
+    fn bounce_paddle(self) {
+        let ball = self.ball;
+        let pos = ball.pos;
+        let low = pos.y + RADIUS >= PADDLE_Y && pos.y - RADIUS < PADDLE_Y + PADDLE_H;
+        let over = pos.x + RADIUS > self.paddle && pos.x - RADIUS < self.paddle + PADDLE_W;
+        if ball.vel.y > 0.0 && low && over {
+            let across = (pos.x - self.paddle) / PADDLE_W * 2.0 - 1.0;
+            pos.y = (PADDLE_Y - RADIUS).to_float();
+            ball.speed = (ball.speed + 0.04).min(3.6);
+            ball.aim(across.clamp(-1.0, 1.0));
+        }
+    }
+
+    fn draw(self) {
+        gfx::clear(Color::Black);
+        self.draw_field();
+        match self.scene {
+            Scene::Title => {
+                gfx::text_centered("B R E A K O U T", 84, Color::Yellow);
+                gfx::text_centered("LEFT RIGHT OR THE MOUSE TO MOVE", 128, Color::Silver);
+                self.prompt("PRESS START", 112, Color::White);
+            }
+            Scene::Serve => {
+                self.draw_paddle();
+                self.prompt("PRESS A TO LAUNCH", 100, Color::White);
+            }
+            Scene::Play => self.draw_paddle(),
+            Scene::Over => {
+                gfx::text_centered("GAME OVER", 84, Color::Red);
+                gfx::text_centered(f"SCORE {self.score}", 96, Color::White);
+                if self.t > 60 {
+                    self.prompt("PRESS START", 108, Color::Yellow);
+                }
+            }
+        }
+    }
+
+    fn draw_field(self) {
+        gfx::rect(ivec2(0, 10), ivec2(luna::WIDTH, 140), Color::Slate);
+        gfx::rect(ivec2(1, 11), ivec2(luna::WIDTH - 2, 138), Color::Slate);
+        // enumerate() builds an array of pairs; the rack already has scalar cell indices.
+        for i in self.bricks.len() {
+            if self.bricks[i] {
+                let cell = IVec2::from_index(i, COLS);
+                let pos = ivec2(LEFT + cell.x * BRICK_W, TOP + cell.y * BRICK_H);
+                gfx::fill_rect(pos, ivec2(BRICK_W - 1, BRICK_H - 1), row_color(cell.y));
+            }
+        }
+        gfx::text(f"SCORE {self.score}", ivec2(4, 2), Color::White);
+        gfx::text_centered(f"LEVEL {self.level}", 2, Color::Silver);
+        for i in self.lives {
+            gfx::sprite(LIFE_SPRITE, ivec2(luna::WIDTH - 12 - i * 9, 1));
+        }
+    }
+
+    fn draw_paddle(self) {
+        let paddle = ivec2(self.paddle, PADDLE_Y);
+        gfx::fill_rect(paddle, ivec2(PADDLE_W, PADDLE_H), Color::Sky);
+        gfx::fill_rect(paddle, ivec2(PADDLE_W, 1), Color::Cyan);
+        let x = self.ball.pos.x.floor().to_int() - RADIUS;
+        let y = self.ball.pos.y.floor().to_int() - RADIUS;
+        gfx::fill_rect(ivec2(x, y), ivec2(RADIUS * 2, RADIUS * 2), Color::White);
+    }
+
+    fn prompt(self, s: str, y: int, c: Color) {
+        if (self.t ~/ 30) % 2 == 0 {
+            gfx::text_centered(s, y, c);
+        }
+    }
+}
+
+fn row_color(row: int) -> Color {
+    match row {
+        0 => Color::Red,
+        1 => Color::Orange,
+        2 => Color::Yellow,
+        3 => Color::Lime,
+        4 => Color::Cyan,
+        _ => Color::Sky,
+    }
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());

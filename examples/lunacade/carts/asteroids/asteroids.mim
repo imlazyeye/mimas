@@ -1,0 +1,337 @@
+use std::math::{IVec2, TAU, Vec2, ivec2, vec2};
+
+const W = 256.0;
+const H = 144.0;
+const SIDES = 9;
+// Simulation runs at 60 Hz. These delays are 1.5 seconds between waves/ships and two
+// seconds of invulnerability after spawning; shots survive just under one second.
+const RESPAWN = 90;
+const SAFE = 120;
+const SHOT_LIFE = 50;
+const MOST_SHOTS = 4;
+// The largest jagged rock is 17 * 1.15 pixels in radius, rounded to at most 20.
+const WRAP_MARGIN = 21;
+
+// indexed by a rock's size, from small to large
+const RADII = [5.0, 9.0, 17.0];
+const POINTS = [100, 50, 20];
+const HULL = [(0.0, -7.0), (-5.0, 6.0), (0.0, 3.0), (5.0, 6.0)];
+
+enum Scene {
+    Title,
+    Playing,
+    Over,
+}
+
+struct Game {
+    scene: Scene,
+    run: Run,
+}
+
+impl Game {
+    fn update(self) {
+        match self.scene {
+            Scene::Playing => {
+                self.run.update();
+                if self.run.lives == 0 && self.run.respawn == 0 {
+                    self.scene = Scene::Over;
+                }
+            }
+            // the title and the game over screen both wait for Start
+            _ => {
+                self.run.drift();
+                if input::pressed(Button::Start) {
+                    self.scene = if self.scene == Scene::Title Scene::Playing else Scene::Title;
+                    self.run = Run::new();
+                }
+            }
+        }
+    }
+
+    fn draw(self) {
+        gfx::clear(Color::Black);
+        self.run.draw();
+        match self.scene {
+            Scene::Title => menu("ASTEROIDS", Color::Yellow, "LEFT RIGHT TURN  UP THRUST  A FIRE"),
+            Scene::Playing => {
+                if self.run.respawn == 0 {
+                    self.run.ship.draw();
+                }
+                gfx::text(f"{self.run.score}", ivec2(4, 4), Color::White);
+                gfx::text_centered(f"WAVE {self.run.wave}", 4, Color::Silver);
+                let icon = hull(0.0, 0.6);
+                for i in self.run.lives {
+                    outline(icon, vec2(248.0 - i.to_float() * 10.0, 10.0), Color::Silver);
+                }
+            }
+            Scene::Over => menu("GAME OVER", Color::Red, f"SCORE {self.run.score}"),
+        }
+    }
+}
+
+// one game's worth of state (starting over is making a new one)
+struct Run {
+    ship: Ship,
+    rocks: [Rock],
+    shots: [Shot],
+    score: int,
+    lives: int,
+    wave: int,
+    respawn: int,
+    pause: int,
+}
+
+impl Run {
+    fn new() -> Self {
+        let run = Self {
+            ship = Ship::new(),
+            rocks = [],
+            shots = [],
+            score = 0,
+            lives = 3,
+            wave = 0,
+            respawn = 0,
+            pause = 0,
+        };
+        run.next_wave();
+        run
+    }
+
+    fn update(self) {
+        self.drift();
+        self.shoot_rocks();
+        let shots = self.shots;
+        let kept = 0;
+        for shot in shots {
+            shot.pos = wrap(shot.pos.add(shot.vel));
+            shot.life -= 1;
+            if shot.life > 0 { shots[kept] = shot; kept += 1; }
+        }
+        while shots.len() > kept { shots.pop(); }
+        if self.rocks.is_empty() {
+            self.pause += 1;
+            if self.pause == RESPAWN {
+                self.next_wave();
+            }
+        }
+        if self.respawn > 0 {
+            self.respawn -= 1;
+            if self.respawn == 0 && self.lives > 0 {
+                self.ship = Ship::new();
+            }
+        } else {
+            self.ship.update();
+            self.fire();
+            self.ram();
+        }
+    }
+
+    // what keeps moving when nobody is playing
+    fn drift(self) {
+        for rock in self.rocks {
+            rock.pos = wrap(rock.pos.add(rock.vel));
+        }
+    }
+
+    fn next_wave(self) {
+        self.wave += 1;
+        self.pause = 0;
+        let speed = 0.3 + 0.08 * self.wave.to_float();
+        for _ in (2 + self.wave).min(7) {
+            // on a ring around the ship (never on top of it)
+            let ring = Vec2::from_angle(float::random(TAU)).scale(90.0);
+            self.rocks.push(Rock::new(wrap(self.ship.pos.add(ring)), 2, speed));
+        }
+    }
+
+    fn fire(self) {
+        let ship = self.ship;
+        if input::pressed(Button::A) && self.shots.len() < MOST_SHOTS {
+            let vel = ship.vel.add(ship.heading().scale(4.0));
+            self.shots.push(Shot { pos = ship.pos, vel, life = SHOT_LIFE });
+        }
+    }
+
+    fn shoot_rocks(self) {
+        let rocks = self.rocks;
+        let output: [Rock]? = null;
+        // Most frames destroy nothing. Allocate the replacement only on the first hit,
+        // preserving rock order and leaving newborn children out of this frame's scan.
+        for i in rocks.len() {
+            let rock = rocks[i];
+            let hit = false;
+            for shot in self.shots {
+                if shot.life > 0 && rock.touches(shot.pos, 0.0) {
+                    shot.life = 0;
+                    hit = true;
+                }
+            }
+            if hit {
+                self.score += POINTS[rock.size];
+                if output == null { output = for j in i collect rocks[j]; }
+                rock.split(output!);
+            } else if let survivors? = output {
+                survivors.push(rock);
+            }
+        }
+        if let survivors? = output { self.rocks = survivors; }
+    }
+
+    fn ram(self) {
+        let ship = self.ship;
+        for rock in self.rocks {
+            if ship.safe == 0 && rock.touches(ship.pos, 4.0) {
+                self.lives -= 1;
+                self.respawn = RESPAWN;
+                break;
+            }
+        }
+    }
+
+    fn draw(self) {
+        for rock in self.rocks {
+            outline(rock.points, rock.pos, Color::Silver);
+        }
+        for shot in self.shots {
+            let corner = pixel(shot.pos).sub(ivec2(1, 1));
+            gfx::fill_rect(corner, ivec2(2, 2), Color::Yellow);
+        }
+        if self.respawn > 60 {
+            // a ring that grows from where the ship was hit
+            gfx::circle(pixel(self.ship.pos), (RESPAWN + 1 - self.respawn) ~/ 2, Color::Orange);
+        }
+    }
+}
+
+struct Ship {
+    pos: Vec2,
+    vel: Vec2,
+    angle: float,
+    safe: int,
+}
+
+impl Ship {
+    fn new() -> Self {
+        Self { pos = vec2(W / 2.0, H / 2.0), vel = Vec2::zero(), angle = 0.0, safe = SAFE }
+    }
+
+    // the way the nose points, which is up when the angle is 0
+    fn heading(self) -> Vec2 {
+        vec2(0.0, -1.0).rotate(self.angle)
+    }
+
+    fn update(self) {
+        if input::held(Button::Left) {
+            self.angle -= 0.085;
+        }
+        if input::held(Button::Right) {
+            self.angle += 0.085;
+        }
+        if input::held(Button::Up) {
+            self.vel = self.vel.add(self.heading().scale(0.04));
+        }
+        self.vel = self.vel.scale(0.985);
+        self.pos = wrap(self.pos.add(self.vel));
+        self.safe = (self.safe - 1).max(0);
+    }
+
+    fn draw(self) {
+        // dims in flashes while the ship can't be hit
+        let color = if self.safe % 8 >= 4 Color::Slate else Color::White;
+        outline(hull(self.angle, 1.0), self.pos, color);
+    }
+}
+
+struct Rock {
+    pos: Vec2,
+    vel: Vec2,
+    size: int,
+    points: [IVec2],
+}
+
+impl Rock {
+    fn new(pos: Vec2, size: int, speed: float) -> Self {
+        let points = for i in SIDES {
+            let r = RADII[size] * (0.75 + float::random(0.4));
+            collect pixel(Vec2::from_angle(TAU * i.to_float() / SIDES.to_float()).scale(r));
+        };
+        let vel = Vec2::from_angle(float::random(TAU)).scale(speed);
+        Self { pos, vel, size, points }
+    }
+
+    fn split(self, rocks: [Rock]) {
+        if self.size == 0 { return; }
+        let speed = self.vel.length() * 1.3;
+        for _ in 2 { rocks.push(Rock::new(self.pos, self.size - 1, speed)); }
+    }
+
+    fn touches(self, at: Vec2, r: float) -> bool {
+        let reach = RADII[self.size] + r;
+        let dx = near(self.pos.x - at.x, W);
+        let dy = near(self.pos.y - at.y, H);
+        dx * dx + dy * dy < reach * reach
+    }
+}
+
+struct Shot {
+    pos: Vec2,
+    vel: Vec2,
+    life: int,
+}
+
+// brings a spot that left the screen back in on the other side
+fn wrap(p: Vec2) -> Vec2 {
+    vec2((p.x % W + W) % W, (p.y % H + H) % H)
+}
+
+// the shortest way between two spots on an axis that wraps
+fn near(d: float, size: float) -> float {
+    let d = d.abs();
+    d.min(size - d)
+}
+
+fn pixel(p: Vec2) -> IVec2 {
+    ivec2(p.x.round().to_int(), p.y.round().to_int())
+}
+
+fn hull(angle: float, scale: float) -> [IVec2] {
+    // Iterate the const directly: passing its mutable array as an argument would clone it.
+    for (x, y) in HULL collect pixel(vec2(x, y).rotate(angle).scale(scale))
+}
+
+// also drawn across the nearer edges (a shape leaving one side comes in the other)
+fn outline(points: [IVec2], at: Vec2, color: Color) {
+    let at = pixel(at);
+    let dx = if at.x < WRAP_MARGIN { luna::WIDTH }
+             else if at.x >= luna::WIDTH - WRAP_MARGIN { -luna::WIDTH } else 0;
+    let dy = if at.y < WRAP_MARGIN { luna::HEIGHT }
+             else if at.y >= luna::HEIGHT - WRAP_MARGIN { -luna::HEIGHT } else 0;
+    trace(points, at, color);
+    // Most shapes are away from an edge. Only draw copies that can wrap into view.
+    if dx != 0 { trace(points, at.add(ivec2(dx, 0)), color); }
+    if dy != 0 { trace(points, at.add(ivec2(0, dy)), color); }
+    if dx != 0 && dy != 0 { trace(points, at.add(ivec2(dx, dy)), color); }
+}
+
+fn trace(points: [IVec2], origin: IVec2, color: Color) {
+    let last = points[points.len() - 1];
+    for point in points {
+        gfx::line(origin.add(last), origin.add(point), color);
+        last = point;
+    }
+}
+
+// a panel keeps the rocks drifting behind it from running through the words
+fn menu(title: str, color: Color, line: str) {
+    gfx::fill_rect(ivec2(24, 40), ivec2(208, 56), Color::Black);
+    gfx::rect(ivec2(24, 40), ivec2(208, 56), Color::Charcoal);
+    gfx::text_centered(title, 50, color);
+    gfx::text_centered(line, 66, Color::Silver);
+    if (luna::frame() ~/ 30) % 2 == 0 {
+        gfx::text_centered("PRESS START", 80, Color::White);
+    }
+}
+
+let game = Game { scene = Scene::Title, run = Run::new() };
+luna::update(|| game.update());
+luna::draw(|| game.draw());

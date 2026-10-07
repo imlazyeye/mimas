@@ -1,0 +1,238 @@
+use std::math::{IVec2, Vec2, ivec2, vec2};
+
+// Positions and speeds are pixels and pixels per 60 Hz frame. The top strip holds the score.
+const TOP = 12.0;
+const BOTTOM = 142.0;
+const MIDDLE = 77.0;
+const RIGHT = 256.0;
+const PADDLE_W = 4.0;
+const PADDLE_H = 24.0;
+const BALL = 4.0;
+const ME_X = 10.0;
+const CPU_X = 242.0;
+const PLAYER_SPEED = 3.0;
+const CPU_SPEED = 2.4;
+const CPU_ERROR = 16.0;
+const START_SPEED = 2.2;
+const SPEEDUP = 0.25;
+const MAX_SPEED = 6.0;
+const SERVE_FRAMES = 45;
+const WIN = 7;
+
+enum Scene {
+    Title,
+    Serve,
+    Play,
+    Over(bool),
+}
+
+struct Game {
+    scene: Scene,
+    timer: int,
+    me: float,
+    cpu: float,
+    aim: float,
+    ball: Vec2,
+    vel: Vec2,
+    speed: float,
+    my_score: int,
+    cpu_score: int,
+}
+
+impl Game {
+    fn new() -> Self {
+        Self {
+            scene = Scene::Title, timer = 0,
+            me = MIDDLE - PADDLE_H / 2.0, cpu = MIDDLE - PADDLE_H / 2.0, aim = 0.0,
+            ball = Vec2::zero(), vel = Vec2::zero(), speed = START_SPEED,
+            my_score = 0, cpu_score = 0,
+        }
+    }
+
+    fn update(self) {
+        self.timer += 1;
+        match self.scene {
+            Scene::Title => {
+                if input::pressed(Button::Start) {
+                    self.my_score = 0;
+                    self.cpu_score = 0;
+                    self.me = MIDDLE - PADDLE_H / 2.0;
+                    self.cpu = MIDDLE - PADDLE_H / 2.0;
+                    self.serve(true);
+                }
+            }
+            Scene::Serve => {
+                self.move_paddles();
+                if self.timer >= SERVE_FRAMES {
+                    self.go(Scene::Play);
+                }
+            }
+            Scene::Play => {
+                self.move_paddles();
+                self.move_ball();
+            }
+            Scene::Over(_) => {
+                if self.timer > 60 && input::pressed(Button::Start) {
+                    self.go(Scene::Title);
+                }
+            }
+        }
+    }
+
+    fn go(self, scene: Scene) {
+        self.scene = scene;
+        self.timer = 0;
+    }
+
+    // puts the ball in the middle, heading for whoever lost the last point
+    fn serve(self, toward_cpu: bool) {
+        self.ball = vec2(RIGHT / 2.0 - BALL / 2.0, MIDDLE - BALL / 2.0);
+        self.speed = START_SPEED;
+        self.aim = wobble();
+        let side = if toward_cpu 1.0 else -1.0;
+        self.launch(side, float::random(2.0) - 1.0);
+        self.go(Scene::Serve);
+    }
+
+    // Preserve total speed; a negative vertical component rises in screen coordinates.
+    fn launch(self, side: float, rise: float) {
+        self.vel = vec2(side * (self.speed * self.speed - rise * rise).sqrt(), rise);
+    }
+
+    fn move_paddles(self) {
+        if input::held(Button::Up) {
+            self.me -= PLAYER_SPEED;
+        }
+        if input::held(Button::Down) {
+            self.me += PLAYER_SPEED;
+        }
+        if let spot? = input::mouse() {
+            if input::mouse_moved() {
+                self.me = spot.y.to_float() - PADDLE_H / 2.0;
+            }
+        }
+        self.me = self.me.clamp(TOP, BOTTOM - PADDLE_H);
+
+        // the cpu only watches the ball once it's headed its way, and never aims quite right
+        let target = if self.vel.x > 0.0 self.ball.y + BALL / 2.0 + self.aim else MIDDLE;
+        let step = (target - self.cpu - PADDLE_H / 2.0).clamp(-CPU_SPEED, CPU_SPEED);
+        self.cpu = (self.cpu + step).clamp(TOP, BOTTOM - PADDLE_H);
+    }
+
+    fn move_ball(self) {
+        self.ball = self.ball.add(self.vel);
+        if self.ball.y < TOP || self.ball.y + BALL > BOTTOM {
+            self.ball.y = self.ball.y.clamp(TOP, BOTTOM - BALL);
+            self.vel.y = -self.vel.y;
+        }
+
+        if self.vel.x < 0.0 && self.hits(ME_X, self.me) {
+            self.ball.x = ME_X + PADDLE_W;
+            self.bounce(self.me, 1.0);
+            self.aim = wobble();
+        } else if self.vel.x > 0.0 && self.hits(CPU_X, self.cpu) {
+            self.ball.x = CPU_X - BALL;
+            self.bounce(self.cpu, -1.0);
+        } else if self.ball.x + BALL < 0.0 {
+            self.point(false);
+        } else if self.ball.x > RIGHT {
+            self.point(true);
+        }
+    }
+
+    fn hits(self, x: float, paddle: float) -> bool {
+        let ball = self.ball;
+        ball.x < x + PADDLE_W
+            && ball.x + BALL > x
+            && ball.y < paddle + PADDLE_H
+            && ball.y + BALL > paddle
+    }
+
+    // the ball leaves at a steeper angle the farther from the paddle's middle it landed
+    fn bounce(self, paddle: float, side: float) {
+        let across = (self.ball.y + BALL / 2.0 - paddle) / PADDLE_H * 2.0 - 1.0;
+        self.speed = (self.speed + SPEEDUP).min(MAX_SPEED);
+        // Cap the vertical component at 70% so even an edge hit keeps moving across the court.
+        self.launch(side, across.clamp(-1.0, 1.0) * self.speed * 0.7);
+    }
+
+    fn point(self, mine: bool) {
+        if mine {
+            self.my_score += 1;
+        } else {
+            self.cpu_score += 1;
+        }
+
+        if self.my_score == WIN || self.cpu_score == WIN {
+            self.go(Scene::Over(mine));
+        } else {
+            self.serve(mine);
+        }
+    }
+
+    fn draw(self) {
+        gfx::clear(Color::Black);
+        block(0.0, TOP - 2.0, RIGHT, 2.0, Color::Slate);
+        block(0.0, BOTTOM, RIGHT, 2.0, Color::Slate);
+        block(ME_X, self.me, PADDLE_W, PADDLE_H, Color::Sky);
+        block(CPU_X, self.cpu, PADDLE_W, PADDLE_H, Color::Orange);
+        match self.scene {
+            Scene::Title => self.draw_title(),
+            Scene::Over(won) => {
+                self.draw_court();
+                self.draw_over(won);
+            }
+            _ => self.draw_court(),
+        }
+    }
+
+    fn draw_court(self) {
+        for i in 16 {
+            gfx::fill_rect(ivec2(127, 14 + i * 8), ivec2(2, 4), Color::Charcoal);
+        }
+        gfx::text("YOU", ivec2(8, 2), Color::Sky);
+        gfx::text("CPU", ivec2(236, 2), Color::Orange);
+        let mine = f"{self.my_score}";
+        gfx::text(mine, ivec2(120 - gfx::text_width(mine), 2), Color::White);
+        gfx::text(f"{self.cpu_score}", ivec2(136, 2), Color::White);
+
+        // the ball blinks while the serve counts down
+        if self.scene != Scene::Serve || self.timer % 8 < 5 {
+            block(self.ball.x, self.ball.y, BALL, BALL, Color::White);
+        }
+    }
+
+    fn draw_title(self) {
+        gfx::blit(IVec2::zero(), ivec2(72, 24), ivec2(92, 28));
+        gfx::text_centered(f"FIRST TO {WIN} WINS", 64, Color::Silver);
+        gfx::text_centered("UP/DOWN OR THE MOUSE TO MOVE", 76, Color::Silver);
+        if self.timer % 60 < 30 {
+            gfx::text_centered("PRESS START", 104, Color::Yellow);
+        }
+    }
+
+    fn draw_over(self, won: bool) {
+        gfx::fill_rect(ivec2(64, 48), ivec2(128, 48), Color::Black);
+        gfx::rect(ivec2(64, 48), ivec2(128, 48), Color::Slate);
+        let color = if won Color::Lime else Color::Red;
+        gfx::text_centered(if won "YOU WIN" else "CPU WINS", 56, color);
+        gfx::text_centered(f"{self.my_score} - {self.cpu_score}", 68, Color::White);
+        if self.timer > 60 && self.timer % 60 < 30 {
+            gfx::text_centered("PRESS START", 80, Color::Yellow);
+        }
+    }
+}
+
+// how far off the ball the cpu aims, until the next time the ball is hit
+fn wobble() -> float {
+    float::random(CPU_ERROR * 2.0) - CPU_ERROR
+}
+
+fn block(x: float, y: float, w: float, h: float, c: Color) {
+    let pos = ivec2(x.round().to_int(), y.round().to_int());
+    gfx::fill_rect(pos, ivec2(w.to_int(), h.to_int()), c);
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());

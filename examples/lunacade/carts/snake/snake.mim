@@ -1,0 +1,252 @@
+use std::math::{IVec2, ivec2};
+
+const COLS = 32;
+const ROWS = 18;
+const CELL = 8;
+const START_DELAY = 10;
+const MIN_DELAY = 4;
+const CELLS = COLS * ROWS;
+const HOME = (ROWS ~/ 2) * COLS + COLS ~/ 2;
+// Button/coordinate triples are immutable. Construct a vector only for an accepted turn.
+const TURNS = [(Button::Up, 0, -1), (Button::Down, 0, 1),
+               (Button::Left, -1, 0), (Button::Right, 1, 0)];
+
+const TITLE = [
+    ".#### #...# .###. #...# #####",
+    "#.... ##..# #...# #..#. #....",
+    ".###. #.#.# ##### ###.. ####.",
+    "....# #..## #...# #..#. #....",
+    "####. #...# #...# #...# #####",
+];
+
+struct Game {
+    scene: Scene,
+    // the cells of the board are numbered across and then down
+    body: [int],
+    // Constant-time collision and food lookup; body keeps the order from head to tail.
+    occupied: [bool],
+    dir: IVec2,
+    turn: IVec2,
+    food: int,
+    delay: int,
+    timer: int,
+    score: int,
+    best: int,
+}
+
+impl Game {
+    fn new() -> Self {
+        Self {
+            scene = Scene::Title, body = [], occupied = array::new_filled(false, CELLS),
+            dir = ivec2(1, 0), turn = ivec2(1, 0), food = 0,
+            delay = START_DELAY, timer = 0, score = 0, best = 0,
+        }
+    }
+
+    fn update(self) {
+        let start = input::pressed(Button::Start);
+        self.timer += 1;
+        match self.scene {
+            Scene::Title => {
+                if start { self.begin(); }
+            },
+            Scene::Over(_) => {
+                if start && self.timer > 60 { self.scene = Scene::Title; }
+            },
+            Scene::Playing => self.play(),
+        }
+    }
+
+    fn draw(self) {
+        match self.scene {
+            Scene::Title => self.draw_title(),
+            Scene::Playing => self.draw_field(),
+            Scene::Over(won) => {
+                gfx::remap(Color::Green, Color::Slate);
+                gfx::remap(Color::Lime, Color::Silver);
+                self.draw_field();
+                self.draw_over(won);
+            },
+        }
+    }
+
+    fn draw_title(self) {
+        gfx::clear(Color::Black);
+        for y in TITLE.len() {
+            let row = TITLE[y];
+            for x in row.len() {
+                if row[x] == "#" {
+                    gfx::sprite(Sprite::Body.id(), ivec2(12 + x * CELL, 20 + y * CELL));
+                }
+            }
+        }
+        gfx::sprite(Sprite::HeadSide.id(), ivec2(244, 52));
+        if luna::frame() % 60 < 30 {
+            gfx::text_centered("PRESS START", 90, Color::Yellow);
+        }
+    }
+
+    fn draw_field(self) {
+        gfx::clear(Color::Black);
+        for x in 1..COLS {
+            gfx::line(
+                ivec2(x * CELL, 0),
+                ivec2(x * CELL, luna::HEIGHT - 1),
+                Color::Charcoal,
+            );
+        }
+        for y in 1..ROWS {
+            gfx::line(
+                ivec2(0, y * CELL),
+                ivec2(luna::WIDTH - 1, y * CELL),
+                Color::Charcoal,
+            );
+        }
+        gfx::rect(IVec2::zero(), ivec2(luna::WIDTH, luna::HEIGHT), Color::Slate);
+        gfx::sprite(Sprite::Food.id(), corner(self.food));
+        for cell in self.body {
+            gfx::sprite(Sprite::Body.id(), corner(cell));
+        }
+        let head = corner(self.body[0]);
+        if self.dir.y == 0 {
+            gfx::sprite(Sprite::HeadSide.id(), head, self.dir.x < 0);
+        } else {
+            gfx::sprite(Sprite::HeadDown.id(), head, false, self.dir.y < 0);
+        }
+        gfx::text(f"SCORE {self.score}  BEST {self.best}", ivec2(3, 2), Color::White);
+    }
+
+    fn draw_over(self, won: bool) {
+        gfx::fill_rect(ivec2(64, 44), ivec2(128, 56), Color::Black);
+        gfx::rect(ivec2(64, 44), ivec2(128, 56), Color::Slate);
+        gfx::text_centered(if won "BOARD CLEARED" else "GAME OVER", 52,
+            if won Color::Lime else Color::Red);
+        gfx::text_centered(f"SCORE {self.score}", 64, Color::White);
+        gfx::text_centered(f"BEST {self.best}", 74, Color::Silver);
+        if self.timer > 60 && luna::frame() % 40 < 26 {
+            gfx::text_centered("PRESS START", 88, Color::Yellow);
+        }
+    }
+
+    fn play(self) {
+        self.steer();
+        if self.timer >= self.delay {
+            self.timer = 0;
+            self.step();
+        }
+    }
+
+    fn steer(self) {
+        for (button, x, y) in TURNS {
+            // Compare with the last actual move, not a queued turn: two button presses between
+            // steps must not let the head reverse into the body.
+            let reverses = x == -self.dir.x && y == -self.dir.y;
+            if input::pressed(button) && !reverses {
+                self.turn = ivec2(x, y);
+            }
+        }
+    }
+
+    fn step(self) {
+        self.dir = self.turn;
+        let at = IVec2::from_index(self.body[0], COLS).add(self.dir);
+        let outside = at.x < 0 || at.x >= COLS || at.y < 0 || at.y >= ROWS;
+        if outside {
+            self.finish(false);
+            return;
+        }
+        let cell = at.to_index(COLS);
+        let eating = cell == self.food;
+        let tail = self.body[self.body.len() - 1];
+        // The tail vacates its cell on an ordinary move, so moving into it is legal.
+        // Check before changing either array: a fatal move leaves the final snake intact.
+        if self.occupied[cell] && (eating || cell != tail) {
+            self.finish(false);
+            return;
+        }
+        if !eating {
+            self.body.pop();
+            self.occupied[tail] = false;
+        }
+        self.body.insert(0, cell);
+        self.occupied[cell] = true;
+        if eating {
+            self.score += 1;
+            self.best = self.best.max(self.score);
+            // Two snacks per speed increase, capped at one step per four frames (15 Hz).
+            self.delay = (START_DELAY - self.score ~/ 2).max(MIN_DELAY);
+            self.place_food();
+        }
+    }
+
+    fn begin(self) {
+        self.body = [HOME, HOME - 1, HOME - 2];
+        self.occupied = array::new_filled(false, CELLS);
+        for cell in self.body { self.occupied[cell] = true; }
+        self.dir = ivec2(1, 0);
+        self.turn = ivec2(1, 0);
+        self.delay = START_DELAY;
+        self.timer = 0;
+        self.score = 0;
+        self.scene = Scene::Playing;
+        self.place_food();
+    }
+
+    fn finish(self, won: bool) {
+        self.scene = Scene::Over(won);
+        self.timer = 0;
+    }
+
+    // Pick the nth empty cell uniformly, using occupancy rather than a membership scan for
+    // every candidate. Filling the board wins instead of choosing from an empty array.
+    fn place_food(self) {
+        let empty = CELLS - self.body.len();
+        if empty == 0 {
+            self.finish(true);
+            return;
+        }
+        let skip = int::random(empty);
+        for cell in CELLS {
+            if !self.occupied[cell] {
+                if skip == 0 {
+                    self.food = cell;
+                    return;
+                }
+                skip -= 1;
+            }
+        }
+    }
+}
+
+enum Scene {
+    Title,
+    Playing,
+    Over(bool), // true when every cell has been filled
+}
+
+enum Sprite {
+    HeadSide,
+    HeadDown,
+    Body,
+    Food,
+}
+
+impl Sprite {
+    fn id(self) -> int {
+        match self {
+            Sprite::HeadSide => 0,
+            Sprite::HeadDown => 1,
+            Sprite::Body => 2,
+            Sprite::Food => 3,
+        }
+    }
+}
+
+// where a cell's sprite goes on the screen
+fn corner(cell: int) -> IVec2 {
+    IVec2::from_index(cell, COLS).scale(CELL)
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());
