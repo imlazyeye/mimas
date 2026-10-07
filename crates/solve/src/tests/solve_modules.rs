@@ -87,6 +87,16 @@ test_multi_file!(
 );
 
 test_multi_file!(
+    import_visible_in_const,
+    foo => "module @;
+            pub const BAR = 3;",
+    fizz => "module @;
+             use foo::BAR;
+             pub const BUZZ = BAR + 1;";
+    "fizz::BUZZ" => Int,
+);
+
+test_multi_file!(
     used_type_in_fn_signature,
     foo => "module @; pub struct Bar { pub x: int }",
     fizz => "module @; use foo::Bar; pub fn take(b: Bar) -> int { b.x }";
