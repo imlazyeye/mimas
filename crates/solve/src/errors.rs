@@ -268,15 +268,13 @@ pub struct AssignToStringIndex {
     pub at: SourceSpan,
 }
 
-/// Reaching a pact *constant* -- rather than a method -- through the abstract pact type has no
-/// lowering yet: each impl supplies a different value, and there's no dispatch for constants the
-/// way there is for methods. Rejected here so it reads as a scope limit instead of surfacing as
-/// an ICE further down the pipeline.
+/// Reaching a pact *constant* through `Self` in a default body. Each impl supplies a different
+/// value and a value picks one by its type at runtime, but `Self` on its own is no value.
 #[derive(Error, Debug, Diagnostic)]
 #[error("pact constant `{member}` can't be reached through `{via}`")]
 #[diagnostic(help(
-    "constants don't dispatch the way pact methods do -- read it off a concrete type \
-     (`TheType::{member}`), or add a pact method that returns it"
+    "read it off a value of the pact (`self.{member}`), or off a concrete type \
+     (`TheType::{member}`)"
 ))]
 pub struct PactConstantNotDispatchable {
     #[source_code]

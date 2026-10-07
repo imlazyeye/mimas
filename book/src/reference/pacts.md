@@ -63,7 +63,20 @@ impl Named for Square {
 let n = Square::NAME; // "Square"
 ```
 
-Constants are read off a **concrete type**. Unlike methods, they don't dispatch -- see [Limitations](#limitations) below.
+A constant can also be read off a value that is only known by its pact. Like a method call, the value's own impl is picked at runtime:
+
+```mimas
+# pact Named { const NAME: str; }
+# struct Square;
+# impl Named for Square { const NAME = "Square"; }
+fn name_of(thing: Named) -> str {
+    thing.NAME
+}
+
+let n = name_of(Square); // "Square"
+```
+
+Read that way it's no longer a compile-time value, so it can't be used to define another `const`.
 
 ## Default implementations
 
@@ -213,24 +226,18 @@ struct Widget {
 
 Pacts are the youngest part of the language. Each of the following is rejected with a clear error rather than silently misbehaving.
 
-**Constants don't dispatch.** A pact constant can only be read off a concrete type. Reaching one through a pact-typed value has no answer at runtime -- every impl declares its own value, and the receiver's concrete type isn't known:
-
-```mimas
-# pact Named { const NAME: str; }
-fn tag_of(thing: Named) -> str {
-    thing.NAME // compile error: pact constant `NAME` can't be reached through `Named`
-}
-```
-
-The workaround is to require a method instead, which does dispatch:
+**`Self::CONSTANT` can't be read in a default body.** A default body is shared by every impl, so `Self` there is no one type, and unlike a value it has nothing to pick an impl's constant by:
 
 ```mimas
 pact Named {
-    fn name(self) -> str;
+    const NAME: str;
+    fn describe() -> str {
+        Self::NAME // compile error: pact constant `NAME` can't be reached through `Self`
+    }
 }
 ```
 
-Reading the constant off [every implementer](#reaching-every-implementer) with `Named::*::NAME` works too, since no single value has to be picked.
+A method can read it off `self` instead (`self.NAME`), since a value does say which impl it is.
 
 **Methods that take `Self` can't be called through a pact.** `Self` in a parameter means "the same type as the receiver", and a value known only by its pact doesn't say what that is -- `a.plus(b)` with both typed `Plus` could pair a `V` with a `W`. The call is rejected wherever the receiver is only known by its bound, even when the arguments happen to match:
 

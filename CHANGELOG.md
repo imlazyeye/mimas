@@ -8,6 +8,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 - `Pact::*::member` reaches a member on every implementer of a pact and collects the results into an array. An associated function is called once per implementer, and a constant is read from each. See [Reaching every implementer](https://mim.as/reference/pacts.html#reaching-every-implementer).
 - mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). Each input runs on top of the ones before it, and a trailing expression prints with its type.
+- A pact constant can be read through a value that is only known by its pact (`thing.NAME` with `thing: Named`), which picks the value's own impl at runtime the way a method call does. It used to be a compile error.
 - `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel".
 - `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write.
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
