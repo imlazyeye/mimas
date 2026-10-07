@@ -1,0 +1,123 @@
+/* The sprite editor: the sheet and the chosen sprite side by side, with the palette and undo
+   under the sprite. The colors come from the variables in style.css. */
+
+.px {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 20px 28px;
+    padding: 16px;
+}
+
+.px:focus {
+    outline: none;
+}
+
+.px-notice {
+    flex: 1 0 100%;
+    margin: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--warm);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.px-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* the canvases keep their size in whole pixels and get no border, which would shrink them
+   to a fraction of a pixel per cell */
+
+.px-sheet,
+.px-sprite {
+    display: block;
+    background: var(--ground);
+    box-shadow: 0 0 0 1px var(--line);
+    image-rendering: pixelated;
+    user-select: none;
+}
+
+.px-sheet {
+    width: 256px;
+    max-width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    cursor: pointer;
+}
+
+.px-sprite {
+    width: 192px;
+    height: 192px;
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.px-caption {
+    margin: 0;
+    color: var(--muted);
+    font: 13px var(--mono);
+}
+
+/* the buttons */
+
+.px button {
+    padding: 3px 10px;
+    font-size: 13px;
+}
+
+.px-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+/* the palette */
+
+.px-palette {
+    display: grid;
+    grid-template-columns: repeat(8, 26px);
+    gap: 4px;
+}
+
+.px .px-swatch {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 3px;
+}
+
+.px .px-swatch[aria-pressed="true"] {
+    border-color: var(--text);
+    box-shadow:
+        0 0 0 2px var(--ground),
+        0 0 0 4px var(--text);
+}
+
+.px-current {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font: 13px var(--mono);
+}
+
+.px-chip {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+}
+
+.px-hint {
+    max-width: 38ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}

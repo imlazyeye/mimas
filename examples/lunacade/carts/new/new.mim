@@ -1,0 +1,38 @@
+use std::math::{Vec2, vec2};
+
+const BALL_SPRITE = 0;
+
+struct Ball {
+    pos: Vec2,
+    vel: Vec2,
+    bounces: int,
+}
+
+impl Ball {
+    fn update(self) {
+        self.pos = self.pos.add(self.vel);
+        if self.pos.x < 0 || self.pos.x > luna::WIDTH - 8 {
+            self.vel.x = -self.vel.x;
+            self.bounce();
+        }
+        if self.pos.y < 0 || self.pos.y > luna::HEIGHT - 8 {
+            self.vel.y = -self.vel.y;
+            self.bounce();
+        }
+    }
+
+    fn bounce(self) {
+        self.bounces += 1;
+        print(f"bounce {self.bounces}");
+    }
+
+    fn draw(self) {
+        gfx::clear(Color::Navy);
+        gfx::sprite(BALL_SPRITE, self.pos.to_ivec2());
+    }
+}
+
+let ball = Ball { pos = vec2(60.0, 40.0), vel = vec2(1.0, 1.0), bounces = 0 };
+luna::update(|| ball.update());
+luna::draw(|| ball.draw());
+print("hello from your new cart");

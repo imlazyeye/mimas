@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en" class="navy">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lunacade</title>
+<meta name="description" content="A fantasy console for mimas, with a code editor and a sprite editor.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="mimas">
+<meta property="og:title" content="lunacade">
+<meta property="og:description" content="A fantasy console for mimas, with a code editor and a sprite editor.">
+<meta property="og:image" content="https://mim.as/brand/icon-color.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="lunacade">
+<meta name="twitter:description" content="A fantasy console for mimas, with a code editor and a sprite editor.">
+<meta name="twitter:image" content="https://mim.as/brand/icon-color.png">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../favicon.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&display=swap">
+<link rel="stylesheet" href="../theme/highlight-tokyo-night.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="editor.css">
+<link rel="stylesheet" href="pixels.css">
+<!-- every CodeMirror package has to be one module instance, so each is pinned here and told to
+     leave its imports of the others to this map -->
+<script type="importmap">
+{
+    "imports": {
+        "@codemirror/state": "https://esm.sh/@codemirror/state@6.7.6",
+        "@codemirror/view": "https://esm.sh/@codemirror/view@6.43.13?external=@codemirror/state",
+        "@codemirror/language": "https://esm.sh/@codemirror/language@6.12.4?external=@codemirror/state,@codemirror/view,@lezer/common,@lezer/highlight",
+        "@codemirror/commands": "https://esm.sh/@codemirror/commands@6.11.1?external=@codemirror/state,@codemirror/view,@codemirror/language,@lezer/common",
+        "@codemirror/lint": "https://esm.sh/@codemirror/lint@6.9.7?external=@codemirror/state,@codemirror/view",
+        "@codemirror/search": "https://esm.sh/@codemirror/search@6.7.2?external=@codemirror/state,@codemirror/view",
+        "@lezer/common": "https://esm.sh/@lezer/common@1.5.3",
+        "@lezer/highlight": "https://esm.sh/@lezer/highlight@1.2.5?external=@lezer/common"
+    }
+}
+</script>
+</head>
+<body>
+<header class="top">
+    <h1>lunacade</h1>
+    <p class="tagline">A fantasy console for mimas</p>
+    <nav aria-label="Links">
+        <a href="../introduction/lunacade.html">Book chapter</a>
+        <a href="../introduction/lunacade-api.html">Cart API</a>
+        <a href="../">mimas</a>
+    </nav>
+</header>
+
+<noscript><p class="plain">lunacade needs JavaScript and WebAssembly.</p></noscript>
+
+<main class="layout">
+    <section class="console" aria-label="Console">
+        <div class="frame" id="frame">
+            <div class="notice" id="notice" role="status" hidden></div>
+        </div>
+
+        <div class="status">
+            <strong class="cart-name" id="cart-name">lunacade</strong>
+            <span class="state" id="state">starting</span>
+        </div>
+
+        <div class="controls">
+            <select id="picker" aria-label="Cart" disabled></select>
+            <button type="button" id="restart" disabled>Restart</button>
+            <button type="button" id="pause" disabled>Pause</button>
+            <button type="button" id="share" disabled>Share</button>
+            <button type="button" id="reset" disabled>Reset to original</button>
+            <span class="saved" id="saved"></span>
+        </div>
+
+        <div class="share" id="share-row" hidden>
+            <input type="text" id="share-url" readonly aria-label="Link to this cart">
+            <span class="note" id="share-note"></span>
+        </div>
+
+        <section class="print" aria-label="Output">
+            <div class="print-head">
+                <h2>Output</h2>
+                <button type="button" id="clear">Clear</button>
+            </div>
+            <div class="log" id="log" role="log" tabindex="0"></div>
+        </section>
+    </section>
+
+    <section class="tabs" aria-label="Cart">
+        <div class="tablist" id="tablist" role="tablist" aria-label="Panels">
+            <button type="button" role="tab" id="tab-code" data-tab="code" aria-controls="panel-code" aria-selected="true">Code <span class="count" id="errors" hidden></span></button>
+            <button type="button" role="tab" id="tab-sprites" data-tab="sprites" aria-controls="panel-sprites" aria-selected="false" tabindex="-1">Sprites</button>
+        </div>
+
+        <div class="panels">
+            <div class="tabpanel" id="panel-code" role="tabpanel" aria-labelledby="tab-code">
+                <div class="runbar">
+                    <label><input type="checkbox" id="autorun" checked> Auto-run</label>
+                    <button type="button" id="run">Run</button>
+                    <span class="hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs now</span>
+                </div>
+                <div class="mount" id="mount-code"></div>
+            </div>
+
+            <div class="tabpanel" id="panel-sprites" role="tabpanel" aria-labelledby="tab-sprites" hidden>
+                <div class="mount" id="mount-sprites"></div>
+            </div>
+
+            <div class="starting" id="starting">Starting the console...</div>
+        </div>
+    </section>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

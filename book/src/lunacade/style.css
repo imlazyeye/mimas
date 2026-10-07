@@ -1,0 +1,429 @@
+/* The page: the layout, the console and its status and controls, the output panel and the tabs.
+   The editor and the sprite editor style themselves in their own files. */
+
+:root {
+    color-scheme: dark;
+
+    /* Sweetie 16 by GrafxKid */
+    --black: #1a1c2c;
+    --plum: #5d275d;
+    --red: #b13e53;
+    --orange: #ef7d57;
+    --yellow: #ffcd75;
+    --lime: #a7f070;
+    --green: #38b764;
+    --teal: #257179;
+    --navy: #29366f;
+    --blue: #3b5dc9;
+    --sky: #41a6f6;
+    --cyan: #73eff7;
+    --white: #f4f4f4;
+    --silver: #94b0c2;
+    --slate: #566c86;
+    --charcoal: #333c57;
+
+    --ground: var(--black);
+    --surface: var(--charcoal);
+    --line: var(--slate);
+    --text: var(--white);
+    --muted: var(--silver);
+    --accent: var(--sky);
+    --warm: var(--yellow);
+
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+html {
+    background: var(--ground);
+}
+
+body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+a {
+    color: var(--accent);
+}
+
+h1,
+h2 {
+    margin: 0;
+    line-height: 1.25;
+}
+
+code,
+kbd {
+    font: 0.9em var(--mono);
+    background: var(--surface);
+    border-radius: 3px;
+    padding: 1px 5px;
+}
+
+kbd {
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+}
+
+button,
+select,
+input[type="text"] {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+
+button,
+select {
+    padding: 5px 12px;
+    cursor: pointer;
+}
+
+button:not([role="tab"]):hover:not(:disabled),
+select:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+button:disabled,
+select:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+button.armed {
+    border-color: var(--orange);
+    color: var(--orange);
+}
+
+:focus-visible {
+    outline: 2px solid var(--warm);
+    outline-offset: 2px;
+}
+
+.plain {
+    margin: 16px;
+}
+
+/* the header */
+
+.top {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--surface);
+}
+
+/* the name is set like the book sets mimas */
+.top h1 {
+    font-family: "Space Grotesk", "Inter", sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.tagline {
+    flex: 1;
+    margin: 0;
+    color: var(--muted);
+}
+
+.top nav {
+    display: flex;
+    gap: 16px;
+}
+
+/* the page, with the console on the left and the tabs on the right */
+
+.layout {
+    display: grid;
+    grid-template-columns: clamp(512px, 52vw, 768px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+    max-width: 1760px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+.console {
+    min-width: 0;
+}
+
+.frame {
+    position: relative;
+    display: grid;
+    place-items: center;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--ground);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+
+.frame:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.frame canvas {
+    display: block;
+    outline: none;
+    image-rendering: pixelated;
+}
+
+.notice {
+    position: absolute;
+    z-index: 1;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--warm);
+    border-radius: 4px;
+    background: var(--surface);
+    font-size: 13px;
+    pointer-events: none;
+}
+
+/* the status bar under the console */
+
+.status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 24px;
+    margin-top: 10px;
+}
+
+.cart-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.state {
+    color: var(--muted);
+    font: 13px var(--mono);
+    white-space: nowrap;
+}
+
+.state[data-state="halted"],
+.state[data-state="crashed"] {
+    color: var(--orange);
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.saved {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.share {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.share input {
+    flex: 1 1 240px;
+    min-width: 0;
+    padding: 5px 8px;
+    font: 13px var(--mono);
+}
+
+.note {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+/* the output panel */
+
+.print {
+    margin-top: 12px;
+    overflow: hidden;
+    border: 1px solid var(--surface);
+    border-radius: 4px;
+}
+
+.print-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 4px 4px 12px;
+    background: var(--surface);
+}
+
+.print-head h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.print-head button {
+    padding: 1px 10px;
+    font-size: 13px;
+}
+
+.log {
+    height: 240px;
+    overflow: auto;
+    padding: 6px 12px;
+    font: 13px/1.45 var(--mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.log:empty::before {
+    content: "Nothing printed yet.";
+    color: var(--slate);
+}
+
+.log .fault {
+    color: var(--orange);
+}
+
+/* the tabs */
+
+.tabs {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: max(560px, calc(100vh - 100px));
+    overflow: hidden;
+    border: 1px solid var(--surface);
+    border-radius: 4px;
+}
+
+.tablist {
+    display: flex;
+    background: var(--surface);
+}
+
+[role="tab"] {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    padding: 8px 16px;
+    color: var(--muted);
+}
+
+[role="tab"]:hover {
+    color: var(--text);
+}
+
+[role="tab"][aria-selected="true"] {
+    border-bottom-color: var(--warm);
+    color: var(--text);
+}
+
+.count {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: 4px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--red);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 18px;
+    text-align: center;
+}
+
+.panels {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.tabpanel {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.mount {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+.runbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--surface);
+    font-size: 13px;
+}
+
+.runbar button {
+    padding: 2px 12px;
+}
+
+.runbar label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.runbar .hint {
+    margin-left: auto;
+    color: var(--muted);
+}
+
+.starting {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--ground);
+    color: var(--muted);
+}
+
+/* narrow screens stack the panels */
+
+@media (max-width: 960px) {
+    .layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .console {
+        width: 100%;
+        max-width: 768px;
+        margin: 0 auto;
+    }
+
+    .tabs {
+        height: 75vh;
+        min-height: 480px;
+    }
+}

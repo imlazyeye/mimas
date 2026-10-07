@@ -3,6 +3,8 @@
 - [Introduction](./introduction.md)
   - [Why mimas?](./introduction/why-mimas.md)
   - [Tour](./introduction/tour.md)
+  - [lunacade](./introduction/lunacade.md)
+    - [Cart API](./introduction/lunacade-api.md)
   - [Benchmarks](./introduction/benchmarks.md)
   - [Getting Started](./introduction/getting-started.md)
   - [Language Server](./introduction/lsp.md)

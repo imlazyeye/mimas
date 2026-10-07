@@ -64,6 +64,12 @@ command = "cargo run -q -p mimas-cli -- docs --mdbook std.md --include-std"
 renderers = ["html"]
 before = ["mimas"]
 
+# the manifest is written by book/wasm.sh, and the chapter stays as it is without it
+[preprocessor.lunacade]
+command = "cargo run -q -p mimas-cli -- docs --mdbook introduction/lunacade-api.md --manifest book/src/lunacade/api.json"
+renderers = ["html"]
+before = ["mimas"]
+
 [preprocessor.mimas]
 command = "cargo run -q -p mimas-cli -- run tools/book/scripts/highlight.mim --"
 renderers = ["html"]
