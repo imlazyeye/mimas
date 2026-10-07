@@ -4,7 +4,7 @@ use parse::NodeId;
 use shared::{IdVec, Located, Location, StrId, StrInterner};
 use solve::{
     Resolutions,
-    components::{DecId, Ty},
+    components::{AdtId, DecId, Ty},
 };
 use std::collections::HashMap;
 
@@ -210,7 +210,6 @@ impl Ir {
             .unwrap_or_else(|| panic!("no resolved DecId for node {node:?}"))
     }
 
-    // struct fields are positional (declaration order, matching how instances are built);
     // resolve a named field on `receiver`'s type to its slot. unwraps an option layer if the
     // access was an optional `?.` -- the solver typed it that way but the slot lookup needs the
     // inner adt.
@@ -223,11 +222,25 @@ impl Ir {
             },
             other => panic!("field access on non-adt type: {other:?}"),
         };
+        self.slot(adt, field)
+    }
+
+    // struct fields are positional (declaration order, matching how instances are built)
+    pub(crate) fn slot(&self, adt: AdtId, field: &str) -> usize {
         self.resolutions.adts[adt]
             .fields
             .iter()
             .position(|n| n == field)
             .unwrap_or_else(|| panic!("no field `{field}` on adt"))
+    }
+
+    // the layout adt the solver shadowed onto a pattern's path (per variant for enums, the struct
+    // itself otherwise)
+    pub(crate) fn layout_adt(&self, path: &parse::Expr) -> AdtId {
+        match self.resolutions.node_tys.get(&path.id()) {
+            Some(Ty::Adt(adt)) => *adt,
+            other => panic!("solver should have shadowed path with an adt type, got {other:?}"),
+        }
     }
 
     // each implementer's dec for `member` of the pact at node `pact` (`Pact::*::member`). order is

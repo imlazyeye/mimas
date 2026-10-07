@@ -1721,9 +1721,8 @@ impl<'s> Parser<'s> {
                                 // shorthand: `Foo { x }` is `Foo { x = x }`
                                 Pat::from(name.clone())
                             };
-                            (name.lexeme, sub)
+                            (name, sub)
                         });
-                        let fields = fields.into_iter().collect();
                         self.new_pat(PatKind::Struct(Box::new(head_expr), fields), start)
                     }
                     // bare path -- `Foo::Bar` with no payload

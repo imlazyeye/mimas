@@ -320,11 +320,10 @@ expr_test!(
         else_expr: None,
         binding: Some(Pat::new(
             PatKind::NullBind(Box::new(Pat::new(
-                PatKind::Struct(Box::new(ident_expr!("Pair")), {
-                    let mut m = rustc_hash::FxHashMap::default();
-                    m.insert("a".into(), Pat::from(ident!("a")));
-                    m
-                }),
+                PatKind::Struct(
+                    Box::new(ident_expr!("Pair")),
+                    vec![(ident!("a"), Pat::from(ident!("a")))],
+                ),
                 Location::default(),
             ))),
             Location::default(),
@@ -357,12 +356,13 @@ expr_test!(
         main_body: block!(),
         else_expr: None,
         binding: Some(Pat::new(
-            PatKind::Struct(Box::new(ident_expr!("Pair")), {
-                let mut m = rustc_hash::FxHashMap::default();
-                m.insert("a".into(), Pat::from(ident!("a")));
-                m.insert("b".into(), Pat::from(ident!("b")));
-                m
-            }),
+            PatKind::Struct(
+                Box::new(ident_expr!("Pair")),
+                vec![
+                    (ident!("a"), Pat::from(ident!("a"))),
+                    (ident!("b"), Pat::from(ident!("b"))),
+                ],
+            ),
             Location::default(),
         )),
     }
@@ -441,12 +441,10 @@ expr_test!(
                     }
                     .into_expr(),
                 ),
-                {
-                    let mut m = rustc_hash::FxHashMap::default();
-                    m.insert("x".into(), Pat::from(ident!("x")));
-                    m.insert("y".into(), Pat::from(ident!("y")));
-                    m
-                },
+                vec![
+                    (ident!("x"), Pat::from(ident!("x"))),
+                    (ident!("y"), Pat::from(ident!("y"))),
+                ],
             ),
             Location::default(),
         )),
