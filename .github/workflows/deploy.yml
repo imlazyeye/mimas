@@ -33,10 +33,12 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          # the breakout demo and web repl are their own workspaces, and miss the cache without this
+          # the breakout demo, web repl and lunacade are their own workspaces, and miss the cache
+          # without this
           workspaces: |
             . -> target
             examples/bevy -> target
+            examples/lunacade -> target
             tools/book/repl -> target
 
       - name: Install mdBook

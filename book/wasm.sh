@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the breakout demo and the web repl into `book/src`, where mdBook copies them into the book
-# like any other file.
+# Builds the breakout demo, the web repl and lunacade into `book/src`, where mdBook copies them into
+# the book like any other file.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -24,3 +24,10 @@ cargo build --release --target wasm32-unknown-unknown --manifest-path tools/book
 wasm-bindgen --target web --no-typescript \
     --out-dir book/src/home --out-name repl \
     tools/book/repl/target/wasm32-unknown-unknown/release/web_repl.wasm
+
+cargo build --release --target wasm32-unknown-unknown --manifest-path examples/lunacade/Cargo.toml -p lunacade
+wasm-bindgen --target web --no-typescript \
+    --out-dir book/src/lunacade/wasm --out-name lunacade \
+    examples/lunacade/target/wasm32-unknown-unknown/release/lunacade.wasm
+# the cart API as a manifest, which the `lunacade` preprocessor in book.toml turns into the Cart API chapter
+cargo run -q --release --manifest-path examples/lunacade/Cargo.toml -p lunacade-core --example api -- book/src/lunacade/api.json
