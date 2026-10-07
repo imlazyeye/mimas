@@ -129,6 +129,38 @@ test_recover!(
 );
 
 test_recover!(
+    missing_each_member,
+    "let a = b::*::;
+     let c = 3;",
+    errors: ["expected identifier"],
+    stmts: ["let a = b::*::<poison>;", "let c = 3;"],
+);
+
+test_recover!(
+    each_without_a_second_colon,
+    "let a = b::*c;
+     let d = 3;",
+    errors: ["expected token"],
+    stmts: ["let a = b::*::c;", "let d = 3;"],
+);
+
+test_recover!(
+    each_without_a_member,
+    "let a = b::*;
+     let c = 3;",
+    errors: ["expected token"],
+    stmts: ["let a = b::*::<poison>;", "let c = 3;"],
+);
+
+test_recover!(
+    each_called_without_a_member,
+    "let a = b::*();
+     let c = 3;",
+    errors: ["expected token"],
+    stmts: ["let a = b::*::<poison>;", "let c = 3;"],
+);
+
+test_recover!(
     missing_closure_body,
     "let f = |x| ;
      let b = 2;",

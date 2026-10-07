@@ -1431,6 +1431,59 @@ expr_test!(
 );
 
 expr_test!(
+    each_access,
+    "foo::*::bar",
+    Access::Each {
+        left: ident_expr!("foo"),
+        right: ident!("bar"),
+    }
+);
+
+expr_test!(
+    each_call,
+    "foo::*::bar()",
+    Call::new(
+        Access::Each {
+            left: ident_expr!("foo"),
+            right: ident!("bar"),
+        }
+        .into_expr(),
+        vec![]
+    )
+);
+
+expr_test!(
+    each_on_a_path,
+    "foo::bar::*::buzz",
+    Access::Each {
+        left: Access::DoubleColon {
+            left: ident_expr!("foo"),
+            right: ident!("bar"),
+        }
+        .into_expr(),
+        right: ident!("buzz")
+    }
+);
+
+expr_test!(
+    each_call_chained,
+    "foo::*::bar().buzz",
+    Access::Dot {
+        left: Call::new(
+            Access::Each {
+                left: ident_expr!("foo"),
+                right: ident!("bar"),
+            }
+            .into_expr(),
+            vec![]
+        )
+        .into_expr(),
+        right: ident_expr!("buzz"),
+        kind: AccessKind::Direct,
+    }
+);
+
+expr_test!(
     unwrap,
     "foo!",
     Unwrap {

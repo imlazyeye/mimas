@@ -155,7 +155,7 @@ pub fn walk_expr(expr: &Expr, visitor: &mut impl Visitor) {
                 walk_expr(left, visitor);
                 walk_expr(right, visitor);
             }
-            Access::DoubleColon { left, right } => {
+            Access::DoubleColon { left, right } | Access::Each { left, right } => {
                 walk_expr(left, visitor);
                 visitor.ident(right);
             }

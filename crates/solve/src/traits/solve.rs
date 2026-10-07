@@ -531,6 +531,7 @@ impl Solve for Access {
                     handle_adt_access(id, solver, left, right)
                 }
             }
+            Access::Each { .. } => unimplemented!(),
         }
     }
 }

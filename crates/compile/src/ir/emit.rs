@@ -229,6 +229,7 @@ impl Emit for Access {
                     ResolvedDeclKind::Pact(_) => todo!(),
                 }
             }
+            Access::Each { .. } => todo!(),
             Access::Square { left, key, kind } => {
                 // tainted plain accesses ride an upstream `?`, so they must null-check at runtime
                 // just like an explicit `?[i]` -- else a mid-chain null faults instead of flowing

@@ -1175,6 +1175,11 @@ impl<'s> Parser<'s> {
     fn colon_access(&mut self, left: Expr) -> Expr {
         let start = left.span().start();
         self.bump(TokKind::DoubleColon);
+        if self.eat(TokKind::Star) {
+            self.expect(TokKind::DoubleColon);
+            let right = self.require_member_name();
+            return self.new_expr(Access::Each { left, right }, start);
+        }
         let right = self.require_member_name();
         self.new_expr(Access::DoubleColon { left, right }, start)
     }
