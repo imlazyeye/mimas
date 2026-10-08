@@ -2,7 +2,9 @@ use api::Intrinsic;
 use macros::native;
 use rand::RngExt;
 use shared::Ty;
-use vm::{RtErr, api::Api};
+use vm::{Ctx, RtErr, api::Api};
+
+use crate::Random;
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method(floor);
@@ -310,11 +312,11 @@ fn to_str(n: f64) -> String {
 /// }
 /// ```
 #[native]
-fn random(len: f64) -> Result<f64, RtErr> {
+fn random<'gc>(ctx: Ctx<'gc>, len: f64) -> Result<f64, RtErr> {
     if !len.is_finite() || len <= 0.0 {
         return Err(RtErr::InvalidArgument(
             "random len must be a finite number above 0.0".into(),
         ));
     }
-    Ok(rand::rng().random_range(0.0..len))
+    Ok(ctx.fixture::<Random>().rng().random_range(0.0..len))
 }

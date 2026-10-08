@@ -2,7 +2,9 @@ use api::Intrinsic;
 use macros::native;
 use rand::RngExt;
 use shared::Ty;
-use vm::{RtErr, api::Api};
+use vm::{Ctx, RtErr, api::Api};
+
+use crate::Random;
 
 pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add_method(abs);
@@ -86,11 +88,11 @@ fn to_str<'gc>(n: i64) -> String {
 /// let roll = int::random(6) + 1; // 1 to 6
 /// ```
 #[native]
-fn random<'gc>(len: i64) -> Result<i64, RtErr> {
+fn random<'gc>(ctx: Ctx<'gc>, len: i64) -> Result<i64, RtErr> {
     if len <= 0 {
         return Err(RtErr::InvalidArgument("random len must be above 0".into()));
     }
-    Ok(rand::rng().random_range(0..len))
+    Ok(ctx.fixture::<Random>().rng().random_range(0..len))
 }
 
 /// Returns the number as a `float`. Arithmetic that mixes `int` and `float` converts on its own,

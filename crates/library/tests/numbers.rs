@@ -369,3 +369,22 @@ test_fail!(
     "1.5.min;",
     r#"f"{3.max}";"#,
 );
+
+fn seeded(seed: u64) -> String {
+    let source = "let rolls = for _ in 20 collect int::random(1000);
+                  let coin = bool::random();
+                  let part = float::random(1.0);
+                  let deck = [1, 2, 3, 4, 5, 6, 7, 8];
+                  deck.shuffle();
+                  let TEST_VALUE = (rolls, coin, part, deck, deck.choose());";
+    let mut vm = vm::Vm::compile(source, library::std).unwrap();
+    vm.fixture::<library::Random>().seed(seed);
+    vm.run().unwrap();
+    format!("{}", vm.resolve_name("TEST_VALUE").unwrap())
+}
+
+#[test]
+fn seeded_random() {
+    assert_eq!(seeded(7), seeded(7));
+    assert_ne!(seeded(7), seeded(8));
+}
