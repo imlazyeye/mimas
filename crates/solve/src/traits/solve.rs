@@ -383,7 +383,7 @@ impl Solve for Access {
                         // adts/identity resolve directly. primitives and collections route
                         // through their library adt, which is where their methods live
                         let aid = match other {
-                            Ty::Adt(aid) | Ty::Identity(aid) => *aid,
+                            Ty::Adt(aid) => *aid,
                             l => solver.builtin_adt(l).ok_or_else(|| {
                                 Error::from(TypeHasNoFields {
                                     src: solver.src(left.location()),
@@ -686,7 +686,7 @@ impl Solve for Call {
                 }
             }
             ExprKind::Ident(ident) => match ident.query(solver)? {
-                Ty::Adt(aid) | Ty::Identity(aid) => {
+                Ty::Adt(aid) => {
                     let (is_enum, name, singular) = {
                         let adt = &solver.adts[aid];
                         (
@@ -768,7 +768,7 @@ impl Solve for Call {
                     (_, other) => other,
                 };
                 let aid = match &lhs {
-                    Ty::Adt(a) | Ty::Identity(a) => *a,
+                    Ty::Adt(a) => *a,
                     l => match solver.builtin_adt(l) {
                         Some(a) => a,
                         None => return Ok(None),
@@ -1050,8 +1050,6 @@ impl Solve for Enum {
             unreachable!()
         };
 
-        // self-referential variants (`enum List { Cons(int, List), Nil }`) need filter_adt to
-        // break the recursion check on field types -- same pattern as Struct::solve.
         solver.ribs.push_impl(adt);
 
         let result = self
@@ -1642,7 +1640,7 @@ impl Solve for Literal {
                     ExprKind::Access(Access::DoubleColon { left, right }) => {
                         let lhs = solver.resolve_path_head(left)?;
                         let adt = match lhs {
-                            Ty::Adt(adt) | Ty::Identity(adt) => adt,
+                            Ty::Adt(adt) => adt,
                             _ => Err(NotAStruct {
                                 src: solver.src(location),
                                 at: location.into(),
@@ -1736,10 +1734,8 @@ impl Solve for Literal {
                                 ty: ident.lexeme.clone(),
                             })?
                         }
-                        // `Ty::Identity` shows up when the named struct is the current impl
-                        // target -- filter_adt rewrote it. treat it as the same adt.
                         let adt = match lhs {
-                            Ty::Adt(adt) | Ty::Identity(adt) => adt,
+                            Ty::Adt(adt) => adt,
                             _ => Err(NotAStruct {
                                 src: solver.src(location),
                                 at: location.into(),
@@ -1928,9 +1924,6 @@ impl Solve for Struct {
             unreachable!()
         };
 
-        // push an impl scope so field types that reference this struct (e.g. `struct Foo { f: Foo
-        // }`) get filter_adt-ed to `Ty::Identity` -- breaks the recursion check that would
-        // otherwise refuse the self-referential adt.
         solver.ribs.push_impl(adt);
 
         let is_tuple = solver.adts[adt].is_tuple_struct();
@@ -2114,9 +2107,9 @@ impl Solve for While {
 fn adt_from_type_path(left: &Expr, solver: &mut Solver) -> Result<AdtId> {
     let ty = solver.resolve_path_head(left)?;
     match ty {
-        Ty::Adt(adt) | Ty::Identity(adt) => Ok(adt),
+        Ty::Adt(adt) => Ok(adt),
         Ty::Fn(ref f) => match f.return_ty.as_ref() {
-            Ty::Adt(adt) | Ty::Identity(adt) => Ok(*adt),
+            Ty::Adt(adt) => Ok(*adt),
             _ => Err(TypeHasNoFields {
                 src: solver.src(left.location()),
                 at: left.location().into(),

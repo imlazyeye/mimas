@@ -73,11 +73,7 @@ impl<'a> HoistCtx<'a> {
     }
 
     /// Completes a hoist by writing it to the needed targets.
-    pub(crate) fn write(&mut self, ident: &Ident, mut ty: Ty, constant: bool) -> Result<()> {
-        if let HoistTarget::Adt(adt) = &self.target {
-            ty = ty.filter_adt(*adt);
-        }
-
+    pub(crate) fn write(&mut self, ident: &Ident, ty: Ty, constant: bool) -> Result<()> {
         match &self.target {
             HoistTarget::Scope => {
                 self.solver

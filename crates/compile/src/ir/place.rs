@@ -63,10 +63,7 @@ impl Place for Access {
                 kind: _,
             } => {
                 let recv = left.id();
-                let is_struct = matches!(
-                    ir.resolutions.node_tys.get(&recv),
-                    Some(Ty::Adt(_) | Ty::Identity(_))
-                );
+                let is_struct = matches!(ir.resolutions.node_tys.get(&recv), Some(Ty::Adt(_)));
                 let receiver = left.lower(ir)?;
                 let slot = match right.kind() {
                     ExprKind::Literal(parse::Literal::Int(i)) => u32::try_from(*i).unwrap(),

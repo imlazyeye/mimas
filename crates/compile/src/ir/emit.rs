@@ -220,10 +220,7 @@ impl Emit for Access {
                 };
                 let recv = left.id();
                 let is_struct = kind == AccessKind::Direct
-                    && matches!(
-                        ir.resolutions.node_tys.get(&recv),
-                        Some(Ty::Adt(_) | Ty::Identity(_))
-                    );
+                    && matches!(ir.resolutions.node_tys.get(&recv), Some(Ty::Adt(_)));
                 let left = left.lower(ir)?;
                 let slot = match right.kind() {
                     ExprKind::Literal(Literal::Int(i)) => u32::try_from(*i).unwrap(),
@@ -449,7 +446,7 @@ impl Emit for Call {
         }
 
         let callee_ty = ir.resolutions.node_tys.get(&self.left.id());
-        if let Some(Ty::Adt(adt) | Ty::Identity(adt)) = callee_ty {
+        if let Some(Ty::Adt(adt)) = callee_ty {
             let adt = *adt;
             let mut args = Vec::with_capacity(self.arguments.len());
             for arg in &self.arguments {
@@ -463,7 +460,7 @@ impl Emit for Call {
         // it'd otherwise dispatch through doesn't exist.
         if let Some(Ty::Fn(header)) = callee_ty
             && header.is_ctor
-            && let Ty::Adt(adt) | Ty::Identity(adt) = header.return_ty.as_ref()
+            && let Ty::Adt(adt) = header.return_ty.as_ref()
         {
             let adt = *adt;
             let mut args = Vec::with_capacity(self.arguments.len());
@@ -996,7 +993,7 @@ impl Emit for Literal {
                     .or_else(|| ir.resolutions.node_tys.get(&id))
                     .unwrap()
                 {
-                    Ty::Adt(adt) | Ty::Identity(adt) => *adt,
+                    Ty::Adt(adt) => *adt,
                     _ => unreachable!(),
                 };
 
@@ -1145,7 +1142,7 @@ impl Emit for Match {
                     _ => return None,
                 };
                 let layout = match ir.resolutions.node_tys.get(&path.id())? {
-                    Ty::Adt(adt) | Ty::Identity(adt) => *adt,
+                    Ty::Adt(adt) => *adt,
                     _ => return None,
                 };
                 let ident_dec = |sub: &Pat| match sub.kind() {

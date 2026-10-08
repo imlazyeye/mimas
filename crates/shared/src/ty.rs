@@ -135,12 +135,6 @@ pub enum Ty {
     ///
     /// See more in the [book](https://mim.as/reference/error-handling.html#results).
     Result(Box<Ty>),
-    /// `Self` inside an `impl` block: the adt being implemented. References to an adt within its
-    /// own impl items are rewritten to this by `filter_adt`, and it's otherwise interchangeable
-    /// with a [Ty::Adt] of the same id.
-    ///
-    /// See more in the [book](https://mim.as/reference/types/structs.html#methods-and-associated-items).
-    Identity(AdtId),
     /// A pact bound: any value whose type implements every pact listed. Written as a pact's name,
     /// or several joined with `+` (`Named + Aged`). The concrete type isn't known statically, so
     /// method calls through a bound dispatch at runtime.
@@ -167,7 +161,6 @@ impl PartialEq for Ty {
             (Self::Option(l), Self::Option(r)) => l == r,
             (Self::Result(l), Self::Result(r)) => l == r,
             (Self::Adt(l), Self::Adt(r)) => l == r,
-            (Self::Identity(l), Self::Identity(r)) => l == r,
             (Self::Pacts(l), Self::Pacts(r)) => l == r,
             (Self::Skolem(l), Self::Skolem(r)) => l == r,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
@@ -208,7 +201,7 @@ impl Ty {
 
     pub fn as_adt(&self) -> Option<&AdtId> {
         match self {
-            Ty::Identity(adt) | Ty::Adt(adt) => Some(adt),
+            Ty::Adt(adt) => Some(adt),
             _ => None,
         }
     }
@@ -238,7 +231,6 @@ impl Ty {
             | Ty::Vid(_)
             | Ty::Anon(_)
             | Ty::Adt(_)
-            | Ty::Identity(_)
             | Ty::Pacts(_) => false,
         }
     }
@@ -419,7 +411,6 @@ impl Ty {
                 .unresolved()
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("{INTERNAL_ANON_MARKER}{n}")),
-            Ty::Identity(id) => names.adt(*id).unwrap_or_else(|| "Self".into()),
             Ty::Skolem(_) => "Self".into(),
             Ty::Adt(id) => match names.adt(*id) {
                 // module adts are spelled `<module:foo>` internally

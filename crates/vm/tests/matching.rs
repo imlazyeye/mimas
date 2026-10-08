@@ -216,7 +216,7 @@ test_vm!(
     "s.flag()" => Int(1),
 );
 
-// `Self::Variant {}` in an impl method body -- `Ty::Identity` left-side of a DoubleColon path.
+// `Self::Variant {}` in an impl method body.
 // previously `Literal::Struct` only matched `Ty::Adt` and rejected this with "Self is not a struct"
 test_vm!(
     self_variant_constructor_in_method,

@@ -816,8 +816,7 @@ impl Solver {
             | Ty::Vid(_)
             | Ty::Adt(_)
             | Ty::Pacts(_)
-            | Ty::Skolem(_)
-            | Ty::Identity(_) => t.clone(),
+            | Ty::Skolem(_) => t.clone(),
         }
     }
 
@@ -1170,12 +1169,6 @@ impl Solver {
             ty
         };
 
-        let ty = if let Some(impl_target) = self.impl_target() {
-            ty.filter_adt(impl_target)
-        } else {
-            ty.clone()
-        };
-
         if ty.occurs(vid, self) {
             return Err(UnificationError::recursive(vid, &ty));
         }
@@ -1439,7 +1432,7 @@ impl Solver {
                     }
                     ExprKind::Access(Access::DoubleColon { left, right }) => {
                         let adt = match self.resolve_path_head(left)? {
-                            Ty::Adt(adt) | Ty::Identity(adt) => adt,
+                            Ty::Adt(adt) => adt,
                             lty => Err(bad(&lty))?,
                         };
                         // module::struct -- treat as the inner struct adt

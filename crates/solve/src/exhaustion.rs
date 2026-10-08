@@ -231,7 +231,7 @@ impl Ctor {
             Ty::Bool => Some(vec![Ctor::Bool(true), Ctor::Bool(false)]),
             Ty::Option(_) => Some(vec![Ctor::Null, Ctor::Some]),
             Ty::Tuple(members) => Some(vec![Ctor::Tuple(members.len())]),
-            Ty::Adt(adt) | Ty::Identity(adt) => {
+            Ty::Adt(adt) => {
                 let flags = solver.adts[adt].flags;
                 if flags.contains(AdtFlags::IS_ENUM) {
                     Some(
@@ -301,7 +301,7 @@ impl Ctor {
             _ => return None,
         };
         let adt = match ty.clone().normalized(solver) {
-            Ty::Adt(adt) | Ty::Identity(adt) => adt,
+            Ty::Adt(adt) => adt,
             _ => return None,
         };
         match path.kind() {
