@@ -363,3 +363,16 @@ test_ty!(
     "enum E { A, B { n: int } }",
     "match E::A { E::A | E::B { n = _ } => 1 }" => Int
 );
+
+test_multi_file!(
+    qualified_struct_patterns,
+    a => "module a;
+          pub struct S { pub x: int }",
+    b => "module b;
+          pub fn f(s: a::S) -> int {
+              match s {
+                  a::S { x } => x,
+              }
+          }";
+    "b::f(a::S { x = 1 })" => Int,
+);

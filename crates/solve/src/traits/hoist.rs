@@ -369,6 +369,14 @@ impl Hoist for Pact {
         shared::name_pact(pact_id.index(), &self.name.lexeme);
         let prev_self = ctx.solver.pact_self.replace(pact_id);
 
+        let dec = ctx.solver.dec_id(
+            &self.name,
+            Ty::pacts(vec![pact_id]),
+            DecKind::Pact(pact_id),
+            ctx.vis,
+        );
+        ctx.solver.ribs.module_mut().insert(self.name.clone(), dec);
+
         for item in self.items.iter() {
             match item {
                 PactItem::Const {
@@ -424,14 +432,6 @@ impl Hoist for Pact {
         }
 
         ctx.solver.pact_self = prev_self;
-
-        let dec = ctx.solver.dec_id(
-            &self.name,
-            Ty::pacts(vec![pact_id]),
-            DecKind::Pact(pact_id),
-            ctx.vis,
-        );
-        ctx.solver.ribs.module_mut().insert(self.name.clone(), dec);
 
         Ok(())
     }

@@ -203,6 +203,19 @@ impl Query for Expr {
                                     break;
                                 }
                             }
+                            if let Some(&dec) = solver.node_decs.get(&self.id()) {
+                                if matches!(
+                                    solver.decs[dec].kind,
+                                    crate::components::DecKind::Pact(_)
+                                ) && solver.non_value != Some(self.id())
+                                {
+                                    return Err(crate::errors::PactIsNotAValue {
+                                        src: solver.src(self.location()),
+                                        at: self.location().into(),
+                                    }
+                                    .into());
+                                }
+                            }
                             let vid = solver.node_vid(self.id());
                             solver
                                 .register_sub(vid, ty)

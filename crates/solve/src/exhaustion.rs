@@ -1,8 +1,8 @@
 //! Maranget-style usefulness check for `match` exhaustion.
 //!
 //! Given a list of `MatchCase`s and the scrutinee's type, this answers the question: "does any
-//! possible value of the scrutinee fail to match any case?" If yes -> not exhaustive (result type
-//! becomes `T?`). If no -> exhaustive (result type stays `T`).
+//! possible value of the scrutinee fail to match any case?" Uncovered values are a compile error
+//! unless the match ends with a `!` arm.
 //!
 //! The algorithm follows Luc Maranget's 2007 paper "Warnings for pattern matching" (JFP) (well, no,
 //! we actually follow rustc's explanation in `usefullness.rs`, which was much more digestible, but
@@ -311,7 +311,12 @@ impl Ctor {
             {
                 Some(Ctor::Variant(adt, right.lexeme.clone()))
             }
-            parse::ExprKind::Ident(_) => Some(Ctor::Single(adt)),
+            parse::ExprKind::Ident(_)
+            | parse::ExprKind::Access(parse::Access::DoubleColon { .. })
+                if !solver.adts[adt].flags.contains(AdtFlags::IS_ENUM) =>
+            {
+                Some(Ctor::Single(adt))
+            }
             _ => None,
         }
     }
