@@ -1,4 +1,7 @@
-use crate::components::Ty::*;
+use crate::{
+    Solver, Unification,
+    components::{Ty, Ty::*},
+};
 
 // Inferred lets
 test_ty!(
@@ -545,6 +548,40 @@ test_fail!(
          d.len()
      }",
 );
+
+test_fail!(
+    mutable_aliases_are_invariant,
+    "fn inject(xs: [int?]) { xs[0] = null; }
+     let xs = [7];
+     inject(xs);" => "mismatched types",
+    r#"fn inject(xs: ~{int?}) { xs["x"] = null; }
+     let xs = ~{ x = 7 };
+     inject(xs);"# => "mismatched types",
+    "fn inject(xs: (int?, int)) { xs.0 = null; }
+     let xs = (7, 1);
+     inject(xs);" => "mismatched types",
+    "pact P {}
+     struct A;
+     impl P for A {}
+     fn inject(xs: [P]) {}
+     let xs = [A];
+     inject(xs);" => "mismatched types",
+);
+
+#[test]
+fn substitutions_are_atomic() {
+    let mut solver = Solver::new();
+    let vid = solver.vid();
+    let mut found = Ty::Tuple(vec![Ty::Vid(vid), Ty::Vid(vid)]);
+    let mut expected = Ty::Tuple(vec![Ty::Int, Ty::Str]);
+    assert!(Unification::unify(&mut found, &mut expected, &solver).is_err());
+    assert_eq!(solver.sub(vid), None);
+    let other_vid = solver.vid();
+    let mut recursive = Ty::Tuple(vec![Ty::Vid(vid), Ty::Vid(other_vid)]);
+    let mut other = Ty::Tuple(vec![Ty::Vid(other_vid), array!(Ty::Vid(vid))]);
+    assert!(Unification::equate(&mut recursive, &mut other, &solver).is_err());
+    assert_eq!(solver.sub(vid), None);
+}
 
 test_fail!(
     constant_arithmetic_matches_runtime,

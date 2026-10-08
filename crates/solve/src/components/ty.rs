@@ -8,9 +8,9 @@ use parse::{components::Annotation, lex::TyKw};
 pub use shared::{FnHeader, FnParam, PactId, Ty, Vid};
 
 pub trait TyExt: Sized {
-    fn occurs(&self, other: Vid, solver: &Solver) -> bool;
     fn from_annotation(annotation: Annotation, solver: &mut Solver) -> Result<Ty>;
-    fn coerce_option(a: Ty, b: Ty, solver: &mut Solver) -> Option<Ty>;
+    /// Finds a common type for expression results, committing successful inference bindings.
+    fn join(self, other: Ty, solver: &mut Solver) -> std::result::Result<Ty, UnificationError>;
     fn coerce_pacts(a: Ty, b: Ty, solver: &mut Solver) -> Option<Ty>;
     fn fulfill_ty(
         &mut self,
@@ -21,56 +21,53 @@ pub trait TyExt: Sized {
 }
 
 impl TyExt for Ty {
-    fn occurs(&self, other: Vid, solver: &Solver) -> bool {
-        match self {
-            Ty::Vid(vid) if *vid == other => true,
-            Ty::Vid(vid) => solver.sub(*vid).is_some_and(|v| v.occurs(other, solver)),
-            Ty::Array(ty) | Ty::Dict(ty) => ty.occurs(other, solver),
-            Ty::Fn(fn_data) => {
-                fn_data
-                    .parameters
-                    .iter()
-                    .any(|p| p.ty.occurs(other, solver))
-                    || fn_data.return_ty.occurs(other, solver)
+    fn join(self, other: Ty, solver: &mut Solver) -> std::result::Result<Ty, UnificationError> {
+        let mut a = self.normalized(solver);
+        let mut b = other.normalized(solver);
+        match (a.clone(), b.clone()) {
+            (Ty::Never, ty) | (ty, Ty::Never) => return Ok(ty),
+            (Ty::Option(a), Ty::Option(b)) => {
+                return Ok(Ty::Option(Box::new(a.join(*b, solver)?)).normalized(solver));
             }
-            Ty::Tuple(members) => members.iter().any(|v| v.occurs(other, solver)),
-            // adt bodies are nominal: descending into their field types would loop forever on
-            // recursive adts (e.g. `enum Tree { Branch(Vec<Tree>) }`), and a vid inside a field
-            // type can't form an infinite type just by being bound to a `Ty::Adt(_)` -- the adt
-            // itself doesn't unfold.
-            Ty::Adt(_) => false,
-            Ty::Option(inner) | Ty::Result(inner) => inner.occurs(other, solver),
-            Ty::Anon(_)
-            | Ty::Pacts(_) // annotations always required, never holds vids
-            | Ty::Skolem(_)
-            | Ty::Unit
-            | Ty::Never
-            | Ty::Null
-            | Ty::Bool
-            | Ty::Int
-            | Ty::Float
-            | Ty::Str => false,
-        }
-    }
-
-    fn coerce_option(a: Ty, b: Ty, solver: &mut Solver) -> Option<Ty> {
-        match (a, b) {
-            (Ty::Null, ty) | (ty, Ty::Null) => {
-                if ty.clone().normalized(solver) != Ty::Null {
-                    Some(Ty::Option(Box::new(ty)))
+            (Ty::Option(inner), ty) | (ty, Ty::Option(inner)) => {
+                let inner = if ty == Ty::Null {
+                    *inner
                 } else {
-                    None
-                }
+                    inner.join(ty, solver)?
+                };
+                return Ok(Ty::Option(Box::new(inner)).normalized(solver));
             }
-            _ => None,
+            (Ty::Null, ty) | (ty, Ty::Null) if ty != Ty::Null => {
+                return Ok(Ty::Option(Box::new(ty)));
+            }
+            (Ty::Result(a), Ty::Result(b)) => return Ok(Ty::Result(Box::new(a.join(*b, solver)?))),
+            (Ty::Result(inner), ty) | (ty, Ty::Result(inner)) => {
+                return Ok(Ty::Result(Box::new(inner.join(ty, solver)?)));
+            }
+            _ => {}
+        }
+        match Unification::equate(&mut a, &mut b, solver) {
+            Ok(sub) => {
+                sub.commit(solver);
+                Ok(a.normalized(solver))
+            }
+            Err(error) => {
+                if let Some(ty) = Ty::coerce_pacts(a.clone(), b.clone(), solver) {
+                    return Ok(ty);
+                }
+                if let Ok(sub) = Unification::unify(&mut a, &mut b, solver) {
+                    sub.commit(solver);
+                    return Ok(b.normalized(solver));
+                }
+                if let Ok(sub) = Unification::unify(&mut b, &mut a, solver) {
+                    sub.commit(solver);
+                    return Ok(a.normalized(solver));
+                }
+                Err(error)
+            }
         }
     }
 
-    /// Widen two otherwise-incompatible types to the pacts they share, if any. Without
-    /// generics, this is the only way to build a collection of "things that implement X":
-    /// `[Square, Circle]` settles on `[Draw]` rather than forcing every element into the
-    /// first one's concrete type. Only consulted after unification has already failed, so
-    /// it can turn an error into a success but never change a program that already checked.
     fn coerce_pacts(a: Ty, b: Ty, solver: &mut Solver) -> Option<Ty> {
         fn bounds(ty: &Ty, solver: &Solver) -> Option<Vec<PactId>> {
             match ty {
@@ -190,7 +187,7 @@ impl TyExt for Ty {
         other: &mut Ty,
         solver: &mut Solver,
     ) -> std::result::Result<(), UnificationError> {
-        Unification::unify(self, other, solver).and_then(|v| v.commit(solver))
+        Unification::unify(self, other, solver).map(|v| v.commit(solver))
     }
 
     fn normalized(self, solver: &Solver) -> Ty {
@@ -222,13 +219,10 @@ impl TyExt for Ty {
             Ty::Pacts(pacts) => Ty::Pacts(pacts),
             Ty::Skolem(pid) => Ty::Skolem(pid),
             Ty::Anon(n) => Ty::Anon(n),
-            Ty::Option(inner) => {
-                if let Ty::Option(nested_inner) = *inner {
-                    Ty::Option(Box::new(nested_inner.normalized(solver)))
-                } else {
-                    Ty::Option(Box::new(inner.normalized(solver)))
-                }
-            }
+            Ty::Option(inner) => match inner.normalized(solver) {
+                ty @ Ty::Option(_) => ty,
+                ty => Ty::Option(Box::new(ty)),
+            },
             Ty::Result(inner) => Ty::Result(Box::new(inner.normalized(solver))),
         }
     }

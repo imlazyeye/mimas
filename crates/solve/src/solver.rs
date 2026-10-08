@@ -35,8 +35,7 @@ pub struct Solver {
     pub(crate) node_decs: IndexMap<NodeId, DecId>,
     pub(crate) closure_captures: IndexMap<NodeId, IndexSet<DecId>>,
     pub(crate) expected_closures: IndexMap<NodeId, Vec<FnParam>>,
-    vids: IdVec<Vid, ()>,
-    subs: IdVec<Vid, Option<Ty>>,
+    pub(crate) subs: IdVec<Vid, Option<Ty>>,
     node_visits: HashSet<NodeId>,
     library: HashMap<String, AdtId>,
     pub(crate) root_modules: IndexMap<String, AdtId>,
@@ -58,7 +57,6 @@ pub struct Solver {
 impl Solver {
     pub fn new() -> Self {
         let mut solver = Self {
-            vids: IdVec::new(),
             subs: IdVec::new(),
             decs: IdVec::new(),
             adts: IdVec::new(),
@@ -429,8 +427,8 @@ impl Solver {
             right,
         } = con;
 
-        let vid = self.node_vid(right.id());
-        let mut ty = Ty::Vid(vid);
+        let dec = self.node_decs[&id];
+        let mut ty = Ty::Vid(self.decs[dec].vid);
 
         if let Some(annotation) = &annotation {
             ty.fulfill_ty(&mut Ty::from_annotation(annotation.clone(), self)?, self)
@@ -563,10 +561,10 @@ impl Solver {
             let StmtKind::Item(item) = stmt.kind() else {
                 continue;
             };
-            let ItemKind::Const(Const { left, right, .. }) = item.kind() else {
+            let ItemKind::Const(Const { left, .. }) = item.kind() else {
                 continue;
             };
-            let vid = self.node_vid(right.id());
+            let vid = self.vid();
             let vis = if item.public() {
                 Vis::Public
             } else {
@@ -1138,54 +1136,16 @@ impl Solver {
         vid: Vid,
         ty: Ty,
     ) -> std::result::Result<(), UnificationError> {
-        // normalize first: a BOUND vid left raw would hit unify's vid arm below, blindly rebind,
-        // and re-unify its old binding with the found/expected roles reversed (the
-        // cross-module-const inverted-mismatch bug). normalized, the conflict unify below compares
-        // concrete types with the caller's roles intact.
-        let mut ty = ty.normalized(&*self);
-
-        // trivial self-substitution `V := Vid(V)` is a no-op -- keep any existing sub intact.
-        // shows up when an expression's solve returns its own expr_vid (e.g. `d["x"]` whose value
-        // type is still an unresolved vid), and Query then folds that result back through
-        // register_sub against the same vid.
-        if let Ty::Vid(v) = &ty
-            && *v == vid
-        {
-            return Ok(());
-        }
-
-        let ty = if let Some(mut previous_ty) = self.subs[vid].take() {
-            if let Err(e) =
-                Unification::unify(&mut ty, &mut previous_ty, self).and_then(|v| v.commit(self))
-            {
-                self.subs[vid] = Some(previous_ty);
-                return Err(e);
-            }
-            // `ty` and `previous_ty` now denote the same type under the substitutions just
-            // committed; store the resolved form so the binding is the most concrete view rather
-            // than whichever one happened to be less inferred.
-            previous_ty.normalized(&*self)
-        } else {
-            ty
-        };
-
-        if ty.occurs(vid, self) {
-            return Err(UnificationError::recursive(vid, &ty));
-        }
-
-        #[cfg(feature = "logging")]
-        println!("{}", crate::utils::Printer::substitution(&vid, &ty));
-        self.subs[vid] = Some(ty);
-        Ok(())
+        let mut previous = Ty::Vid(vid).normalized(self);
+        let mut ty = ty.normalized(self);
+        Unification::equate(&mut previous, &mut ty, self).map(|sub| sub.commit(self))
     }
 }
 
 // some id utils
 impl Solver {
     pub(crate) fn vid(&mut self) -> Vid {
-        let vid = self.vids.push(());
-        self.subs.push(None);
-        vid
+        self.subs.push(None)
     }
 
     pub(crate) fn node_vid(&mut self, node_id: NodeId) -> Vid {
@@ -1361,7 +1321,6 @@ impl Solver {
             PatKind::Poison(poison) => poison.escaped(),
             PatKind::Literal(lit) => unify(
                 self,
-                ty,
                 match lit {
                     parse::Literal::True | parse::Literal::False => Ty::Bool,
                     parse::Literal::Null => Ty::Null,
@@ -1371,6 +1330,7 @@ impl Solver {
                     parse::Literal::Float(_) => Ty::Float,
                     _ => Ty::Vid(crate::components::Vid::UNKNOWN),
                 },
+                ty,
                 pat.location(),
             ),
             PatKind::Tuple(pats) => {
@@ -1597,8 +1557,7 @@ impl Solver {
                 right,
                 else_branch,
             }) => {
-                let vid = self.node_vid(right.id());
-                let mut ty = Ty::Vid(vid);
+                let mut ty = Ty::Vid(self.vid());
 
                 if let Some(annotation) = &annotation {
                     ty.fulfill_ty(&mut Ty::from_annotation(annotation.clone(), self)?, self)
@@ -1771,11 +1730,7 @@ impl Solver {
                     // natives carry a fresh `Ty::Fn` per use so each call gets its own type vars;
                     // without this, two calls with different types unify and the second fails.
                     let ty = if let Some(binding) = self.dec_to_native.get(&dec_id) {
-                        let sig = NativeFnSig {
-                            params: binding.sig.params.clone(),
-                            return_ty: binding.sig.return_ty.clone(),
-                            recv: binding.sig.recv.clone(),
-                        };
+                        let sig = binding.sig.clone();
                         self.instantiate_native(&sig, None)?
                     } else {
                         Ty::Vid(self.decs[dec_id].vid).normalized(self)
@@ -2044,19 +1999,14 @@ impl Solver {
             .unwrap())
     }
 
-    pub(crate) fn regsiter_loop_control_flow_ty(
+    pub(crate) fn register_loop_ty(
         &mut self,
         mut ty: Ty,
         target_option: &mut Option<Ty>,
     ) -> std::result::Result<(), UnificationError> {
-        if let Some(break_ty) = target_option
-            && let Err(e) = ty.fulfill_ty(break_ty, self)
-        {
-            ty = Ty::coerce_option(ty.clone(), break_ty.clone(), self)
-                .or_else(|| Ty::coerce_pacts(ty, break_ty.clone(), self))
-                .ok_or(e)?;
+        if let Some(previous) = target_option.take() {
+            ty = previous.join(ty, self)?;
         }
-
         *target_option = Some(ty);
         Ok(())
     }

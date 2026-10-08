@@ -17,8 +17,8 @@ use std::collections::HashMap;
 /// Returns the unique matching candidate, or `None` if there's no method at all. With a single
 /// candidate we skip the work and return it directly so non-overloaded methods keep their existing
 /// behavior. With multiple, we freshen each candidate's recv pattern and dry-unify it against the
-/// actual receiver: the substitution is computed but discarded (never `commit`ted), so testing a
-/// loser only leaks unused vids. The unique success wins; zero matches surface as a type-mismatch
+/// actual receiver: repeated inference slots must agree within each trial, and its substitutions
+/// are discarded. The unique success wins; zero matches surface as a type-mismatch
 /// against the first candidate, multiple as ambiguity.
 fn pick_method_overload(
     solver: &mut Solver,
@@ -160,11 +160,7 @@ impl Solve for Access {
             solver.node_decs.insert(id, dec);
             // module-nested natives need fresh type vars per call site, same as free natives.
             let ty = if let Some(binding) = solver.dec_to_native.get(&dec) {
-                let sig = crate::NativeFnSig {
-                    params: binding.sig.params.clone(),
-                    return_ty: binding.sig.return_ty.clone(),
-                    recv: binding.sig.recv.clone(),
-                };
+                let sig = binding.sig.clone();
                 solver.instantiate_native(&sig, None)?
             } else {
                 field.ty
@@ -453,11 +449,7 @@ impl Solve for Access {
                                 solver.check_vis(dec, right.location())?;
                                 solver.node_decs.insert(id, dec);
                                 let member = if let Some(binding) = solver.dec_to_native.get(&dec) {
-                                    let sig = crate::NativeFnSig {
-                                        params: binding.sig.params.clone(),
-                                        return_ty: binding.sig.return_ty.clone(),
-                                        recv: binding.sig.recv.clone(),
-                                    };
+                                    let sig = binding.sig.clone();
                                     solver
                                         .instantiate_native(&sig, Some((&lhs, left.location())))?
                                 } else {
@@ -634,7 +626,7 @@ impl Solve for Break {
             },
             |solver, loop_data| {
                 solver
-                    .regsiter_loop_control_flow_ty(ty, &mut loop_data.break_ty)
+                    .register_loop_ty(ty, &mut loop_data.break_ty)
                     .map_err(|e| e.into_type_mismatch(solver, location))
             },
         )?;
@@ -783,11 +775,7 @@ impl Solve for Call {
                 solver.check_vis(dec, ident.location)?;
                 solver.node_decs.insert(call.left.id(), dec);
                 let ty = if let Some(binding) = solver.dec_to_native.get(&dec) {
-                    let sig = crate::NativeFnSig {
-                        params: binding.sig.params.clone(),
-                        return_ty: binding.sig.return_ty.clone(),
-                        recv: binding.sig.recv.clone(),
-                    };
+                    let sig = binding.sig.clone();
                     solver.instantiate_native(&sig, Some((&lhs, left.location())))?
                 } else {
                     field.ty
@@ -1024,7 +1012,7 @@ impl Solve for Collect {
             },
             |solver, loop_data| {
                 solver
-                    .regsiter_loop_control_flow_ty(ty, &mut loop_data.collect_ty)
+                    .register_loop_ty(ty, &mut loop_data.collect_ty)
                     .map_err(|e| e.into_type_mismatch(solver, location))
             },
         )?;
@@ -1396,24 +1384,14 @@ impl Solve for If {
         solver.control_flow.enter();
         let positive_ty = self.main_body.query(solver)?;
         let positive = solver.control_flow.exit();
-
-        // Ensure the branches match, or coercse an option.
         let (ty, negative) = if let Some(else_expr) = self.else_expr.as_ref() {
             solver.control_flow.enter();
-            // solved first so only a mismatch falls back to coercion (a failed solve would come
-            // back from the second query as a bare vid)
-            else_expr.query(solver)?;
-            let ty = if let Err(e) = else_expr.fulfill_ty(positive_ty.clone(), solver) {
-                let found = else_expr.query(solver)?;
-                Ty::coerce_option(found.clone(), positive_ty.clone(), solver)
-                    .or_else(|| Ty::coerce_pacts(found, positive_ty, solver))
-                    .ok_or(e)?
-            } else {
-                positive_ty.clone()
-            };
+            let negative_ty = else_expr.query(solver)?;
+            let ty = positive_ty
+                .join(negative_ty, solver)
+                .map_err(|e| e.into_type_mismatch(solver, else_expr.location()))?;
             (ty, solver.control_flow.exit())
         } else {
-            // If there's no else then the main body must be ()
             self.main_body
                 .fulfill_ty(Ty::Unit, solver)
                 .map_err(|_| IfNeedsElse {
@@ -1602,31 +1580,16 @@ impl Solve for In {
 impl Solve for Literal {
     fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
         fn assemble(exprs: Vec<&Expr>, solver: &mut Solver) -> Result<Ty> {
-            let ty = if let Some(expr) = exprs.first() {
-                let mut first_ty = expr.query(solver)?;
-                for expr in exprs.iter().skip(1) {
-                    // see `If`
-                    expr.query(solver)?;
-                    first_ty = if let Err(e) = expr.fulfill_ty(first_ty.clone(), solver) {
-                        let found = expr.query(solver)?;
-                        if let Some(ty) = Ty::coerce_option(found.clone(), first_ty.clone(), solver)
-                        {
-                            ty
-                        } else if let Some(ty) = Ty::coerce_pacts(found, first_ty, solver) {
-                            // mixed concrete types that share a pact widen to it, so
-                            // `[Square, Circle]` can be a `[Draw]`
-                            ty
-                        } else {
-                            Err(e)?
-                        }
-                    } else {
-                        first_ty.clone()
-                    };
-                }
-                first_ty
-            } else {
-                Ty::Vid(solver.vid())
-            };
+            let mut ty = None;
+            for expr in exprs {
+                let found = expr.query(solver)?;
+                ty = Some(match ty {
+                    None => found,
+                    Some(acc) => Ty::join(acc, found, solver)
+                        .map_err(|e| e.into_type_mismatch(solver, expr.location()))?,
+                });
+            }
+            let ty = ty.unwrap_or_else(|| Ty::Vid(solver.vid()));
             Ok(ty)
         }
         Ok(match self {
@@ -1852,20 +1815,11 @@ impl Solve for Match {
                 guard.fulfill_ty(Ty::Bool, solver)?;
             }
             let body = case.body();
-            result = Some(match result.take() {
+            result = Some(match result {
                 None => body.query(solver)?,
-                Some(acc) => {
-                    // see `If`
-                    body.query(solver)?;
-                    if let Err(e) = body.fulfill_ty(acc.clone(), solver) {
-                        let found = body.query(solver)?;
-                        Ty::coerce_option(found.clone(), acc.clone(), solver)
-                            .or_else(|| Ty::coerce_pacts(found, acc, solver))
-                            .ok_or(e)?
-                    } else {
-                        acc
-                    }
-                }
+                Some(acc) => acc
+                    .join(body.query(solver)?, solver)
+                    .map_err(|e| e.into_type_mismatch(solver, body.location()))?,
             });
             solver.ribs.pop();
         }
