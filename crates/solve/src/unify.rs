@@ -34,13 +34,7 @@ impl Unification {
             (Ty::Never, _) | (_, Ty::Never) => Ok(Substitution::None),
 
             // Adts (or Identities) must point to the same definition
-            (Ty::Adt(lhs_adt), Ty::Adt(rhs_adt))
-            | (Ty::Identity(lhs_adt), Ty::Adt(rhs_adt))
-            | (Ty::Adt(lhs_adt), Ty::Identity(rhs_adt))
-                if lhs_adt == rhs_adt =>
-            {
-                Ok(Substitution::None)
-            }
+            (Ty::Adt(lhs_adt), Ty::Adt(rhs_adt)) if lhs_adt == rhs_adt => Ok(Substitution::None),
 
             // `Self` fulfills its own pact's bound (it's some implementer), but a bound never
             // fulfills `Self`, as the value could be any implementer, not necessarily the
@@ -50,7 +44,7 @@ impl Unification {
             }
 
             // one way only: a bound could be holding any implementer, so it never fulfills an adt
-            (Ty::Adt(aid) | Ty::Identity(aid), Ty::Pacts(pids)) => {
+            (Ty::Adt(aid), Ty::Pacts(pids)) => {
                 if pids
                     .iter()
                     .all(|pid| solver.pact_impls.contains(&(*pid, *aid)))

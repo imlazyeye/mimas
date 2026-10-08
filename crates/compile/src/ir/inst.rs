@@ -562,7 +562,7 @@ impl BlockWriter<'_> {
     /// Reads the layout adt id that the solver shadowed onto a pattern's path expression.
     fn layout_adt(&self, path: &parse::Expr) -> AdtId {
         match self.ir.resolutions.node_tys.get(&path.id()) {
-            Some(Ty::Adt(adt) | Ty::Identity(adt)) => *adt,
+            Some(Ty::Adt(adt)) => *adt,
             other => panic!("solver should have shadowed path with an adt type, got {other:?}",),
         }
     }

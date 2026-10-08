@@ -212,9 +212,9 @@ impl Ir {
     // inner adt.
     pub(crate) fn field_index(&self, receiver: NodeId, field: &str) -> usize {
         let adt = match self.resolutions.node_tys.get(&receiver) {
-            Some(Ty::Adt(adt)) | Some(Ty::Identity(adt)) => *adt,
+            Some(Ty::Adt(adt)) => *adt,
             Some(Ty::Option(inner)) => match inner.as_ref() {
-                Ty::Adt(adt) | Ty::Identity(adt) => *adt,
+                Ty::Adt(adt) => *adt,
                 other => panic!("field access on option of non-adt type: {other:?}"),
             },
             other => panic!("field access on non-adt type: {other:?}"),

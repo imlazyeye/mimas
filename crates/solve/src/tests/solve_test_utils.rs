@@ -89,9 +89,7 @@ impl LooseEq for Ty {
             (Ty::Array(ty), Ty::Array(o_ty)) | (Ty::Dict(ty), Ty::Dict(o_ty)) => {
                 ty.loose_eq(o_ty, solver)
             }
-            (Ty::Adt(adt), Ty::Adt(o_adt))
-            | (Ty::Identity(adt), Ty::Adt(o_adt))
-            | (Ty::Adt(adt), Ty::Identity(o_adt)) => {
+            (Ty::Adt(adt), Ty::Adt(o_adt)) => {
                 adt == o_adt || (solver.adts[adt].loose_eq(&solver.adts[o_adt], solver))
             }
 

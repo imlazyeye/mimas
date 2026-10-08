@@ -5,7 +5,7 @@ use crate::{
     traits::Query,
 };
 use parse::{components::Annotation, lex::TyKw};
-pub use shared::{AdtId, FnHeader, FnParam, PactId, Ty, Vid};
+pub use shared::{FnHeader, FnParam, PactId, Ty, Vid};
 
 pub trait TyExt: Sized {
     fn occurs(&self, other: Vid, solver: &Solver) -> bool;
@@ -18,7 +18,6 @@ pub trait TyExt: Sized {
         solver: &mut Solver,
     ) -> std::result::Result<(), UnificationError>;
     fn normalized(self, solver: &Solver) -> Ty;
-    fn filter_adt(&self, adt: AdtId) -> Ty;
 }
 
 impl TyExt for Ty {
@@ -41,8 +40,7 @@ impl TyExt for Ty {
             // itself doesn't unfold.
             Ty::Adt(_) => false,
             Ty::Option(inner) | Ty::Result(inner) => inner.occurs(other, solver),
-            Ty::Identity(_)
-            | Ty::Anon(_)
+            Ty::Anon(_)
             | Ty::Pacts(_) // annotations always required, never holds vids
             | Ty::Skolem(_)
             | Ty::Unit
@@ -76,7 +74,7 @@ impl TyExt for Ty {
     fn coerce_pacts(a: Ty, b: Ty, solver: &mut Solver) -> Option<Ty> {
         fn bounds(ty: &Ty, solver: &Solver) -> Option<Vec<PactId>> {
             match ty {
-                Ty::Adt(aid) | Ty::Identity(aid) => Some(
+                Ty::Adt(aid) => Some(
                     solver
                         .pact_impls
                         .iter()
@@ -136,7 +134,7 @@ impl TyExt for Ty {
                 solver.note(&head, ty.clone(), dec);
                 for segment in iter {
                     let adt = match ty.clone().normalized(solver) {
-                        Ty::Adt(adt) | Ty::Identity(adt) => adt,
+                        Ty::Adt(adt) => adt,
                         other => Err(TypeHasNoFields {
                             src: solver.src(segment.location),
                             at: segment.location.into(),
@@ -224,7 +222,6 @@ impl TyExt for Ty {
             Ty::Pacts(pacts) => Ty::Pacts(pacts),
             Ty::Skolem(pid) => Ty::Skolem(pid),
             Ty::Anon(n) => Ty::Anon(n),
-            Ty::Identity(adt) => Ty::Identity(adt),
             Ty::Option(inner) => {
                 if let Ty::Option(nested_inner) = *inner {
                     Ty::Option(Box::new(nested_inner.normalized(solver)))
@@ -233,40 +230,6 @@ impl TyExt for Ty {
                 }
             }
             Ty::Result(inner) => Ty::Result(Box::new(inner.normalized(solver))),
-        }
-    }
-
-    fn filter_adt(&self, adt: AdtId) -> Ty {
-        match self {
-            Ty::Array(ty) => Ty::Array(Box::new(ty.filter_adt(adt))),
-            Ty::Dict(ty) => Ty::Dict(Box::new(ty.filter_adt(adt))),
-            Ty::Tuple(members) => Ty::Tuple(members.iter().map(|m| m.filter_adt(adt)).collect()),
-            Ty::Adt(this_adt) if *this_adt == adt => Ty::Identity(adt),
-            Ty::Fn(f) => {
-                let parameters: Vec<FnParam> = f
-                    .parameters
-                    .iter()
-                    .map(|p| FnParam::new(p.name.clone(), p.ty.filter_adt(adt), p.has_default))
-                    .collect();
-                let mut h = FnHeader::new(parameters, f.return_ty.filter_adt(adt), f.is_method);
-                h.is_ctor = f.is_ctor;
-                Ty::Fn(h)
-            }
-            Ty::Option(inner) => Ty::Option(Box::new(inner.filter_adt(adt))),
-            Ty::Result(inner) => Ty::Result(Box::new(inner.filter_adt(adt))),
-            Ty::Adt(_)
-            | Ty::Pacts(_)
-            | Ty::Skolem(_)
-            | Ty::Identity(_)
-            | Ty::Anon(_)
-            | Ty::Vid(_)
-            | Ty::Unit
-            | Ty::Never
-            | Ty::Null
-            | Ty::Bool
-            | Ty::Int
-            | Ty::Float
-            | Ty::Str => self.clone(),
         }
     }
 }
