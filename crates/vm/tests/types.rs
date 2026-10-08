@@ -194,6 +194,21 @@ test_vm!(
 );
 
 test_vm!(
+    forward_const_arithmetic,
+    "const A: int = B + 1;
+     const B = C + 1;
+     const C = 1;
+     fn local() -> int {
+         let value = X;
+         const X = Y + 1;
+         const Y = 2;
+         value
+     }",
+    "A" => Int(3),
+    "local()" => Int(3),
+);
+
+test_vm!(
     constant_semantics,
     "const LT = 9007199254740992 < 9007199254740993;
      const AND = false && (1 ~/ 0 == 1);

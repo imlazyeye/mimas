@@ -43,6 +43,7 @@ pub struct Solver {
 
     pub(crate) dec_to_native: HashMap<DecId, NativeBinding>,
     pub(crate) native_constants: HashMap<DecId, NativeId>,
+    const_defs: HashMap<DecId, (Const, NodeId, Ribs)>,
 
     pub(crate) ribs: Ribs,
     pub(crate) loop_stack: Vec<LoopRun>,
@@ -76,6 +77,7 @@ impl Solver {
             sources: HashMap::new(),
             dec_to_native: HashMap::new(),
             native_constants: HashMap::new(),
+            const_defs: HashMap::new(),
             non_value: None,
             fn_arg: None,
         };
@@ -221,19 +223,8 @@ impl Solver {
         run_phase(self, Self::hoist_constants, &mut saved_ribs)?;
         run_phase(self, Self::solve_types, &mut saved_ribs)?;
 
-        // fixpoint: solve_consts. each round may resolve more consts (e.g. a const that references
-        // another module's const reduces only once that other const is bound). re-run while the
-        // count of consts-with-known-values grows, capped as a safety net.
-        const FIXPOINT_CAP: usize = 16;
-        let mut prev = self.resolved_constants();
-        for _ in 0..FIXPOINT_CAP {
-            run_phase(self, Self::solve_consts, &mut saved_ribs)?;
-            let curr = self.resolved_constants();
-            if curr == prev {
-                break;
-            }
-            prev = curr;
-        }
+        run_phase(self, Self::prepare_consts, &mut saved_ribs)?;
+        run_phase(self, Self::solve_consts, &mut saved_ribs)?;
 
         run_phase(self, Self::solve_bodies, &mut saved_ribs)?;
 
@@ -404,19 +395,63 @@ impl Solver {
         })
     }
 
-    /// Number of `Constant` decls whose value is known. Used by the solve-consts fixpoint loop
-    /// to detect "no progress this round -> stop."
-    fn resolved_constants(&self) -> usize {
-        self.decs
-            .iter()
-            .filter(|(_, d)| matches!(d.kind, DecKind::Constant(Some(_))))
-            .count()
+    fn prepare_consts(&mut self, ast: &Ast) -> Result<()> {
+        self.hoist_uses(ast)?;
+        Self::for_each_item(ast, |item| {
+            match item.kind() {
+                ItemKind::Const(con) => self.remember_const(con, item.id()),
+                ItemKind::Impl(imp) => {
+                    let Ty::Adt(adt) = imp.target.query(self)? else {
+                        unreachable!()
+                    };
+                    self.ribs.push_impl(adt);
+                    for item in &imp.items {
+                        if let ItemKind::Const(con) = item.kind() {
+                            self.remember_const(con, item.id());
+                        }
+                    }
+                    self.ribs.pop();
+                }
+                _ => {}
+            }
+            Ok(())
+        })
     }
 
-    /// Solve a single `const` item's rhs and, once every constant it names has a value, populate
-    /// `DeclKind::Constant`'s payload with its own. No-op for non-const items. Shared by the
-    /// top-level fixpoint, impl associated consts, and block-scoped consts during body visits.
+    fn remember_const(&mut self, con: &Const, id: NodeId) {
+        let dec = self.node_decs[&id];
+        self.const_defs
+            .insert(dec, (con.clone(), id, self.ribs.clone()));
+    }
+
+    pub(crate) fn resolve_const(&mut self, dec: DecId) -> Result<()> {
+        if !matches!(self.decs[dec].kind, DecKind::Constant(None)) {
+            return Ok(());
+        }
+        let Some((con, id, scope)) = self.const_defs.remove(&dec) else {
+            return Err(crate::errors::UnresolvedConst {
+                src: self.src(self.decs[dec].location),
+                at: self.decs[dec].location.into(),
+                name: self.decs[dec].name.clone(),
+            }
+            .into());
+        };
+        let outer = std::mem::replace(&mut self.ribs, scope);
+        let result = self.evaluate_const(&con, id);
+        let scope = std::mem::replace(&mut self.ribs, outer);
+        if result.is_err() {
+            self.const_defs.insert(dec, (con, id, scope));
+        }
+        result.map(|_| ())
+    }
+
+    /// Solves a constant and the constants its value depends on.
     pub(crate) fn solve_const(&mut self, con: &Const, id: NodeId) -> Result<Ty> {
+        self.resolve_const(self.node_decs[&id])?;
+        Ok(Ty::Vid(self.node_vid(con.right.id())).normalized(self))
+    }
+
+    fn evaluate_const(&mut self, con: &Const, id: NodeId) -> Result<Ty> {
         let Const {
             left,
             annotation,
@@ -569,6 +604,13 @@ impl Solver {
             let dec = self.dec_id(left, Ty::Vid(vid), DecKind::Constant(None), vis);
             self.node_decs.insert(item.id(), dec);
             self.ribs.current_mut().insert(left.clone(), dec);
+        }
+        for stmt in body {
+            if let StmtKind::Item(item) = stmt.kind()
+                && let ItemKind::Const(con) = item.kind()
+            {
+                self.remember_const(con, item.id());
+            }
         }
     }
 
@@ -1587,8 +1629,7 @@ impl Solver {
                 // module decls are handled in the pre-pass of `solve`.
             }
             StmtKind::Item(item) => match item.kind() {
-                // block-scoped consts get solved here, top-level consts are handled by the
-                // hoist_constants/solve_consts fixpoint
+                // block-scoped consts get solved here
                 ItemKind::Const(con) => self.solve_const(con, item.id()).map(|_| ())?,
                 // re-runs `process_use` so the imports land in the body-solve phase's fresh
                 // import rib (earlier phases pushed them, but their ribs were popped at phase end).
@@ -1694,6 +1735,7 @@ impl Solver {
             match self.ribs.resolve(ident) {
                 Some(dec_id) => {
                     self.check_vis(dec_id, read_location)?;
+                    self.resolve_const(dec_id)?;
                     // natives carry a fresh `Ty::Fn` per use so each call gets its own type vars;
                     // without this, two calls with different types unify and the second fails.
                     let ty = if let Some(binding) = self.dec_to_native.get(&dec_id) {

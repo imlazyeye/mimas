@@ -204,6 +204,7 @@ impl Query for Expr {
                                 }
                             }
                             if let Some(&dec) = solver.node_decs.get(&self.id()) {
+                                solver.resolve_const(dec)?;
                                 if matches!(
                                     solver.decs[dec].kind,
                                     crate::components::DecKind::Pact(_)

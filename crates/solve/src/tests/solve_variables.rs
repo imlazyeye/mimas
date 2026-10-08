@@ -583,6 +583,35 @@ fn substitutions_are_atomic() {
     assert_eq!(solver.sub(vid), None);
 }
 
+test_success!(constants_follow_dependencies, &{
+    use std::fmt::Write;
+    let mut source = String::new();
+    for i in 0..64 {
+        writeln!(source, "const A{i}: int = A{} + 1;", i + 1).unwrap();
+    }
+    source.push_str(
+        "const A64 = 0;
+             let x: int = A0;",
+    );
+    source
+});
+
+test_success!(
+    local_constant_dependencies,
+    "fn f() -> int {
+         let x = A;
+         const A = B + 1;
+         const B = 1;
+         x
+     }"
+);
+
+test_fail!(
+    cyclic_constants,
+    "const A = B + 1;
+     const B = A + 1;" => "unresolved constant `A`",
+);
+
 test_fail!(
     constant_arithmetic_matches_runtime,
     "const X = 9223372036854775807 + 1;" => "integer arithmetic overflows",

@@ -280,3 +280,14 @@ test_multi_file!(
     "user::BY_PATH == shapes::DOT" => Bool,
     "user::ALL[0] == shapes::CIRCLE" => Bool,
 );
+
+test_multi_file!(
+    constant_import_dependencies,
+    a => "module a;
+          use b::B;
+          pub const A: int = B + 1;",
+    b => "module b;
+          pub const B = C + 1;
+          const C = 1;";
+    "a::A" => Int,
+);
