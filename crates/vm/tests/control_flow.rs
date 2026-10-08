@@ -385,3 +385,23 @@ test_vm!(
      let f = Foo { val = 5 };",
     "f.check()" => Int(5),
 );
+
+test_vm!(
+    break_types_keep_null,
+    "fn f(c: bool) -> int? {
+         loop {
+             if c { break null; }
+             break 1;
+         }
+     }
+     fn g(c: bool) -> int? {
+         loop {
+             if c { break 1; }
+             break null;
+         }
+     }",
+    "f(true) ?? 0" => Int(0),
+    "f(false) ?? 0" => Int(1),
+    "g(true) ?? 0" => Int(1),
+    "g(false) ?? 0" => Int(0),
+);

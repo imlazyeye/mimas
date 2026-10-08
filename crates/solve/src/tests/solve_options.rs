@@ -1,4 +1,7 @@
-use crate::components::Ty::*;
+use crate::{
+    Solver,
+    components::{Ty, Ty::*, TyExt},
+};
 
 test_ty!(
     explicate,
@@ -144,3 +147,12 @@ test_fail!(
 );
 
 test_fail!(coalesce_assign_on_non_option, "let a = 0; a ??= 1;");
+
+#[test]
+fn option_normalization_is_idempotent() {
+    let solver = Solver::new();
+    let ty = option!(option!(option!(Ty::Int)));
+    let normalized = ty.normalized(&solver);
+    assert_eq!(normalized, option!(Ty::Int));
+    assert_eq!(normalized.clone().normalized(&solver), normalized);
+}

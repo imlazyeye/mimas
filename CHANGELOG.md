@@ -26,6 +26,11 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Arrays, dicts and tuples can no longer be passed under a wider element type, such as passing `[int]` as `[int?]`. They share their contents, so the old check allowed writes through one binding to break another's type. Fresh collection literals still accept optional and pact element annotations.
+- Function parameters are checked in the correct direction: a function taking `int` cannot be used as `(int?) -> int`, while one taking `int?` can be used as `(int) -> int`.
+- Native method overload selection now checks that repeated type parameters agree, so a receiver with mixed element types can select the correct overload.
+- An `if` or `match` with a nonreturning arm keeps the other arm's type. Loop breaks and collected values keep their optional type when any value can be `null`, regardless of their order.
+- Nested optional types consistently flatten to one `?`, including when their inner type is resolved through inference.
 - Integer arithmetic in constants now reports overflow and invalid shift counts at compile time. It used to wrap overflowing values or accept shifts of 64 bits or more.
 - Ordering comparisons in constants compare integers exactly. Large integers could compare as equal after being rounded to floats.
 - `&&` and `||` in constants now short-circuit, so `false && (1 ~/ 0 == 1)` and `true || (1 ~/ 0 == 1)` do not evaluate the division.

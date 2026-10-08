@@ -3,10 +3,15 @@ use crate::{
     components::{Ty, Vid},
     errors::TypeMismatch,
 };
+use indexmap::IndexMap;
 use shared::Location;
 
-pub(crate) struct Unification;
-impl Unification {
+pub(crate) struct Unification<'a> {
+    solver: &'a Solver,
+    subs: IndexMap<Vid, Ty>,
+}
+impl Unification<'_> {
+    /// Checks whether `ty` fulfills `rule`, returning bindings without changing the solver.
     pub(crate) fn unify(
         ty: &mut Ty,
         rule: &mut Ty,
@@ -14,133 +19,129 @@ impl Unification {
     ) -> Result<Substitution, UnificationError> {
         #[cfg(feature = "logging")]
         println!("{}", crate::utils::Printer::ty_unification(ty, rule));
-
-        // todo, borrow checker driving me insane
-        let potential_err = UnificationError {
-            found: ty.to_string(),
-            expected: rule.to_string(),
+        let mut trial = Unification {
+            solver,
+            subs: IndexMap::new(),
         };
+        trial.relate(ty, rule, false)?;
+        Ok(Substitution(trial.subs))
+    }
 
-        match (ty, rule) {
-            // Directly equal types
-            (ty, rule) if ty == rule => Ok(Substitution::None),
+    /// Checks type equality without applying coercions or committing bindings.
+    pub(crate) fn equate(
+        ty: &mut Ty,
+        rule: &mut Ty,
+        solver: &Solver,
+    ) -> Result<Substitution, UnificationError> {
+        #[cfg(feature = "logging")]
+        println!("{}", crate::utils::Printer::ty_unification(ty, rule));
+        let mut trial = Unification {
+            solver,
+            subs: IndexMap::new(),
+        };
+        trial.relate(ty, rule, true)?;
+        Ok(Substitution(trial.subs))
+    }
 
-            // Unbound Vid unification
-            (Ty::Vid(vid), other) | (other, Ty::Vid(vid)) => {
-                Ok(Substitution::Single(*vid, other.clone()))
+    /// Follows type variable bindings in this trial and the solver.
+    fn resolve<'a>(&'a self, ty: &'a Ty) -> &'a Ty {
+        match ty {
+            Ty::Vid(vid) => self
+                .subs
+                .get(vid)
+                .or_else(|| self.solver.sub(*vid))
+                .map_or(ty, |ty| self.resolve(ty)),
+            _ => ty,
+        }
+    }
+
+    /// Checks whether `vid` occurs inside `ty` after following substitutions.
+    fn occurs(&self, vid: Vid, ty: &Ty) -> bool {
+        match self.resolve(ty) {
+            Ty::Vid(other) => *other == vid,
+            Ty::Array(inner) | Ty::Dict(inner) | Ty::Option(inner) | Ty::Result(inner) => {
+                self.occurs(vid, inner)
             }
-
-            // Never is never checked
-            (Ty::Never, _) | (_, Ty::Never) => Ok(Substitution::None),
-
-            // Adts (or Identities) must point to the same definition
-            (Ty::Adt(lhs_adt), Ty::Adt(rhs_adt)) if lhs_adt == rhs_adt => Ok(Substitution::None),
-
-            // `Self` fulfills its own pact's bound (it's some implementer), but a bound never
-            // fulfills `Self`, as the value could be any implementer, not necessarily the
-            // receiver's type.
-            (Ty::Skolem(pid), Ty::Pacts(pids)) if pids.iter().all(|p| *p == *pid) => {
-                Ok(Substitution::None)
+            Ty::Tuple(members) => members.iter().any(|ty| self.occurs(vid, ty)),
+            Ty::Fn(header) => {
+                header.parameters.iter().any(|p| self.occurs(vid, &p.ty))
+                    || self.occurs(vid, &header.return_ty)
             }
+            _ => false,
+        }
+    }
 
-            // one way only: a bound could be holding any implementer, so it never fulfills an adt
-            (Ty::Adt(aid), Ty::Pacts(pids)) => {
-                if pids
-                    .iter()
-                    .all(|pid| solver.pact_impls.contains(&(*pid, *aid)))
-                {
-                    Ok(Substitution::None)
-                } else {
-                    Err(potential_err)
+    /// Checks compatibility, or equality when `exact`, and records bindings in this trial.
+    fn relate(&mut self, found: &Ty, expected: &Ty, exact: bool) -> Result<(), UnificationError> {
+        let found = self.resolve(found).clone();
+        let expected = self.resolve(expected).clone();
+        let error = UnificationError {
+            found: found.to_string(),
+            expected: expected.to_string(),
+        };
+        match (&found, &expected) {
+            (a, b) if a == b => Ok(()),
+            (Ty::Vid(vid), ty) | (ty, Ty::Vid(vid)) => {
+                if self.occurs(*vid, ty) {
+                    return Err(UnificationError::recursive(*vid, ty));
                 }
+                self.subs.insert(*vid, ty.clone());
+                Ok(())
             }
-
-            // a wider bound fulfills a narrower one
-            (Ty::Pacts(found), Ty::Pacts(expected))
-                if expected.iter().all(|pid| found.contains(pid)) =>
+            (Ty::Never, _) if !exact => Ok(()),
+            (Ty::Skolem(pid), Ty::Pacts(pids)) if !exact && pids.iter().all(|p| p == pid) => Ok(()),
+            (Ty::Adt(aid), Ty::Pacts(pids))
+                if !exact
+                    && pids
+                        .iter()
+                        .all(|pid| self.solver.pact_impls.contains(&(*pid, *aid))) =>
             {
-                Ok(Substitution::None)
+                Ok(())
             }
-
-            // fn types unify structurally -- param names and the synthesized is_ctor flag
-            // don't affect compatibility, only the per-position param types + return type.
-            (Ty::Fn(lhs), Ty::Fn(rhs)) if lhs.parameters.len() == rhs.parameters.len() => {
-                let mut sub = Substitution::None;
-                for (l, r) in lhs.parameters.iter_mut().zip(rhs.parameters.iter_mut()) {
-                    sub = sub.combo(
-                        Self::unify(&mut l.ty, &mut r.ty, solver)
-                            .map_err(|_| potential_err.clone())?,
-                    );
+            (Ty::Pacts(found), Ty::Pacts(expected))
+                if !exact && expected.iter().all(|pid| found.contains(pid)) =>
+            {
+                Ok(())
+            }
+            (Ty::Fn(a), Ty::Fn(b)) if a.parameters.len() == b.parameters.len() => {
+                for (a, b) in a.parameters.iter().zip(&b.parameters) {
+                    if !exact && b.has_default && !a.has_default {
+                        return Err(error);
+                    }
+                    self.relate(&b.ty, &a.ty, exact)
+                        .map_err(|_| error.clone())?;
                 }
-                sub = sub.combo(
-                    Self::unify(lhs.return_ty.as_mut(), rhs.return_ty.as_mut(), solver)
-                        .map_err(|_| potential_err)?,
-                );
-                Ok(sub)
+                self.relate(&a.return_ty, &b.return_ty, exact)
+                    .map_err(|_| error)
             }
-
-            // Collections
-            (Ty::Array(ty), Ty::Array(exp_ty)) | (Ty::Dict(ty), Ty::Dict(exp_ty)) => {
-                Self::unify(ty, exp_ty, solver).map_err(|_| potential_err)
+            (Ty::Array(a), Ty::Array(b)) | (Ty::Dict(a), Ty::Dict(b)) => {
+                self.relate(a, b, true).map_err(|_| error)
             }
-            (Ty::Tuple(lhs), Ty::Tuple(rhs)) if lhs.len() == rhs.len() => lhs
-                .iter_mut()
-                .zip(rhs.iter_mut())
-                .try_fold(Substitution::None, |sub, (l, r)| {
-                    Self::unify(l, r, solver).map(|v| sub.combo(v))
-                })
-                .map_err(|_| potential_err),
-            (Ty::Option(ty), Ty::Option(exp)) => {
-                Self::unify(ty, exp, solver).or(Err(potential_err))
+            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
+                for (a, b) in a.iter().zip(b) {
+                    self.relate(a, b, true).map_err(|_| error.clone())?;
+                }
+                Ok(())
             }
-            (Ty::Result(ty), Ty::Result(exp)) => {
-                Self::unify(ty, exp, solver).or(Err(potential_err))
+            (Ty::Option(a), Ty::Option(b)) | (Ty::Result(a), Ty::Result(b)) => {
+                self.relate(a, b, exact).map_err(|_| error)
             }
-
-            // ? fulfills T?
-            (Ty::Null, Ty::Option(_)) | (Ty::Option(_), Ty::Null) => Ok(Substitution::None),
-
-            // T fulfills T?
-            (ty, Ty::Option(rule)) => Self::unify(ty, rule.as_mut(), solver),
-
-            // T fulfills T! (auto-wrap as ok)
-            (ty, Ty::Result(rule)) => Self::unify(ty, rule.as_mut(), solver),
-
-            // Anything else is a mismatch
-            _ => Err(potential_err),
+            (Ty::Null, Ty::Option(_)) if !exact => Ok(()),
+            (ty, Ty::Option(inner) | Ty::Result(inner)) if !exact => self.relate(ty, inner, false),
+            _ => Err(error),
         }
     }
 }
 
-#[derive(Debug)]
 #[must_use]
-pub(crate) enum Substitution {
-    Single(Vid, Ty),
-    Multi(Vec<(Vid, Ty)>),
-    None,
-}
+pub(crate) struct Substitution(IndexMap<Vid, Ty>);
 impl Substitution {
-    pub(crate) fn combo(self, other: Self) -> Self {
-        let mut vec = match other {
-            Substitution::Single(vid, ty) => vec![(vid, ty)],
-            Substitution::Multi(vec) => vec,
-            Substitution::None => vec![],
-        };
-        match self {
-            Substitution::Single(vid, ty) => vec.push((vid, ty)),
-            Substitution::Multi(mut other) => vec.append(&mut other),
-            Substitution::None => {}
-        }
-        Substitution::Multi(vec)
-    }
-
-    pub(crate) fn commit(self, solver: &mut Solver) -> Result<(), UnificationError> {
-        match self {
-            Substitution::Single(vid, ty) => solver.register_sub(vid, ty),
-            Substitution::Multi(multi) => multi
-                .into_iter()
-                .try_for_each(|(vid, ty)| solver.register_sub(vid, ty)),
-            Substitution::None => Ok(()),
+    /// Applies all bindings from a successful trial to the solver.
+    pub(crate) fn commit(self, solver: &mut Solver) {
+        for (vid, ty) in self.0 {
+            #[cfg(feature = "logging")]
+            println!("{}", crate::utils::Printer::substitution(&vid, &ty));
+            solver.subs[vid] = Some(ty);
         }
     }
 }
@@ -151,6 +152,7 @@ pub struct UnificationError {
     expected: String,
 }
 impl UnificationError {
+    /// Builds an error for a binding that would make a type contain itself.
     pub(crate) fn recursive(vid: Vid, ty: &Ty) -> Self {
         Self {
             found: ty.to_string(),
@@ -161,6 +163,7 @@ impl UnificationError {
         }
     }
 
+    /// Turns the relation error into a type mismatch diagnostic at `location`.
     pub(crate) fn into_type_mismatch(self, solver: &Solver, location: Location) -> Error {
         TypeMismatch {
             src: solver.src(location),

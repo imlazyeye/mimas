@@ -1,4 +1,4 @@
-use crate::components::Ty::*;
+use crate::components::{Ty, Ty::*};
 
 // Basic headers
 test_ty!(
@@ -493,10 +493,11 @@ test_fail!(duplicate_named_argument, "fn f(a: int) {} f(a = 1, a = 2);");
 // required param after an optional one
 test_fail!(required_after_optional, "fn f(a: int = 0, b: int) {}");
 
-// fn-type annotation mismatch on a let binding
 test_fail!(
     fn_type_annotation_mismatch,
-    "fn h(a: int) -> int { a } let f: (str) -> int = h;"
+    "fn h(a: int) -> int { a }
+     fn call(f: (str) -> int) -> int { f(\"x\") }
+     call(h);"
 );
 
 // NotAllPathsReturn: body falls off the end without a value
@@ -522,3 +523,44 @@ test_fail!(
     "fn outer() { fn inner() {} }",
     "fn outer() { { fn inner() {} } }",
 );
+
+test_fail!(
+    function_parameters_are_contravariant,
+    "fn narrow(x: int) -> int { x }
+     fn call(f: (int?) -> int) -> int { f(null) }
+     call(narrow);" => "mismatched types",
+);
+
+test_success!(
+    wider_function_parameters,
+    "fn wide(x: int?) -> int { x ?? 0 }
+     fn call(f: (int) -> int) -> int { f(1) }
+     call(wide);"
+);
+
+#[test]
+fn repeated_native_slots_reject_a_candidate() {
+    fn method(receiver: Ty) -> api::ApiMethod<()> {
+        api::ApiMethod {
+            recv_ty: receiver,
+            name: "probe".into(),
+            parameters: vec![],
+            return_ty: Some(Ty::Unit),
+            takes_self: true,
+            doc: String::new(),
+            call: (),
+        }
+    }
+    let mut library = api::Library::new();
+    library.method(method(array!(Ty::Tuple(vec![Ty::Anon(0), Ty::Anon(0)]))));
+    library.method(method(array!(Ty::Tuple(vec![Ty::Int, Ty::Str]))));
+    let modules = crate::Modules::from_files(
+        [(
+            "test.mim",
+            "let xs: [(int, str)] = [(1, \"x\")];
+             xs.probe();",
+        )],
+        &library,
+    );
+    assert!(modules.errors.is_empty(), "{:?}", modules.errors);
+}

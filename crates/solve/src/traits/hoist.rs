@@ -482,7 +482,7 @@ impl Hoist for Function {
 
 impl Hoist for Const {
     fn hoist(&self, mut ctx: HoistCtx) -> Result<()> {
-        let vid = ctx.solver.node_vid(self.right.id());
+        let vid = ctx.solver.vid();
         ctx.write(&self.left, Ty::Vid(vid), true)
     }
 }

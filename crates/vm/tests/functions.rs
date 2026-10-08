@@ -455,3 +455,10 @@ test_vm!(
     "maybe?.make(4)" => Int(14),
     "e.pick(4)" => Int(8),
 );
+
+test_vm!(
+    wider_function_input,
+    "fn wide(x: int?) -> int { x ?? 0 }
+     fn call(f: (int) -> int) -> int { f(1) }",
+    "call(wide)" => Int(1),
+);

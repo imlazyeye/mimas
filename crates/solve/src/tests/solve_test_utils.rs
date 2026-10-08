@@ -119,11 +119,14 @@ impl LooseEq for Variant {
     fn loose_eq(&self, other: &Self, solver: &Solver) -> bool {
         println!("{} {}", self, other);
         match (self, other) {
-            (Variant::Tuple(variant), Variant::Tuple(o_variant)) => variant
-                .members
-                .iter()
-                .zip(o_variant.members.iter())
-                .all(|(a, b)| a.loose_eq(b, solver)),
+            (Variant::Tuple(variant), Variant::Tuple(o_variant)) => {
+                variant.members.len() == o_variant.members.len()
+                    && variant
+                        .members
+                        .iter()
+                        .zip(o_variant.members.iter())
+                        .all(|(a, b)| a.loose_eq(b, solver))
+            }
             (Variant::Struct(variant), Variant::Struct(o_variant)) => {
                 variant.fields.len() == o_variant.fields.len()
                     && variant.fields.iter().all(|(name, field)| {
@@ -146,10 +149,12 @@ impl LooseEq for Field {
 
 impl LooseEq for FnHeader {
     fn loose_eq(&self, other: &Self, solver: &Solver) -> bool {
-        self.parameters
-            .iter()
-            .zip(other.parameters.iter())
-            .all(|(l, r)| l.ty.loose_eq(&r.ty, solver))
+        self.parameters.len() == other.parameters.len()
+            && self
+                .parameters
+                .iter()
+                .zip(other.parameters.iter())
+                .all(|(l, r)| l.ty.loose_eq(&r.ty, solver))
             && self.return_ty.loose_eq(&other.return_ty, solver)
     }
 }

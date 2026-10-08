@@ -584,3 +584,47 @@ test_fail!(
     "let s = \"abc\"; let c = s[\"k\"];"
 );
 test_fail!(string_index_assign, "let s = \"abc\"; s[0] = \"x\";");
+
+test_ty!(
+    joins_are_order_independent,
+    "if true {
+         loop {}
+     } else { 1 }" => Int,
+    "if true { 1 } else {
+         loop {}
+     }" => Int,
+    "if true { null } else { 1 }" => option!(Int),
+    "if true { 1 } else { null }" => option!(Int),
+    "match true {
+         true => loop {},
+         false => 1,
+     }" => Int,
+    "loop {
+         if true { break null; }
+         break 1;
+     }" => option!(Int),
+    "loop {
+         if true { break 1; }
+         break null;
+     }" => option!(Int),
+    "for i in 0..2 {
+         if i == 0 { collect null; } else { collect 1; }
+     }" => array!(option!(Int)),
+);
+
+test_success!(
+    contextual_collection_literals,
+    "pact P {}
+     struct A;
+     impl P for A {}
+     let xs: [P] = [A];
+     let ys: [int?] = [1, null];
+     let ds: ~{int?} = ~{ x = 1 };
+     let ts: (int?, int) = (1, 2);
+     fn take(xs: [int?]) {}
+     take([1]);
+     struct B;
+     impl P for B {}
+     fn touch(xs) { let x = xs[0]; }
+     touch([A, B]);"
+);
