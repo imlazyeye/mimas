@@ -1,10 +1,29 @@
 use std::path::{Path, PathBuf};
 
+use api::Project;
+
 use crate::workspace::Workspace;
 
-/// Writes `files` into a fresh folder in the temp dir, with a `.git` at its top.
+/// Writes `files` into a fresh folder outside other repositories and packages, with a `.git` at its
+/// top.
 pub(crate) fn tree(name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("mimas-lsp-{name}-{}", std::process::id()));
+    let bases = [
+        Some(std::env::temp_dir()),
+        #[cfg(unix)]
+        Some(PathBuf::from("/var/tmp")),
+        #[cfg(windows)]
+        std::env::var_os("LOCALAPPDATA").map(|path| PathBuf::from(path).join("Temp")),
+    ];
+    let base = bases
+        .into_iter()
+        .flatten()
+        .find(|base| {
+            base.is_dir()
+                && base.ancestors().all(|dir| !dir.join(".git").exists())
+                && Project::of(base).package.is_none()
+        })
+        .expect("no temporary folder outside a repository or package");
+    let root = base.join(format!("mimas-lsp-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join(".git")).unwrap();
     for (path, text) in files {
