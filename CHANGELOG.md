@@ -26,6 +26,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Functions, closures and pact defaults with a non-unit return type now reject paths that finish without returning a value. Returns inside a `while` or `for` loop that may not run, or an argument skipped by an optional call, no longer count as returning on every path.
 - Arrays, dicts and tuples can no longer be passed under a wider element type, such as passing `[int]` as `[int?]`. They share their contents, so the old check allowed writes through one binding to break another's type. Fresh collection literals still accept optional and pact element annotations.
 - Function parameters are checked in the correct direction: a function taking `int` cannot be used as `(int?) -> int`, while one taking `int?` can be used as `(int) -> int`.
 - Native method overload selection now checks that repeated type parameters agree, so a receiver with mixed element types can select the correct overload.

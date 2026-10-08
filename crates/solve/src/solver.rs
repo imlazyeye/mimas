@@ -45,7 +45,6 @@ pub struct Solver {
     pub(crate) dec_to_native: HashMap<DecId, NativeBinding>,
     pub(crate) native_constants: HashMap<DecId, NativeId>,
 
-    pub(crate) control_flow: ControlFlow,
     pub(crate) ribs: Ribs,
     pub(crate) loop_stack: Vec<LoopRun>,
     pub(crate) fn_stack: Vec<FnRun>,
@@ -68,7 +67,6 @@ impl Solver {
             node_decs: IndexMap::new(),
             closure_captures: IndexMap::new(),
             expected_closures: IndexMap::new(),
-            control_flow: ControlFlow::new(),
             node_visits: HashSet::new(),
             ribs: Ribs::default(),
             loop_stack: vec![],
@@ -257,7 +255,6 @@ impl Solver {
             })?;
         }
 
-        self.control_flow = ControlFlow::default();
         assert!(self.fn_stack.is_empty());
         assert!(self.loop_stack.is_empty());
         Ok(())
@@ -1593,9 +1590,7 @@ impl Solver {
                     // there) and isolate its flow so the diverging `else` doesn't make the rest
                     // of the block read as unreachable. then bind refutably.
                     Some(else_branch) => {
-                        self.control_flow.enter();
                         let else_ty = else_branch.query(self)?;
-                        self.control_flow.exit();
                         if else_ty.normalized(self) != Ty::Never {
                             Err(crate::errors::LetElseMustDiverge {
                                 src: self.src(else_branch.location()),
@@ -1650,16 +1645,7 @@ impl Solver {
                         let expected = return_type
                             .clone()
                             .map_or(Ok(Ty::Unit), |a| Ty::from_annotation(a, self))?;
-                        self.fn_stack.push(FnRun {
-                            expected_ty: expected.clone(),
-                        });
-                        self.control_flow.enter();
-                        let body_ty = body.query(self)?;
-                        self.fn_stack.pop();
-                        self.control_flow.exit();
-                        if body_ty != Ty::Unit {
-                            body.fulfill_ty(expected, self)?;
-                        }
+                        self.check_body(body, expected)?;
                         self.ribs.pop();
                     }
                     self.pact_self = prev_self;
@@ -1980,6 +1966,27 @@ impl Solver {
         }
 
         Ok(ty)
+    }
+
+    pub(crate) fn check_body(&mut self, body: &Expr, expected: Ty) -> Result<()> {
+        self.fn_stack.push(FnRun {
+            expected_ty: expected.clone(),
+        });
+        let outer_loops = std::mem::take(&mut self.loop_stack);
+        let result = body.query(self);
+        self.loop_stack = outer_loops;
+        self.fn_stack.pop();
+        let found = result?;
+        let expected = expected.normalized(self);
+        if found == Ty::Unit && !matches!(expected, Ty::Unit | Ty::Vid(_)) {
+            return Err(crate::errors::NotAllPathsReturn {
+                src: self.src(body.location()),
+                at: body.location().into(),
+                ty: expected.to_string(),
+            }
+            .into());
+        }
+        body.fulfill_ty(expected, self)
     }
 
     pub(crate) fn run_loop_body(&mut self, body: &Expr) -> Result<LoopRun> {

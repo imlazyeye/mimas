@@ -8,11 +8,9 @@
 
 pub mod components {
     mod adt;
-    mod control_flow;
     mod rib;
     mod ty;
     pub use adt::*;
-    pub use control_flow::*;
     pub use rib::*;
     pub use ty::*;
 }

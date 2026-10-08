@@ -538,6 +538,55 @@ test_success!(
      call(wide);"
 );
 
+test_fail!(
+    fallthrough_is_checked,
+    "fn f() -> int {
+         while false { return 1; }
+     }" => "not all paths return",
+    "fn f() -> int {
+         for i in 0..0 { return 1; }
+     }" => "not all paths return",
+    "fn f(c: bool) -> int {
+         if c { return 1; } else {}
+     }" => "not all paths return",
+    "let f = || -> int {
+         while false { return 1; }
+     };" => "not all paths return",
+    "pact P {
+         fn f(self) -> int {}
+     }" => "not all paths return",
+    "pact P {
+         fn f() -> int {}
+     }" => "not all paths return",
+    "struct S;
+     impl S {
+         fn take(self, x: int) {}
+     }
+     fn f(s: S?) -> int {
+         s?.take(return 1);
+     }" => "not all paths return",
+);
+
+test_success!(
+    divergent_initializers,
+    "fn take(x: int) {}
+     fn direct() -> int {
+         let x = return 1;
+     }
+     fn argument() -> int {
+         take(return 1);
+     }
+     fn collection() -> int {
+         let xs = [return 1];
+     }
+     fn typed() -> int {
+         let xs: [int] = [return 1];
+     }
+     fn diverge() -> int {
+         loop {}
+     }"
+);
+
 #[test]
 fn repeated_native_slots_reject_a_candidate() {
     fn method(receiver: Ty) -> api::ApiMethod<()> {

@@ -457,6 +457,27 @@ test_vm!(
 );
 
 test_vm!(
+    return_from_initializers,
+    "fn take(x: int) {}
+     fn direct() -> int {
+         let x = return 1;
+     }
+     fn argument() -> int {
+         take(return 2);
+     }
+     fn collection() -> int {
+         let xs = [return 3];
+     }
+     fn typed() -> int {
+         let xs: [int] = [return 4];
+     }",
+    "direct()" => Int(1),
+    "argument()" => Int(2),
+    "collection()" => Int(3),
+    "typed()" => Int(4),
+);
+
+test_vm!(
     wider_function_input,
     "fn wide(x: int?) -> int { x ?? 0 }
      fn call(f: (int) -> int) -> int { f(1) }",
