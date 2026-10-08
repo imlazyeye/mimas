@@ -87,6 +87,8 @@ pub enum Inst {
     In(InstId, InstId, bool),
     Format(Vec<FormatPart>),
     RefBody(BodyId),
+    Shared(u32),
+    DeepClone(InstId),
     MakeClosure {
         body: BodyId,
         captures: Vec<InstId>,
@@ -185,6 +187,8 @@ impl Inst {
             | Inst::In(..)
             | Inst::Format(..)
             | Inst::RefBody(..)
+            | Inst::Shared(..)
+            | Inst::DeepClone(..)
             | Inst::MakeClosure { .. }
             | Inst::NewInstance { .. }
             | Inst::IsInstance { .. }
@@ -232,6 +236,8 @@ impl Inst {
             | Inst::In(..)
             | Inst::Format(..)
             | Inst::RefBody(..)
+            | Inst::Shared(..)
+            | Inst::DeepClone(..)
             | Inst::MakeClosure { .. }
             | Inst::Return(..)
             | Inst::NewInstance { .. }
@@ -342,6 +348,8 @@ impl IrDisplay for Inst {
                 format!("format {parts}")
             }
             Inst::RefBody(body) => format!("ref_body @{}", body.index()),
+            Inst::Shared(slot) => format!("shared #{slot}"),
+            Inst::DeepClone(value) => format!("deep_clone {value}"),
             Inst::MakeClosure { body, captures } => {
                 let caps = captures.iter().map(|c| c.to_string()).join(", ");
                 format!("make_closure @{} [{caps}]", body.index())
@@ -427,7 +435,10 @@ impl BlockWriter<'_> {
                     Constant::Int(_) => OperandKind::Int,
                     Constant::Float(_) => OperandKind::Float,
                     Constant::Str(_) => OperandKind::Str,
-                    Constant::Array(_) | Constant::Null => OperandKind::Generic,
+                    Constant::Array(_)
+                    | Constant::Dict(_)
+                    | Constant::Instance(_, _)
+                    | Constant::Null => OperandKind::Generic,
                 };
                 let this = self.constant(con);
                 let eq = self.bin(BinOp::Identity, scrut_val, this, op_kind);
@@ -747,6 +758,14 @@ impl BlockWriter<'_> {
 
     pub(crate) fn ref_body(&mut self, body: BodyId) -> InstId {
         self.instruct(Inst::RefBody(body))
+    }
+
+    pub(crate) fn shared(&mut self, slot: u32) -> InstId {
+        self.instruct(Inst::Shared(slot))
+    }
+
+    pub(crate) fn deep_clone(&mut self, value: InstId) -> InstId {
+        self.instruct(Inst::DeepClone(value))
     }
 
     pub(crate) fn make_closure(&mut self, body: BodyId, captures: Vec<InstId>) -> InstId {

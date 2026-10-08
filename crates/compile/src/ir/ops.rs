@@ -23,6 +23,7 @@ pub enum BinOp {
     BitXor,
     BitShiftLeft,
     BitShiftRight,
+    StructuralEqual,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -53,7 +54,7 @@ impl BinOp {
             IDiv => Scalar::Int(a.checked_div(b).ok_or(BinFault::Overflow)?),
             Mod if b == 0 => return Err(BinFault::ModByZero),
             Mod => Scalar::Int(a.checked_rem(b).ok_or(BinFault::Overflow)?),
-            Identity => Scalar::Bool(a == b),
+            Identity | StructuralEqual => Scalar::Bool(a == b),
             NotEqual => Scalar::Bool(a != b),
             LessThan => Scalar::Bool(a < b),
             LessEqual => Scalar::Bool(a <= b),
@@ -83,7 +84,7 @@ impl BinOp {
             Div => Scalar::Float(a / b),
             IDiv => Scalar::Float((a / b).floor()),
             Mod => Scalar::Float(a % b),
-            Identity => Scalar::Bool(a == b),
+            Identity | StructuralEqual => Scalar::Bool(a == b),
             NotEqual => Scalar::Bool(a != b),
             LessThan => Scalar::Bool(a < b),
             LessEqual => Scalar::Bool(a <= b),
@@ -120,6 +121,7 @@ impl std::fmt::Display for BinOp {
             BinOp::BitXor => f.pad("bit_xor"),
             BinOp::BitShiftLeft => f.pad("bit_shift_left"),
             BinOp::BitShiftRight => f.pad("bit_shift_right"),
+            BinOp::StructuralEqual => f.pad("structural_equal"),
         }
     }
 }

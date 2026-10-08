@@ -236,7 +236,7 @@ pub enum ConstValue {
     /// A folded bool, number, string or null, or an array or tuple of those.
     Literal(parse::Literal),
     /// Anything else (a dict, a struct, an enum variant, or a collection holding one). The
-    /// constant's own expr is kept and built again at each read.
+    /// constant's own expr is kept for compile to build the value from.
     Expr(parse::Expr),
 }
 

@@ -81,6 +81,8 @@ pub struct State<'gc> {
     /// Swapped for a fresh set every time a program is loaded, which is what invalidates the
     /// handles the host took out against the previous one -- see `Ctx::reset_roots`.
     pub roots: Gc<'gc, Lock<DynamicRootSet<'gc>>>,
+    /// The value of each constant the program reads in place built once when it loads.
+    pub shared: Gc<'gc, RefLock<Vec<Val<'gc>>>>,
 }
 
 impl<'gc> State<'gc> {
@@ -102,6 +104,7 @@ impl<'gc> State<'gc> {
             mimas_bindings,
             fixtures,
             roots: Gc::new(mc, Lock::new(DynamicRootSet::new(mc))),
+            shared: Gc::new(mc, RefLock::new(Vec::new())),
         }
     }
 

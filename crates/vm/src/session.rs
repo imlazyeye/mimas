@@ -88,6 +88,7 @@ impl Session {
         // a faulted input's dec ids come back around in the next one, which must not find these
         // bodies
         let items = self.ir.item_bodies.clone();
+        let slots = self.ir.shared_slots.clone();
         let entry = self.ir.new_entry(self.entry, resolutions);
         self.ir.lower_echo(stmts);
         self.vm.extend(self.compiler.compile(&mut self.ir));
@@ -102,6 +103,8 @@ impl Session {
             }
             Err(error) => {
                 self.ir.item_bodies = items;
+                // keep the values for closures saved by the faulted input, but forget its dec ids
+                self.ir.shared_slots = slots;
                 Err(error)
             }
         }

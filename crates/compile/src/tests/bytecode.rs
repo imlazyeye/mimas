@@ -81,6 +81,14 @@ pub(crate) fn decode_op(d: &mut Decoder) -> Op {
             dst: Reg::decode(d),
             constant: Constant::decode(d),
         },
+        OpCode::LoadShared => Op::LoadShared {
+            dst: Reg::decode(d),
+            slot: d.u32(),
+        },
+        OpCode::DeepClone => Op::DeepClone {
+            dst: Reg::decode(d),
+            src: Reg::decode(d),
+        },
         OpCode::Jump => Op::Jump {
             target: BlockTarget::decode(d),
         },
@@ -784,7 +792,7 @@ fn empty_vec_fields_roundtrip() {
     });
 }
 
-// each Constant kind survives the round-trip (the Sample only covers Int); nested arrays too.
+// each Constant kind survives the round-trip (the Sample only covers Int).
 #[test]
 fn all_constant_kinds_roundtrip() {
     for c in [
@@ -800,6 +808,19 @@ fn all_constant_kinds_roundtrip() {
             Constant::Bool(true),
             Constant::Array(vec![Constant::Str(StrId::from(7)), Constant::Null]),
         ]),
+        Constant::Dict(vec![]),
+        Constant::Dict(vec![(
+            StrId::from(4),
+            Constant::Array(vec![Constant::Bool(true)]),
+        )]),
+        Constant::Instance(AdtId::from(8), vec![]),
+        Constant::Instance(
+            AdtId::from(9),
+            vec![Constant::Dict(vec![(
+                StrId::from(3),
+                Constant::Instance(AdtId::from(8), vec![Constant::Int(2)]),
+            )])],
+        ),
     ] {
         roundtrip(Op::LoadConst {
             dst: r(1),

@@ -88,6 +88,7 @@ impl Vm {
             // a stashed handle names a body in the program it was taken against (see `reset_roots`)
             state.ctx(mc).reset_roots();
             state.thread.borrow_mut(mc).regs.clear();
+            state.shared.borrow_mut(mc).clear();
         });
         self.extend(program);
     }
@@ -102,6 +103,7 @@ impl Vm {
             bytes,
             root,
             sources,
+            shared,
         } = program;
         self.bytes = bytes;
         self.chunks = chunks;
@@ -121,6 +123,15 @@ impl Vm {
                 return_reg: 0,
                 base: 0,
             });
+            let ctx = state.ctx(mc);
+            let mut values = state.shared.borrow_mut(mc);
+            let start = values.len();
+            values.extend(
+                shared
+                    .into_iter()
+                    .skip(start)
+                    .map(|value| constant_to_val(value, ctx, &self.c_strs)),
+            );
         });
     }
 
@@ -728,6 +739,16 @@ handlers! {
         let con = Constant::decode(code);
         let val = constant_to_val(con, ctx, strs);
         wr!(regs, reg, val);
+    },
+    LoadShared => {
+        let dst = Reg::decode(code);
+        let slot = code.u32() as usize;
+        wr!(regs, dst, ctx.state().shared.borrow()[slot]);
+    },
+    DeepClone => {
+        let dst = Reg::decode(code);
+        let src = Reg::decode(code);
+        wr!(regs, dst, ctx.deep_clone(rd!(regs, src)));
     },
     Move => {
         let dst = Reg::decode(code);
@@ -1660,6 +1681,25 @@ fn constant_to_val<'gc>(c: Constant, ctx: Ctx<'gc>, c_cstrs: &StrInterner) -> Va
             Val::Array(ctx.new_array(out))
         }
         Constant::Null => Val::Null,
+        Constant::Dict(fields) => {
+            let values = fields
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        ctx.intern(c_cstrs.get(key)),
+                        constant_to_val(value, ctx, c_cstrs),
+                    )
+                })
+                .collect();
+            Val::Dict(ctx.new_dict(values))
+        }
+        Constant::Instance(adt, fields) => {
+            let values = fields
+                .into_iter()
+                .map(|value| constant_to_val(value, ctx, c_cstrs))
+                .collect();
+            Val::Instance(ctx.new_instance(adt.index() as u32, Fields::new(values)))
+        }
     }
 }
 

@@ -20,6 +20,8 @@ pub struct Ir {
     pub str_interner: StrInterner,
     pub item_bodies: HashMap<DecId, BodyId>,
     pub closure_bodies: HashMap<BodyId, NodeId>,
+    pub shared: Vec<crate::Constant>,
+    pub shared_slots: HashMap<DecId, u32>,
     pub(crate) resolutions: Resolutions,
     pub(crate) intrinsics: HashMap<NativeId, Intrinsic>,
 
@@ -42,6 +44,8 @@ impl Ir {
             body_stack: Vec::new(),
             item_bodies: HashMap::new(),
             closure_bodies: HashMap::new(),
+            shared: Vec::new(),
+            shared_slots: HashMap::new(),
             current_loc: Location::SYNTHETIC,
         }
     }
@@ -273,6 +277,18 @@ impl Ir {
         let bid = self.bodies.push(Body::new());
         self.item_bodies.insert(dec, bid);
         bid
+    }
+
+    /// Return the constant's shared slot, building its data on the first read.
+    pub(crate) fn shared_for(&mut self, dec: DecId) -> u32 {
+        if let Some(&slot) = self.shared_slots.get(&dec) {
+            return slot;
+        }
+        let value = crate::Constant::from_dec(self, dec);
+        let slot = self.shared.len() as u32;
+        self.shared.push(value);
+        self.shared_slots.insert(dec, slot);
+        slot
     }
 
     pub(super) fn current_body(&self) -> &Body {

@@ -1,7 +1,10 @@
 use itertools::Itertools;
-use parse::{ExprKind, Literal};
+use parse::{Access, Expr, ExprKind, Literal};
 use shared::StrId;
-use solve::components::{ConstValue, DecId};
+use solve::{
+    ResolvedDeclKind,
+    components::{AdtId, ConstValue, DecId},
+};
 
 use super::{Inst, Ir, IrDisplay};
 
@@ -15,6 +18,8 @@ pub enum Constant {
     Str(StrId) = 3,
     Array(Vec<Constant>) = 4,
     Null = 5,
+    Dict(Vec<(StrId, Constant)>) = 6,
+    Instance(AdtId, Vec<Constant>) = 7,
 }
 
 #[repr(u8)]
@@ -26,6 +31,8 @@ pub enum ConstantCode {
     Str = 3,
     Array = 4,
     Null = 5,
+    Dict = 6,
+    Instance = 7,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,6 +70,12 @@ impl Constant {
             Constant::Str(_) => 4,
             Constant::Array(a) => 4 + a.iter().map(|v| 1 + v.byte_len()).sum::<usize>(),
             Constant::Null => 0,
+            Constant::Dict(fields) => {
+                4 + fields.iter().map(|(_, v)| 5 + v.byte_len()).sum::<usize>()
+            }
+            Constant::Instance(_, fields) => {
+                8 + fields.iter().map(|v| 1 + v.byte_len()).sum::<usize>()
+            }
         }
     }
 
@@ -80,6 +93,63 @@ impl Constant {
                 }
             }
             Constant::Null => {}
+            Constant::Dict(fields) => {
+                e.u32(fields.len() as u32);
+                for (key, value) in fields {
+                    e.u32(*key);
+                    e.u8(constant_discriminant(value));
+                    value.encode(e);
+                }
+            }
+            Constant::Instance(adt, fields) => {
+                e.u32(*adt);
+                e.u32(fields.len() as u32);
+                for value in fields {
+                    e.u8(constant_discriminant(value));
+                    value.encode(e);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn from_dec(ir: &mut Ir, dec: DecId) -> Self {
+        match ir.resolutions.decs[dec].kind.clone() {
+            ResolvedDeclKind::Constant(ConstValue::Literal(lit)) => Self::from_literal(ir, lit),
+            ResolvedDeclKind::Constant(ConstValue::Expr(expr)) => Self::from_expr(ir, &expr),
+            ResolvedDeclKind::Variant { layout, .. } => Self::Instance(layout, vec![]),
+            ResolvedDeclKind::Adt(adt) => Self::Instance(adt, vec![]),
+            _ => unreachable!("solver checked constant declarations"),
+        }
+    }
+
+    fn from_expr(ir: &mut Ir, expr: &Expr) -> Self {
+        match expr.kind() {
+            ExprKind::Literal(lit) => Self::from_literal(ir, lit.clone()),
+            ExprKind::Ident(_) | ExprKind::Access(Access::DoubleColon { .. }) => {
+                Self::from_dec(ir, ir.node_dec(expr.id()))
+            }
+            ExprKind::Grouping(g) => Self::from_expr(ir, &g.inner),
+            ExprKind::Call(call) => {
+                let adt = *ir.resolutions.node_tys[&call.left.id()].as_adt().unwrap();
+                let fields = call
+                    .arguments
+                    .iter()
+                    .map(|arg| Self::from_expr(ir, &arg.value))
+                    .collect();
+                Self::Instance(adt, fields)
+            }
+            _ => {
+                let lit = solve::utils::reduce(expr, &|e| {
+                    let dec = ir.node_dec(e.id());
+                    match &ir.resolutions.decs[dec].kind {
+                        ResolvedDeclKind::Constant(ConstValue::Literal(lit)) => Some(lit.clone()),
+                        _ => None,
+                    }
+                })
+                .expect("solver checked constant arithmetic")
+                .expect("solver checked constant expressions");
+                Self::from_literal(ir, lit)
+            }
         }
     }
 
@@ -92,38 +162,39 @@ impl Constant {
             Literal::Float(f) => Self::Float(f),
             Literal::Hex(h) => Self::Int(i64::from_str_radix(&h, 16).unwrap()),
             Literal::String(s) => Self::Str(ir.intern_str(&s)),
-            // arrays and tuples share the same runtime shape -- both lower to a `NewArray` + pushes
-            // at use sites today (see `Literal::emit`), so the const form mirrors that.
-            Literal::Array(a) | Literal::Tuple(a) => Self::Array(
-                a.iter()
-                    .map(|member| match member.kind() {
-                        ExprKind::Literal(lit) => Self::from_literal(ir, lit.clone()),
-                        _ => unreachable!("a folded array holds folded members"),
-                    })
+            Literal::Array(a) | Literal::Tuple(a) => {
+                Self::Array(a.iter().map(|member| Self::from_expr(ir, member)).collect())
+            }
+            Literal::Dictionary(fields) => Self::Dict(
+                fields
+                    .iter()
+                    .map(|(key, value)| (ir.intern_str(&key.lexeme), Self::from_expr(ir, value)))
                     .collect(),
             ),
-            Literal::Dictionary(_) | Literal::Struct(_) => {
-                unreachable!("dicts and structs never fold, see `ConstValue::Expr`")
+            Literal::Struct(s) => {
+                let adt = *ir.resolutions.node_tys[&s.name.id()].as_adt().unwrap();
+                let order = ir.resolutions.adts[adt].fields.clone();
+                let fields = order
+                    .iter()
+                    .map(|name| {
+                        let (_, value) = s
+                            .fields
+                            .iter()
+                            .find(|(key, _)| key.to_string() == *name)
+                            .unwrap();
+                        Self::from_expr(ir, value)
+                    })
+                    .collect();
+                Self::Instance(adt, fields)
             }
         }
     }
 
-    /// Emit a use-site reference to a const dec. A folded value lowers to a `LoadConst` inst, and
-    /// anything else lowers to a fresh runtime allocation at the use site (the constant's own
-    /// expr, lowered again).
+    /// Emit a constant's value with fresh containers. Reads that only inspect it use
+    /// `Ir::shared_for`.
     pub(crate) fn emit_const_dec(ir: &mut Ir, dec: DecId) -> Option<crate::InstId> {
-        use super::Lower;
-
-        let solve::ResolvedDeclKind::Constant(value) = &ir.resolutions.decs[dec].kind else {
-            unreachable!("emit_const_dec called on non-constant dec {dec:?}");
-        };
-        match value.clone() {
-            ConstValue::Literal(lit) => {
-                let constant = Self::from_literal(ir, lit);
-                Some(ir.current().constant(constant))
-            }
-            ConstValue::Expr(expr) => expr.lower(ir),
-        }
+        let constant = Self::from_dec(ir, dec);
+        Some(ir.current().constant(constant))
     }
 
     /// Returns the [CachedConstant] version of this const, if available. These are Hash friendly.
@@ -134,7 +205,7 @@ impl Constant {
             Constant::Str(str_id) => Some(CachedConstant::Str(*str_id)),
             Constant::Null => Some(CachedConstant::Null),
             Constant::Float(f) => Some(CachedConstant::Float(f.to_bits())),
-            Constant::Array(_) => None,
+            Constant::Array(_) | Constant::Dict(_) | Constant::Instance(_, _) => None,
         }
     }
 }
@@ -147,7 +218,7 @@ impl IrDisplay for Constant {
             Constant::Int(i) => i.to_string(),
             Constant::Float(float) => float.to_string(),
             Constant::Str(str_id) => format!("\"{}\"", ir.str(*str_id)),
-            Constant::Array(_) => self.to_string(),
+            Constant::Array(_) | Constant::Dict(_) | Constant::Instance(_, _) => self.to_string(),
             Constant::Null => "null".into(),
         }
     }
@@ -165,6 +236,18 @@ impl std::fmt::Display for Constant {
                 f.pad(&format!("[{}]", a.iter().map(|v| v.to_string()).join(", ")))
             }
             Constant::Null => f.pad("null"),
+            Constant::Dict(fields) => f.pad(&format!(
+                "~{{ {} }}",
+                fields
+                    .iter()
+                    .map(|(key, value)| format!("str {} = {value}", key.index()))
+                    .join(", ")
+            )),
+            Constant::Instance(adt, fields) => f.pad(&format!(
+                "adt {}({})",
+                adt.index(),
+                fields.iter().join(", ")
+            )),
         }
     }
 }
