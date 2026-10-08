@@ -1,9 +1,6 @@
 use crate::{
-    Error, FnRun, LoopRun, Result, Solver, Unification, array,
-    components::{
-        Adt, AdtFlags, AdtId, DecKind, Field, Flow, FnHeader, FnParam, Quantification, Ty, TyExt,
-        Variant,
-    },
+    Error, LoopRun, Result, Solver, Unification, array,
+    components::{Adt, AdtFlags, AdtId, DecKind, Field, FnHeader, FnParam, Ty, TyExt, Variant},
     errors::*,
     option,
     traits::Query,
@@ -588,8 +585,14 @@ impl Solve for Block {
         let mut diverged = false;
         for stmt in &self.body {
             solver.visit_stmt(stmt)?;
-            if let StmtKind::Expr(e) = stmt.kind()
-                && matches!(e.query(solver)?, Ty::Never)
+            let value = match stmt.kind() {
+                StmtKind::Expr(expr) => Some(expr),
+                StmtKind::Let(binding) => Some(&binding.right),
+                StmtKind::Assignment(assignment) => Some(&assignment.right),
+                _ => None,
+            };
+            if let Some(expr) = value
+                && expr.query(solver)? == Ty::Never
             {
                 diverged = true;
             }
@@ -947,30 +950,7 @@ impl Solve for Closure {
             Some(annotation) => Ty::from_annotation(annotation.clone(), solver)?,
             None => Ty::Vid(solver.vid()),
         };
-        solver.fn_stack.push(FnRun {
-            expected_ty: expected_ty.clone(),
-        });
-        // `break`, `continue` and `collect` can't target a loop outside the closure (the body
-        // compiles on its own)
-        let outer_loops = std::mem::take(&mut solver.loop_stack);
-        solver.control_flow.enter();
-        let body_ty = self.body.query(solver)?;
-        solver.loop_stack = outer_loops;
-        solver.fn_stack.pop().unwrap();
-        let flow = solver.control_flow.exit();
-
-        let expected_ty = expected_ty.normalized(solver);
-        if body_ty != Ty::Unit || matches!(expected_ty, Ty::Vid(_)) {
-            self.body.fulfill_ty(expected_ty.clone(), solver)?;
-        } else if expected_ty != Ty::Unit
-            && solver.control_flow.quantify(&flow) != Quantification::Universal
-        {
-            Err(NotAllPathsReturn {
-                src: solver.src(self.body.location()),
-                at: self.body.location().into(),
-                ty: expected_ty.to_string(),
-            })?;
-        }
+        solver.check_body(&self.body, expected_ty.clone())?;
 
         solver.ribs.pop();
 
@@ -1287,25 +1267,7 @@ impl Solve for Function {
         }
 
         let expected_ty = fn_data.return_ty.as_ref().clone();
-        solver.fn_stack.push(FnRun {
-            expected_ty: expected_ty.clone(),
-        });
-        solver.control_flow.enter();
-        let body_ty = self.body.query(solver)?;
-        solver.fn_stack.pop().unwrap();
-        let flow = solver.control_flow.exit();
-
-        if body_ty != Ty::Unit {
-            self.body.fulfill_ty(expected_ty.clone(), solver)?;
-        } else if expected_ty != Ty::Unit
-            && solver.control_flow.quantify(&flow) != Quantification::Universal
-        {
-            Err(NotAllPathsReturn {
-                src: solver.src(self.body.location()),
-                at: self.body.location().into(),
-                ty: expected_ty.to_string(),
-            })?;
-        }
+        solver.check_body(&self.body, expected_ty)?;
 
         solver.ribs.pop();
 
@@ -1381,16 +1343,12 @@ impl Solve for If {
             self.condition.fulfill_ty(Ty::Bool, solver)?;
         }
 
-        solver.control_flow.enter();
         let positive_ty = self.main_body.query(solver)?;
-        let positive = solver.control_flow.exit();
-        let (ty, negative) = if let Some(else_expr) = self.else_expr.as_ref() {
-            solver.control_flow.enter();
+        let ty = if let Some(else_expr) = self.else_expr.as_ref() {
             let negative_ty = else_expr.query(solver)?;
-            let ty = positive_ty
+            positive_ty
                 .join(negative_ty, solver)
-                .map_err(|e| e.into_type_mismatch(solver, else_expr.location()))?;
-            (ty, solver.control_flow.exit())
+                .map_err(|e| e.into_type_mismatch(solver, else_expr.location()))?
         } else {
             self.main_body
                 .fulfill_ty(Ty::Unit, solver)
@@ -1398,12 +1356,8 @@ impl Solve for If {
                     src: solver.src(location),
                     at: location.into(),
                 })?;
-            (Ty::Unit, solver.control_flow.push(Flow::Block(vec![])))
+            Ty::Unit
         };
-
-        solver
-            .control_flow
-            .push(Flow::Potential { positive, negative });
 
         if self.binding.is_some() {
             solver.ribs.pop();
@@ -1866,8 +1820,6 @@ impl Solve for Return {
             .fulfill_ty(&mut expected_ty, solver)
             .map_err(|e| e.into_type_mismatch(solver, location))?;
 
-        solver.control_flow.push(Flow::Return);
-
         Ok(Ty::Never)
     }
 }
@@ -1984,7 +1936,6 @@ impl Solve for parse::Raise {
         }
 
         self.value.fulfill_ty(Ty::Str, solver)?;
-        solver.control_flow.push(Flow::Return);
         Ok(Ty::Never)
     }
 }

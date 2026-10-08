@@ -123,6 +123,56 @@ impl Query for Expr {
             }
         }
 
+        /// Returns the inputs that must complete for this expression to produce a value.
+        fn inputs(expr: &Expr) -> Vec<&Expr> {
+            match expr.kind() {
+                ExprKind::Call(call) => {
+                    let mut inputs = vec![&call.left];
+                    if !call.left.taints_chain() {
+                        inputs.extend(call.arguments.iter().map(|arg| &arg.value));
+                    }
+                    inputs
+                }
+                ExprKind::Literal(Literal::Array(values) | Literal::Tuple(values)) => {
+                    values.iter().collect()
+                }
+                ExprKind::Literal(Literal::Dictionary(values)) => {
+                    values.iter().map(|(_, value)| value).collect()
+                }
+                ExprKind::Literal(Literal::Struct(value)) => {
+                    value.fields.iter().map(|(_, value)| value).collect()
+                }
+                ExprKind::FString(string) => string
+                    .parts
+                    .iter()
+                    .filter_map(|part| match part {
+                        FStringPart::Expr(expr) => Some(expr),
+                        _ => None,
+                    })
+                    .collect(),
+                ExprKind::Grouping(group) => vec![&group.inner],
+                ExprKind::Unary(unary) => vec![&unary.right],
+                ExprKind::Unwrap(unwrap) => vec![&unwrap.expr],
+                ExprKind::Evaluation(eval) => vec![&eval.left, &eval.right],
+                ExprKind::Equality(eq) => vec![&eq.left, &eq.right],
+                ExprKind::Logical(logical) => vec![&logical.left],
+                ExprKind::Coalescence(coalesce) => vec![&coalesce.left],
+                ExprKind::Absolve(absolve) => vec![&absolve.left],
+                ExprKind::If(branch) => vec![&branch.condition],
+                ExprKind::While(loop_) => vec![&loop_.header],
+                ExprKind::For(loop_) => vec![&loop_.iterator],
+                ExprKind::Access(Access::Dot { left, .. }) => vec![left],
+                ExprKind::Access(Access::Square { left, key, kind }) => {
+                    if *kind == AccessKind::Option || left.taints_chain() {
+                        vec![left]
+                    } else {
+                        vec![left, key]
+                    }
+                }
+                _ => vec![],
+            }
+        }
+
         match self.kind() {
             ExprKind::Literal(Literal::True) | ExprKind::Literal(Literal::False) => Ok(Ty::Bool),
             ExprKind::Literal(Literal::Null) => Ok(Ty::Null),
@@ -146,7 +196,13 @@ impl Query for Expr {
 
                     inner(self)
                         .solve(self.id(), self.location(), solver)
-                        .and_then(|ty| {
+                        .and_then(|mut ty| {
+                            for input in inputs(self) {
+                                if input.query(solver)? == Ty::Never {
+                                    ty = Ty::Never;
+                                    break;
+                                }
+                            }
                             let vid = solver.node_vid(self.id());
                             solver
                                 .register_sub(vid, ty)
