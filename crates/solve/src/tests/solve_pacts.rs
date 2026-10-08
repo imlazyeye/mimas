@@ -820,7 +820,12 @@ test_multi_file!(
                pub pact Draw {
                    fn make() -> Self;
                }";
-    "shapes::Draw::*::make()" => array!(query!(Draw)),
+    "shapes::Draw::*::make()" => array!(TEST_SESSION.with(|s| {
+        // query! can't take a path, and Draw no longer leaks out of shapes through the global pact
+        // lookup. resolve shapes::Draw as a type annotation for the expected type.
+        let mut s = s.borrow_mut();
+        <crate::components::Ty as crate::components::TyExt>::from_annotation(parse::components::Annotation::Path(vec![parse::Ident::synthetic("shapes"), parse::Ident::synthetic("Draw")]), &mut s.0).unwrap()
+    })),
 );
 
 test_fail!(
@@ -910,4 +915,23 @@ test_fail!(
          }
      }
      let squares: [Square] = Draw::*::make();"
+);
+
+test_fail!(
+    pact_names_have_no_value,
+    "pact P {}
+     P;" => "pacts are not values",
+    "pact P {}
+     let p = (P);" => "pacts are not values",
+    "pact P {}
+     fn take(p: P) {}
+     take(P);" => "pacts are not values",
+);
+
+test_multi_file_fail!(
+    private_pact_is_not_global,
+    a => "module a;
+          pact Hidden {}",
+    b => "module b;
+          pub fn f(x: Hidden) {}";
 );

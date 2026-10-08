@@ -235,3 +235,15 @@ test_vm!(
      let l = Light::On {}.flip();",
     "l.is_on()" => Bool(false),
 );
+
+test_vm!(
+    qualified_struct_match,
+    files {
+        a => "module a;
+              pub struct S { pub x: int }",
+        main => "let s = a::S { x = 7 };
+                 let TEST_VALUE = match s {
+                     a::S { x } => x,
+                 };"
+    } => Int(7)
+);

@@ -2,10 +2,9 @@ use crate::{
     Error, Result, Unification, UnificationError,
     components::*,
     errors::{
-        AssignToConst, AssignToLoopVar, AssignToStringIndex, BareNullBinding, ExtraTupleMembers,
-        FieldNotFound, FnIsNotAValue, InvalidAssignTarget, InvalidPattern, InvalidUseTarget,
-        MissingTupleMembers, MultipleConstDeclarations, NonConstantValue, NotFound,
-        SelfOutOfContext,
+        AssignToConst, AssignToLoopVar, AssignToStringIndex, BareNullBinding, FieldNotFound,
+        FnIsNotAValue, InvalidAssignTarget, InvalidPattern, InvalidUseTarget,
+        MultipleConstDeclarations, NonConstantValue, NotFound, SelfOutOfContext,
     },
     traits::*,
 };
@@ -1214,32 +1213,24 @@ impl Solver {
 
 impl Solver {
     pub(crate) fn solve_pat(&mut self, pat: &Pat, ty: Ty) -> Result<()> {
-        // normalize so an unresolved Vid reveals its concrete shape (e.g. tuple destruction where
-        // the rhs's type was unified only after we got here).
+        fn supported(pat: &Pat) -> bool {
+            match pat.kind() {
+                PatKind::Ident(_) => true,
+                PatKind::Tuple(parts) => parts.iter().all(supported),
+                _ => false,
+            }
+        }
         let ty = ty.normalized(self);
-        match (pat.kind(), ty) {
-            (PatKind::Ident(ident), ty) => self.declare(ident, pat.id(), ty).map(|_| ()),
-            (PatKind::Tuple(idents), Ty::Tuple(tys)) => match idents.len().cmp(&tys.len()) {
-                std::cmp::Ordering::Less => Err(MissingTupleMembers {
-                    src: self.src(pat.location()),
-                    at: pat.location().into(),
-                })?,
-                std::cmp::Ordering::Greater => Err(ExtraTupleMembers {
-                    src: self.src(pat.location()),
-                    at: pat.location().into(),
-                })?,
-                std::cmp::Ordering::Equal => idents
-                    .iter()
-                    .zip(tys.iter())
-                    .try_for_each(|(pat, ty)| self.solve_pat(pat, ty.clone())),
-            },
-            (a, b) => Err(InvalidPattern {
+        if !supported(pat) {
+            return Err(InvalidPattern {
                 src: self.src(pat.location()),
                 at: pat.location().into(),
-                pattern: a.to_string(),
-                ty: b.to_string(),
-            })?,
+                pattern: pat.to_string(),
+                ty: ty.to_string(),
+            }
+            .into());
         }
+        self.solve_match_pat(pat, ty, false)
     }
 
     /// Solves the pattern of an `if let`, `while let` or `let else`. A bare name over an option or
@@ -1404,8 +1395,11 @@ impl Solver {
                                     at: right.location.into(),
                                     field_name: right.lexeme.clone(),
                                 })?;
-                            let Ty::Adt(inner) = field.ty else {
-                                Err(bad(&field.ty))?
+                            self.check_vis(field.dec, right.location)?;
+                            let field_ty = field.ty.normalized(self);
+                            self.note(right, field_ty.clone(), Some(field.dec));
+                            let Ty::Adt(inner) = field_ty else {
+                                Err(bad(&field_ty))?
                             };
                             (inner, None)
                         } else {
@@ -1570,19 +1564,6 @@ impl Solver {
                     })?;
                 }
 
-                // a bare pact name has a Ty (so accesses like `P::CONST` can consume it) but
-                // no value form -- binding one would ICE at codegen. pact-ANNOTATED lets with
-                // a concrete rhs are fine, so key off the rhs expr being the pact ident itself.
-                if matches!(right.kind(), ExprKind::Ident(_))
-                    && let Some(&dec) = self.node_decs.get(&right.id())
-                    && matches!(self.decs[dec].kind, DecKind::Pact(_))
-                {
-                    Err(crate::errors::PactIsNotAValue {
-                        src: self.src(right.location()),
-                        at: right.location().into(),
-                    })?;
-                }
-
                 match else_branch {
                     // no `else` -> the pattern must be irrefutable (ident / tuple destructure)
                     None => self.solve_pat(left, ty)?,
@@ -1726,17 +1707,11 @@ impl Solver {
                 None if self.library.contains_key(&ident.lexeme) => {
                     (Ty::Adt(self.library[&ident.lexeme]), None)
                 }
-                None => {
-                    let pact = self.pacts.iter().find(|(_, p)| p.name == ident.lexeme);
-                    let Some((pid, _)) = pact else {
-                        Err(NotFound {
-                            src: self.src(read_location),
-                            at: read_location.into(),
-                            name: ident.lexeme.clone(),
-                        })?
-                    };
-                    (Ty::pacts(vec![pid]), None)
-                }
+                None => Err(NotFound {
+                    src: self.src(read_location),
+                    at: read_location.into(),
+                    name: ident.lexeme.clone(),
+                })?,
             }
         };
         self.note(ident, ty.clone(), dec);

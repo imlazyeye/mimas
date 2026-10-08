@@ -516,7 +516,7 @@ impl Solve for Access {
                 }
             }
             Access::Each { left, right } => {
-                let head = left.query(solver)?;
+                let head = solver.query_non_value(left)?;
                 let named = match solver.node_decs.get(&left.id()) {
                     Some(&dec) => matches!(solver.decs[dec].kind, DecKind::Pact(_)),
                     None => matches!(left.kind(), ExprKind::Ident(_)),

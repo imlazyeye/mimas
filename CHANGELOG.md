@@ -26,6 +26,9 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Pact names now follow module scope and visibility. A private pact in another module could be found by its bare name without an import.
+- Using a pact name as a value, including inside parentheses or as an argument, is now a compile error instead of crashing the compiler.
+- Struct patterns named through a module path, such as `shapes::Point { x }`, now resolve the struct and count toward match exhaustiveness. The path also checks the struct's visibility.
 - Functions, closures and pact defaults with a non-unit return type now reject paths that finish without returning a value. Returns inside a `while` or `for` loop that may not run, or an argument skipped by an optional call, no longer count as returning on every path.
 - Arrays, dicts and tuples can no longer be passed under a wider element type, such as passing `[int]` as `[int?]`. They share their contents, so the old check allowed writes through one binding to break another's type. Fresh collection literals still accept optional and pact element annotations.
 - Function parameters are checked in the correct direction: a function taking `int` cannot be used as `(int?) -> int`, while one taking `int?` can be used as `(int) -> int`.
