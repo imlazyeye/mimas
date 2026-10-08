@@ -26,6 +26,10 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Integer arithmetic in constants now reports overflow and invalid shift counts at compile time. It used to wrap overflowing values or accept shifts of 64 bits or more.
+- Ordering comparisons in constants compare integers exactly. Large integers could compare as equal after being rounded to floats.
+- `&&` and `||` in constants now short-circuit, so `false && (1 ~/ 0 == 1)` and `true || (1 ~/ 0 == 1)` do not evaluate the division.
+- Float constants now match runtime unary `+` and division by zero, and support `~/` and `%`.
 - Some std methods panicked the host on bad arguments rather than raising a runtime error: `array.insert` past the end, `int.clamp` and `float.clamp` with `low` above `high`, `int::random` and `float::random` with an empty range, `array.sum` and `int.abs` overflowing, and `array::new_filled` with a length too large for an array.
 - `array::new_filled` with a negative length is now a runtime error. It used to give an empty array.
 - A value typed as a pact was accepted where a specific implementer was expected, so one struct could be read as another. It's now a type mismatch.

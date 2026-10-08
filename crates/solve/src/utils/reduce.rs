@@ -66,9 +66,13 @@ pub fn reduce<F: Fn(&Expr) -> Option<Literal>>(
             Ok(match (&u.op, right) {
                 (Not, True) => Some(False),
                 (Not, False) => Some(True),
-                (Positive, Int(v)) => Some(Int(i64::abs(v))),
-                (Positive, Float(v)) => Some(Float(f64::abs(v))),
-                (Negative, Int(v)) => Some(Int(std::ops::Neg::neg(v))),
+                (Positive, Int(v)) => Some(Int(v
+                    .checked_abs()
+                    .ok_or(ReduceError::Overflow(expr.location()))?)),
+                (Positive, Float(v)) => Some(Float(v)),
+                (Negative, Int(v)) => Some(Int(v
+                    .checked_neg()
+                    .ok_or(ReduceError::Overflow(expr.location()))?)),
                 (Negative, Float(v)) => Some(Float(std::ops::Neg::neg(v))),
                 (BitwiseNot, Int(v)) => Some(Int(std::ops::Not::not(v))),
                 _ => None,
@@ -87,7 +91,16 @@ pub fn reduce<F: Fn(&Expr) -> Option<Literal>>(
             Ok(compare(l, e.op, r))
         }
         ExprKind::Logical(l) => {
-            let (Some(lhs), Some(rhs)) = (lit(&l.left)?, lit(&l.right)?) else {
+            let Some(lhs) = lit(&l.left)? else {
+                return Ok(None);
+            };
+            if matches!(
+                (&lhs, l.op),
+                (False, LogicalOp::And) | (True, LogicalOp::Or)
+            ) {
+                return Ok(Some(lhs));
+            }
+            let Some(rhs) = lit(&l.right)? else {
                 return Ok(None);
             };
             Ok(match (lhs, rhs) {
@@ -147,25 +160,16 @@ fn evaluate(
     rhs: Literal,
     location: Location,
 ) -> ReduceResult<Option<Literal>> {
-    fn math_floats(
-        a: f64,
-        op: EvaluationOp,
-        b: f64,
-        location: Location,
-    ) -> ReduceResult<Option<f64>> {
-        Ok(match op {
+    fn math_floats(a: f64, op: EvaluationOp, b: f64) -> Option<f64> {
+        match op {
             Plus => Some(a + b),
             Minus => Some(a - b),
-            Divide => {
-                if b == 0.0 {
-                    Err(ReduceError::DivideByZero(location))?
-                } else {
-                    Some(a / b)
-                }
-            }
+            Divide => Some(a / b),
             Multiply => Some(a * b),
+            Div => Some((a / b).floor()),
+            Modulo => Some(a % b),
             _ => None,
-        })
+        }
     }
 
     Ok(match (lhs, rhs) {
@@ -176,10 +180,16 @@ fn evaluate(
         }
 
         (Int(a), Int(b)) => match op {
-            Plus => Some(Int(a.wrapping_add(b))),
-            Minus => Some(Int(a.wrapping_sub(b))),
+            Plus => Some(Int(a
+                .checked_add(b)
+                .ok_or(ReduceError::Overflow(location))?)),
+            Minus => Some(Int(a
+                .checked_sub(b)
+                .ok_or(ReduceError::Overflow(location))?)),
             Divide => Some(Float(a as f64 / b as f64)),
-            Multiply => Some(Int(a.wrapping_mul(b))),
+            Multiply => Some(Int(a
+                .checked_mul(b)
+                .ok_or(ReduceError::Overflow(location))?)),
             Div => {
                 if b == 0 {
                     Err(ReduceError::DivideByZero(location))?
@@ -201,19 +211,23 @@ fn evaluate(
             And => Some(Int(a & b)),
             Or => Some(Int(a | b)),
             Xor => Some(Int(a ^ b)),
-            BitShiftLeft => Some(Int(a.wrapping_shl(
-                b.try_into()
-                    .map_err(|_| ReduceError::InvalidShift(location))?,
-            ))),
-            BitShiftRight => Some(Int(a.wrapping_shr(
-                b.try_into()
-                    .map_err(|_| ReduceError::InvalidShift(location))?,
-            ))),
+            BitShiftLeft => Some(Int(a
+                .checked_shl(
+                    b.try_into()
+                        .map_err(|_| ReduceError::InvalidShift(location))?,
+                )
+                .ok_or(ReduceError::InvalidShift(location))?)),
+            BitShiftRight => Some(Int(a
+                .checked_shr(
+                    b.try_into()
+                        .map_err(|_| ReduceError::InvalidShift(location))?,
+                )
+                .ok_or(ReduceError::InvalidShift(location))?)),
         },
 
-        (Float(float_a), Float(float_b)) => math_floats(float_a, op, float_b, location)?.map(Float),
-        (Int(int), Float(float)) => math_floats(int as f64, op, float, location)?.map(Float),
-        (Float(float), Int(int)) => math_floats(float, op, int as f64, location)?.map(Float),
+        (Float(float_a), Float(float_b)) => math_floats(float_a, op, float_b).map(Float),
+        (Int(int), Float(float)) => math_floats(int as f64, op, float).map(Float),
+        (Float(float), Int(int)) => math_floats(float, op, int as f64).map(Float),
 
         _ => None,
     })
@@ -246,7 +260,7 @@ fn compare(lhs: Literal, op: EqualityOp, rhs: Literal) -> Option<Literal> {
         NotEqual if lhs == rhs => Some(False),
         NotEqual if lhs != rhs => Some(True),
         _ => match (lhs, rhs) {
-            (Int(a), Int(b)) => Some(ordered(a as f64, op, b as f64)),
+            (Int(a), Int(b)) => Some(ordered(a, op, b)),
             (Float(a), Float(b)) => Some(ordered(a, op, b)),
             (String(a), String(b)) => Some(ordered(a, op, b)),
             _ => None,

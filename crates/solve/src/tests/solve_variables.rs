@@ -545,3 +545,17 @@ test_fail!(
          d.len()
      }",
 );
+
+test_fail!(
+    constant_arithmetic_matches_runtime,
+    "const X = 9223372036854775807 + 1;" => "integer arithmetic overflows",
+    "const X = -9223372036854775807 - 2;" => "integer arithmetic overflows",
+    "const X = 9223372036854775807 * 2;" => "integer arithmetic overflows",
+    "const X = -(-9223372036854775807 - 1);" => "integer arithmetic overflows",
+    "const X = +(-9223372036854775807 - 1);" => "integer arithmetic overflows",
+);
+
+test_fail!(
+    invalid_constant_shift,
+    "const X = 1 << 100;" => "attempted to shift by an invalid integer",
+);

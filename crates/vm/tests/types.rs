@@ -192,3 +192,21 @@ test_vm!(
     "DIFF" => Bool(false),
     "NESTED" => Bool(true),
 );
+
+test_vm!(
+    constant_semantics,
+    "const LT = 9007199254740992 < 9007199254740993;
+     const AND = false && (1 ~/ 0 == 1);
+     const OR = true || (1 ~/ 0 == 1);
+     const FLOAT = +-1.5;
+     const DIV = 1.0 / 0.0;
+     const REM = 5.5 % 2.0;
+     const IDIV = 6.5 ~/ 2.0;",
+    "LT" => Bool(true),
+    "AND" => Bool(false),
+    "OR" => Bool(true),
+    "FLOAT" => Float(-1.5),
+    "DIV" => Float(f64::INFINITY),
+    "REM" => Float(1.5),
+    "IDIV" => Float(3.0),
+);

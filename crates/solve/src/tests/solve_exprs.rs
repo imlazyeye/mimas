@@ -472,15 +472,15 @@ test_fail!(
 );
 test_fail!(giant_hex_let, "let a = 0xffffffffffffffffff;");
 test_fail!(tuple_ident_index, "let a = (0, 1); let b = a.foo;");
-test_success!(
+test_fail!(
     add_overflow,
     "const ADD_OVER: int = 9223372036854775807 + 1;"
 );
-test_success!(
+test_fail!(
     mul_overflow,
     "const MUL_OVER: int = 9223372036854775807 * 2;"
 );
-test_success!(shift_overflow, "const SHIFT_OVER: int = 1 << 100;");
+test_fail!(shift_overflow, "const SHIFT_OVER: int = 1 << 100;");
 test_success!(const_tuple, "const T: (int, int) = (1, 2);");
 test_success!(
     const_struct,

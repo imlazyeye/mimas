@@ -474,6 +474,20 @@ macro_rules! test_success {
 
 #[macro_export]
 macro_rules! test_fail {
+    ($(#[$attr:meta])* $name:ident, $($src:expr => $message:expr),+ $(,)?) => {
+        #[cfg(test)]
+        #[test]
+        $(#[$attr])*
+        fn $name() {
+            use super::solve_test_utils::*;
+            $({
+                let _t = TestResetter;
+                let source = $src;
+                let error = TEST_SESSION.with(|s| s.borrow_mut().run(source, "test")).unwrap_err();
+                pretty_assertions::assert_eq!(error.to_string(), $message, "{source}");
+            })+
+        }
+    };
     ($(#[$attr:meta])* $name:ident, $($src:expr),+ $(,)?) => {
         #[cfg(test)]
         #[test]
