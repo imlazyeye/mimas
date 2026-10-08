@@ -112,7 +112,7 @@ test_reduction!(
     "+1" => Int(1),
     "+-1" => Int(1),
     "+1.2" => Float(1.2),
-    "+-1.2" => Float(1.2),
+    "+-1.2" => Float(-1.2),
 );
 test_reduction!(
     negative,
@@ -183,3 +183,14 @@ test_reduction!(coalescence, "foo ?? bar" => None);
 test_reduction!(r#return, "return 0" => None);
 test_reduction!(unwrap, "a!" => None);
 test_reduction!(r#while, "while foo {}" => None);
+
+test_reduction!(
+    exact_integer_ordering,
+    "9007199254740992 < 9007199254740993" => parse::Literal::True,
+    "9007199254740993 > 9007199254740992" => parse::Literal::True,
+    "false && (1 ~/ 0 == 1)" => parse::Literal::False,
+    "true || (1 ~/ 0 == 1)" => parse::Literal::True,
+    "1.0 / 0.0" => parse::Literal::Float(f64::INFINITY),
+    "5.5 % 2.0" => parse::Literal::Float(1.5),
+    "6.5 ~/ 2.0" => parse::Literal::Float(3.0),
+);
