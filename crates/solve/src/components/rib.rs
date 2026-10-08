@@ -1,6 +1,6 @@
 #![allow(unused)] // temp
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use parse::{Expr, ExprKind, Ident, NodeId};
 use shared::{AdtId, Location, PactId};
@@ -9,22 +9,18 @@ use crate::components::{Ty, Vid};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Ribs {
-    inner: Vec<Rib>,
+    inner: Arc<Vec<Rib>>,
 }
 
 impl Default for Ribs {
     fn default() -> Self {
         Self {
-            inner: vec![Rib::new(RibKind::Module(AdtId::DANGLING))],
+            inner: Arc::new(vec![Rib::new(RibKind::Module(AdtId::DANGLING))]),
         }
     }
 }
 
 impl Ribs {
-    pub(crate) fn push_module(&mut self, adt: AdtId) {
-        self.inner.push(Rib::new(RibKind::Module(adt)));
-    }
-
     /// AdtId of the innermost module rib. `AdtId::DANGLING` for the implicit root rib
     /// (no `module` decl) -- treat that as "no module" for visibility purposes.
     pub(crate) fn current_module(&self) -> AdtId {
@@ -39,39 +35,41 @@ impl Ribs {
     }
 
     pub(crate) fn push_rib(&mut self, rib: Rib) {
-        self.inner.push(rib);
+        self.inner_mut().push(rib);
     }
 
     pub(crate) fn push_import(&mut self) {
-        self.inner.push(Rib::new(RibKind::Import));
+        self.inner_mut().push(Rib::new(RibKind::Import));
     }
 
     pub(crate) fn push_block(&mut self) {
-        self.inner.push(Rib::new(RibKind::Block));
+        self.inner_mut().push(Rib::new(RibKind::Block));
     }
 
     pub(crate) fn push_function(&mut self) {
-        self.inner.push(Rib::new(RibKind::Function));
+        self.inner_mut().push(Rib::new(RibKind::Function));
     }
 
     pub(crate) fn push_closure(&mut self, node_id: NodeId) {
-        self.inner.push(Rib::new(RibKind::Closure(node_id)));
+        self.inner_mut().push(Rib::new(RibKind::Closure(node_id)));
     }
 
     pub(crate) fn push_impl(&mut self, adt_id: AdtId) {
-        self.inner.push(Rib::new(RibKind::Impl(adt_id)));
+        self.inner_mut().push(Rib::new(RibKind::Impl(adt_id)));
     }
 
     pub(crate) fn pop(&mut self) -> Rib {
-        self.inner.pop().expect("tried to pop the root module rib")
+        self.inner_mut()
+            .pop()
+            .expect("tried to pop the root module rib")
     }
 
     pub(crate) fn current_mut(&mut self) -> &mut Rib {
-        self.inner.last_mut().unwrap()
+        self.inner_mut().last_mut().unwrap()
     }
 
     pub(crate) fn import_mut(&mut self) -> &mut Rib {
-        self.inner
+        self.inner_mut()
             .iter_mut()
             .rev()
             .find(|rib| rib.kind == RibKind::Import)
@@ -80,7 +78,7 @@ impl Ribs {
 
     /// The active module scope that holds hoisted items.
     pub(crate) fn module_mut(&mut self) -> &mut Rib {
-        self.inner
+        self.inner_mut()
             .iter_mut()
             .rev()
             .find(|rib| matches!(rib.kind, RibKind::Module(_)))
@@ -164,6 +162,10 @@ impl Ribs {
         let block = self.pop();
         assert_eq!(block.kind, RibKind::Block);
         block
+    }
+
+    fn inner_mut(&mut self) -> &mut Vec<Rib> {
+        Arc::make_mut(&mut self.inner)
     }
 }
 

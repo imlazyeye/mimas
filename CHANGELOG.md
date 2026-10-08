@@ -26,6 +26,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Constants can use forward references in arithmetic, including in local blocks and across modules, even through long dependency chains.
 - Pact names now follow module scope and visibility. A private pact in another module could be found by its bare name without an import.
 - Using a pact name as a value, including inside parentheses or as an argument, is now a compile error instead of crashing the compiler.
 - Struct patterns named through a module path, such as `shapes::Point { x }`, now resolve the struct and count toward match exhaustiveness. The path also checks the struct's visibility.
