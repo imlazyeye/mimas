@@ -28,6 +28,21 @@ pub enum Val<'gc> {
 
 impl<'gc> PartialEq for Val<'gc> {
     fn eq(&self, other: &Self) -> bool {
+        self.equals(*other, true)
+    }
+}
+
+impl<'gc> Val<'gc> {
+    /// Compare contents, optionally accepting container identity without comparing its fields.
+    pub fn equals(self, other: Self, allow_identity: bool) -> bool {
+        fn fields<'gc>(left: &[Val<'gc>], right: &[Val<'gc>], allow_identity: bool) -> bool {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(&a, &b)| a.equals(b, allow_identity))
+        }
+
         match (self, other) {
             (Val::Null, Val::Null) => true,
             (Val::Bool(a), Val::Bool(b)) => a == b,
@@ -36,13 +51,24 @@ impl<'gc> PartialEq for Val<'gc> {
             (Val::Fn(a), Val::Fn(b)) => a == b,
             (Val::Str(a), Val::Str(b)) => a == b,
             (Val::Array(a), Val::Array(b)) => {
-                Gc::ptr_eq(a.0, b.0) || *a.0.borrow() == *b.0.borrow()
+                (allow_identity && Gc::ptr_eq(a.0, b.0))
+                    || fields(&a.0.borrow(), &b.0.borrow(), allow_identity)
             }
-            (Val::Dict(a), Val::Dict(b)) => Gc::ptr_eq(a.0, b.0) || *a.0.borrow() == *b.0.borrow(),
-            (Val::Instance(a), Val::Instance(b)) => {
-                Gc::ptr_eq(a.0, b.0) || {
+            (Val::Dict(a), Val::Dict(b)) => {
+                (allow_identity && Gc::ptr_eq(a.0, b.0)) || {
                     let (a, b) = (a.0.borrow(), b.0.borrow());
-                    a.struct_id == b.struct_id && a.fields.as_slice() == b.fields.as_slice()
+                    a.len() == b.len()
+                        && a.iter().all(|(k, &v)| {
+                            b.get(k)
+                                .is_some_and(|&other| v.equals(other, allow_identity))
+                        })
+                }
+            }
+            (Val::Instance(a), Val::Instance(b)) => {
+                (allow_identity && Gc::ptr_eq(a.0, b.0)) || {
+                    let (a, b) = (a.0.borrow(), b.0.borrow());
+                    a.struct_id == b.struct_id
+                        && fields(a.fields.as_slice(), b.fields.as_slice(), allow_identity)
                 }
             }
             (Val::Closure(a), Val::Closure(b)) => Gc::ptr_eq(a.0, b.0),
@@ -50,9 +76,6 @@ impl<'gc> PartialEq for Val<'gc> {
             _ => false,
         }
     }
-}
-
-impl<'gc> Val<'gc> {
     #[inline]
     pub fn as_int(self) -> Option<i64> {
         if let Val::Int(n) = self {
@@ -519,6 +542,7 @@ pub fn bin<'gc>(this: Val<'gc>, ctx: Ctx<'gc>, other: Val<'gc>, op: BinOp) -> Rt
     }
 
     Ok(match (op, this, other) {
+        (BinOp::StructuralEqual, left, right) => Val::Bool(left.equals(right, false)),
         (BinOp::Add, Val::Str(a), Val::Str(b)) => {
             let combined = format!("{}{}", a.as_str(), b.as_str());
             Val::Str(ctx.intern(&combined))

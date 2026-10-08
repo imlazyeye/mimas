@@ -27,6 +27,42 @@ test_run!(
 );
 
 test_run!(
+    push_on_const_leaves_const,
+    "const NUMS = [1, 2, 3];
+     fn pushed() -> int {
+         NUMS.push(4);
+         NUMS.len() + NUMS[2]
+     }",
+    "pushed()" => "6",
+    "NUMS.contains(2)" => "true",
+    "NUMS.contains(5)" => "false",
+);
+
+test_run!(
+    push_while_looping_over_const,
+    "const NUMS = [1, 2, 3];
+     fn looped() -> int {
+         let seen = 0;
+         for value in NUMS {
+             NUMS.push(value);
+             seen += 1;
+         }
+         seen + NUMS.len()
+     }",
+    "looped()" => "6",
+);
+
+test_run!(
+    push_on_const_row_leaves_const,
+    "const GRID = [[1, 2], [3, 4]];
+     fn pushed() -> int {
+         GRID[0].push(5);
+         GRID[0].len() + GRID[0][1]
+     }",
+    "pushed()" => "4",
+);
+
+test_run!(
     push_returns_unit,
     "let a = [1];
      let r = a.push(2);",

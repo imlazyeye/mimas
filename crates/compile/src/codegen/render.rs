@@ -182,6 +182,12 @@ impl std::fmt::Display for Op {
                 write!(f, "{}{}{}", OpName("load_body"), dst, Body(*body))
             }
 
+            Op::LoadShared { dst, slot } => {
+                write!(f, "{}{}#{slot}", OpName("load_shared"), dst)
+            }
+
+            Op::DeepClone { dst, src } => write!(f, "{}{}{}", OpName("deep_clone"), dst, src),
+
             Op::Call { dst, callee, args } => {
                 write!(f, "{}{}{}", OpName("call"), dst, callee)?;
                 for arg in args {

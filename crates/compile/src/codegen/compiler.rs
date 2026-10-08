@@ -835,6 +835,7 @@ impl Compiler {
             strs: ir.str_interner.clone(),
             bytes: self.bytes.clone().finish(),
             sources: ir.resolutions.sources.clone(),
+            shared: ir.shared.clone(),
         }
     }
 }

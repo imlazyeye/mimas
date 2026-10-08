@@ -19,6 +19,33 @@ fn run_then_yields_null_for_a_script() {
 }
 
 #[test]
+fn const_cache_reloads() {
+    let mut vm = Vm::new();
+    let library = vm.install_library(|_| {});
+    for value in [2, 5] {
+        let source = format!(
+            "const TABLE = [0, {value}];
+             fn second() -> int {{
+                 TABLE[1]
+             }}"
+        );
+        let modules = solve::Modules::from_files([("test", source.as_str())], &library);
+        assert!(modules.errors.is_empty(), "{:?}", modules.errors);
+        let mut ir = compile::Ir::new(
+            solve::Resolutions::from(modules.solver.clone()),
+            Default::default(),
+        );
+        ir.lower(modules.asts.iter().flat_map(parse::Ast::stmts));
+        let program = compile::Compiler::new().compile(&mut ir);
+        vm.set_fuel(Some(0));
+        vm.load_program(program);
+        assert_eq!(vm.fuel(), Some(0));
+        vm.set_fuel(None);
+        assert_eq!(vm.call::<i64>("second", ()).unwrap(), value);
+    }
+}
+
+#[test]
 fn interrupt_faults_and_leaves_the_vm_usable() {
     let mut vm = Vm::compile(
         "fn f() -> int { 7 }

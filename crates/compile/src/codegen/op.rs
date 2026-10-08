@@ -33,6 +33,8 @@ macro_rules! for_each_op {
             SetFieldScalar [ (receiver, Reg, reg) (slot, u32, u32) (value, Reg, reg) ];
             LoadBody     [ (dst, Reg, reg) (body, BodyId, u32) ];
             LoadConst    [ (dst, Reg, reg) (constant, Constant, konst) ];
+            LoadShared   [ (dst, Reg, reg) (slot, u32, u32) ];
+            DeepClone    [ (dst, Reg, reg) (src, Reg, reg) ];
 
             // -- Control Flow -- //
             Jump         [ (target, BlockTarget, jump) ];
@@ -536,6 +538,14 @@ impl Op {
             Inst::RefBody(body) => Op::LoadBody {
                 dst: ctx.reg(),
                 body: *body,
+            },
+            Inst::Shared(slot) => Op::LoadShared {
+                dst: ctx.reg(),
+                slot: *slot,
+            },
+            Inst::DeepClone(value) => Op::DeepClone {
+                dst: ctx.reg(),
+                src: ctx.i2r(value),
             },
             Inst::MakeClosure { body, captures } => Op::NewClosure {
                 dst: ctx.reg(),

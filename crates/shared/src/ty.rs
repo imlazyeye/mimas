@@ -210,6 +210,15 @@ impl Ty {
         matches!(self, Ty::Float | Ty::Int)
     }
 
+    /// Whether this is a number, bool or string, optionally wrapped in `?`.
+    pub fn is_plain(&self) -> bool {
+        match self {
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Str => true,
+            Ty::Option(inner) => inner.is_plain(),
+            _ => false,
+        }
+    }
+
     /// Whether a pact's `Self` appears anywhere in this type, however deeply nested.
     pub fn contains_skolem(&self) -> bool {
         match self {

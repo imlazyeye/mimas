@@ -118,6 +118,7 @@ pub(crate) fn uses(inst: &Inst) -> Vec<InstId> {
         Inst::Push { array, value } => vec![*array, *value],
         Inst::Insert { value, .. } => vec![*value],
         Inst::Len(v)
+        | Inst::DeepClone(v)
         | Inst::ToFloat(v)
         | Inst::Sqrt(v)
         | Inst::Unwrap(v)

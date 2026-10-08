@@ -299,3 +299,26 @@ fn each_impls_are_fixed_at_compile() {
     assert_eq!(echo(&mut session, "4 in Shape::*::sides()"), "true: bool");
     assert_eq!(echo(&mut session, "old()"), "[4]: [int]");
 }
+
+#[test]
+fn const_read_in_place_carries() {
+    let mut session = session(&[]);
+    quiet(&mut session, "const TABLE = [1, 2, 3];");
+    assert_eq!(echo(&mut session, "TABLE[1]"), "2: int");
+    quiet(&mut session, "const OTHER = [4, 5, 6];");
+    assert_eq!(echo(&mut session, "TABLE[1] + OTHER[1]"), "7: int");
+}
+
+#[test]
+fn const_read_in_place_after_fault() {
+    let mut session = session(&[]);
+    quiet(&mut session, "let kept = [|| 0];");
+    let faulted = session.run(
+        "const BAD = [7, 8];
+         kept[0] = || BAD[0];
+         BAD[5]",
+    );
+    assert!(faulted.is_err());
+    quiet(&mut session, "const GOOD = [1, 2];");
+    assert_eq!(echo(&mut session, "GOOD[0] + kept[0]()"), "8: int");
+}

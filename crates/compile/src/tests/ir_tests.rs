@@ -145,6 +145,165 @@ fn loop_invariant_arith_const_becomes_immediate() {
     );
 }
 
+#[test]
+fn fieldless_eq_tests_the_layout() {
+    let ops = compile_ops(
+        "enum Foo {
+             Bar,
+             Baz,
+         }
+         struct Unit;
+         const BAR = Foo::Bar;
+         const ALIAS = (BAR);
+         fn compare(foo: Foo, maybe: Foo?, unit: Unit?) -> [bool] {
+             [
+                 foo == Foo::Bar,
+                 Foo::Baz != foo,
+                 foo != BAR,
+                 ALIAS == foo,
+                 maybe == Foo::Baz,
+                 BAR != maybe,
+                 unit == Unit,
+                 Unit != unit,
+             ]
+         }",
+    );
+    let layout_tests = ops
+        .iter()
+        .filter(|op| matches!(op, Op::IsInstance { .. }))
+        .count();
+    assert_eq!(
+        layout_tests, 8,
+        "each comparison should be one is_instance:\n{ops:#?}"
+    );
+    assert!(
+        !ops.iter()
+            .any(|op| matches!(op, Op::NewInstance { .. } | Op::Bin { .. })),
+        "no instance should be built or compared generically:\n{ops:#?}"
+    );
+}
+
+#[test]
+fn const_reads_need_no_initializers() {
+    let ops = compile_ops(
+        "struct Point {
+             x: int,
+             y: int,
+         }
+         const TABLE = [1, 2, 3];
+         const ORIGIN = Point { x = 3, y = 4 };
+         fn read(i: int, other: [int]) -> int {
+             let total = TABLE[i] + ORIGIN.x;
+             for value in TABLE {
+                 total += value;
+             }
+             if i in TABLE && TABLE != other {
+                 total += 1;
+             }
+             total
+         }",
+    );
+    let count = |pred: fn(&Op) -> bool| ops.iter().filter(|op| pred(op)).count();
+    assert_eq!(
+        count(|op| matches!(op, Op::LoadShared { .. })),
+        5,
+        "each read should load the shared value:\n{ops:#?}"
+    );
+    let slots: std::collections::HashSet<_> = ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::LoadShared { slot, .. } => Some(*slot),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slots.len(), 2, "repeated reads should use the same slot");
+    assert_eq!(
+        count(|op| matches!(
+            op,
+            Op::LoadConst {
+                constant: crate::Constant::Array(_) | crate::Constant::Instance(_, _),
+                ..
+            } | Op::NewInstance { .. }
+        )),
+        0,
+        "shared values should need no initializer bytecode:\n{ops:#?}"
+    );
+}
+
+#[test]
+fn const_chain_reads_without_cloning() {
+    let ops = compile_ops(
+        "struct Point {
+             x: int,
+             y: int,
+         }
+         enum Shape {
+             Dot,
+             Circle(int),
+         }
+         const DIRS = [(0, 1), (1, 0)];
+         const POINTS = [Point { x = 1, y = 2 }, Point { x = 3, y = 4 }];
+         const SHAPES = [Shape::Dot, Shape::Circle(2)];
+         fn read(i: int) -> int {
+             if SHAPES[i] == Shape::Dot {
+                 return 0;
+             }
+             DIRS[i].0 + POINTS[i].x
+         }",
+    );
+    let count = |pred: fn(&Op) -> bool| ops.iter().filter(|op| pred(op)).count();
+    assert_eq!(
+        count(|op| matches!(op, Op::LoadShared { .. })),
+        3,
+        "each chain should start from the shared value:\n{ops:#?}"
+    );
+    assert_eq!(
+        count(|op| matches!(op, Op::DeepClone { .. })),
+        0,
+        "a chain that ends in a plain value keeps nothing to clone:\n{ops:#?}"
+    );
+}
+
+#[test]
+fn shared_equality_is_structural() {
+    let ops = compile_ops(
+        "const GRID = [[0 / 0]];
+         fn compare(other: [float]) -> [bool] {
+             [
+                 GRID[0] == GRID[0],
+                 GRID[0] != other,
+                 other == other,
+                 other != other,
+             ]
+         }",
+    );
+    assert_eq!(
+        ops.iter()
+            .filter(|op| matches!(
+                op,
+                Op::Bin {
+                    op: crate::BinOp::StructuralEqual,
+                    ..
+                }
+            ))
+            .count(),
+        2,
+    );
+    assert_eq!(
+        ops.iter()
+            .filter(|op| matches!(
+                op,
+                Op::Bin {
+                    op: crate::BinOp::Identity | crate::BinOp::NotEqual,
+                    ..
+                }
+            ))
+            .count(),
+        2,
+    );
+    assert!(!ops.iter().any(|op| matches!(op, Op::DeepClone { .. })));
+}
+
 // const-fold correctness: each arithmetic/comparison/bit operator must fold to the right
 // constant. these pin `BinOp::eval_int` / `eval_float` -- a result-only vm test can't, since
 // the runtime has its own (separately-tested) arithmetic and would compute the right answer

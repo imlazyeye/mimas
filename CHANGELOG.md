@@ -18,6 +18,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Changed
 
+- Reading a constant's contents reuses a value built when the program loads instead of building it at every read. Binding, passing or storing it still gives its own value, and changing that value never changes the constant.
 - Scripts run faster. mimas's benchmarks take 16% to 41% less time, with the biggest gains on function calls, struct field access, array reads and float math.
 - Embedding mimas pulls in fewer crates: 98 instead of 101 with the default features, and 60 with only `export-api`.
 - `print` and `dbg` now run through an `Output` fixture so hosts can redirect them.

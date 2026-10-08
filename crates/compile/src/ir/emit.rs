@@ -1,19 +1,19 @@
 use crate::{
     OperandKind,
-    ir::{BinOp, BlockId, BodyId, Constant, FormatPart, InstId, Ir, LoopCtx, Place},
+    ir::{BinOp, BlockId, BodyId, Constant, FormatPart, Inst, InstId, Ir, LoopCtx, Place, UnaryOp},
 };
 use api::NativeId;
 use parse::{
     Absolve, Access, AccessKind, AssignmentOp, Block, Break, Call, Closure, Coalescence, Collect,
-    Continue, Equality, Evaluation, Expr, ExprKind, FString, FStringPart, For, Grouping, Ident, If,
-    In, Literal, Logical, Loop, Match, MatchCase, NodeId, Raise, Range, Return, Stmt, StmtKind,
-    Unary, Unwrap, While,
+    Continue, Equality, EqualityOp, Evaluation, Expr, ExprKind, FString, FStringPart, For,
+    Grouping, Ident, If, In, Literal, Logical, Loop, Match, MatchCase, NodeId, Raise, Range,
+    Return, Stmt, StmtKind, Unary, Unwrap, While,
     components::{Binding, Pat, PatKind},
 };
 use shared::{AdtId, Located, PactId};
 use solve::{
     ResolvedAdt, ResolvedDeclKind,
-    components::{DecId, FnHeader, Ty},
+    components::{ConstValue, DecId, FnHeader, Ty},
 };
 
 // per-kind worker -- mirrors `Solve`. source location is ambient on `Ir.current_loc`,
@@ -221,7 +221,7 @@ impl Emit for Access {
                 let recv = left.id();
                 let is_struct = kind == AccessKind::Direct
                     && matches!(ir.resolutions.node_tys.get(&recv), Some(Ty::Adt(_)));
-                let left = left.lower(ir)?;
+                let left = lower_shared(ir, left)?;
                 let slot = match right.kind() {
                     ExprKind::Literal(Literal::Int(i)) => u32::try_from(*i).unwrap(),
                     ExprKind::Ident(ident) => {
@@ -229,7 +229,9 @@ impl Emit for Access {
                     }
                     _ => unreachable!(),
                 };
-                Some(ir.current().get_field(left, slot, kind, is_struct))
+                let value = ir.current().get_field(left, slot, kind, is_struct);
+                let plain = ir.resolutions.node_tys.get(&id).is_some_and(Ty::is_plain);
+                Some(owned(ir, value, plain))
             }
             Access::DoubleColon { .. } => {
                 let dec = ir.node_dec(id);
@@ -271,9 +273,11 @@ impl Emit for Access {
                 };
                 let is_array = kind == AccessKind::Direct
                     && matches!(ir.resolutions.node_tys.get(&left.id()), Some(Ty::Array(_)));
-                let left = left.lower(ir)?;
+                let left = lower_shared(ir, left)?;
                 let key = key.lower(ir)?;
-                Some(ir.current().get_index(left, key, kind, is_array))
+                let value = ir.current().get_index(left, key, kind, is_array);
+                let plain = ir.resolutions.node_tys.get(&id).is_some_and(Ty::is_plain);
+                Some(owned(ir, value, plain))
             }
         }
     }
@@ -535,7 +539,18 @@ impl Emit for Call {
                 let native_id = native;
                 let body = (native_id.is_none()).then(|| ir.item_body_for(dec));
                 let defaults = dec_defaults(ir, Some(dec));
-                let receiver = left.lower(ir)?;
+                // `len` and `contains` only read their receiver
+                let reads = native_id.is_some_and(|id| {
+                    matches!(
+                        ir.intrinsics.get(&id),
+                        Some(api::Intrinsic::Len | api::Intrinsic::In)
+                    )
+                });
+                let receiver = if reads {
+                    lower_shared(ir, left)
+                } else {
+                    left.lower(ir)
+                }?;
 
                 let do_call = |ir: &mut Ir, receiver: InstId| -> Option<InstId> {
                     let receiver = takes_self.then_some(receiver);
@@ -678,6 +693,53 @@ impl Emit for Continue {
 
 impl Emit for Equality {
     fn emit(&self, id: NodeId, ir: &mut Ir) -> Option<InstId> {
+        fn fieldless_layout(ir: &Ir, expr: &Expr) -> Option<AdtId> {
+            match expr.kind() {
+                ExprKind::Grouping(grouping) => fieldless_layout(ir, &grouping.inner),
+                ExprKind::Ident(_) | ExprKind::Access(Access::DoubleColon { .. }) => {
+                    match &ir.resolutions.decs[ir.node_dec(expr.id())].kind {
+                        ResolvedDeclKind::Variant { layout: adt, .. }
+                        | ResolvedDeclKind::Adt(adt) => {
+                            ir.resolutions.adts[*adt].fields.is_empty().then_some(*adt)
+                        }
+                        ResolvedDeclKind::Constant(ConstValue::Expr(value)) => {
+                            fieldless_layout(ir, value)
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        // comparing to a value with no fields only needs the other side's layout
+        if matches!(self.op, EqualityOp::Equal | EqualityOp::NotEqual) {
+            let fieldless = fieldless_layout(ir, &self.right)
+                .map(|layout| (&self.left, layout))
+                .or_else(|| fieldless_layout(ir, &self.left).map(|layout| (&self.right, layout)));
+            if let Some((other, layout)) = fieldless {
+                let other = lower_shared(ir, other)?;
+                let same = ir.current().is_instance(other, layout);
+                return Some(match self.op {
+                    EqualityOp::Equal => same,
+                    _ => ir.current().unary(UnaryOp::Not, same),
+                });
+            }
+
+            let kind = num_kind(ir, id, &self.left, &self.right);
+            let left = lower_shared(ir, &self.left)?;
+            let right = lower_shared(ir, &self.right)?;
+            // a shared constant still compares as two independent values (including any NaNs)
+            if kind == OperandKind::Generic && (is_shared(ir, left) || is_shared(ir, right)) {
+                let same = ir.current().bin(BinOp::StructuralEqual, left, right, kind);
+                return Some(match self.op {
+                    EqualityOp::Equal => same,
+                    _ => ir.current().unary(UnaryOp::Not, same),
+                });
+            }
+            return Some(ir.current().bin(self.op.into(), left, right, kind));
+        }
+
         emit_bin_op(ir, id, &self.left, self.op, &self.right)
     }
 }
@@ -756,7 +818,7 @@ impl Emit for For {
                     ExprKind::Literal(Literal::String(_)) => false,
                     _ => ir.resolutions.node_tys[&self.iterator.id()] == Ty::Int,
                 };
-                let target = self.iterator.lower(ir)?;
+                let target = lower_shared(ir, &self.iterator)?;
                 let zero = ir.current().constant(0);
                 if int_iter {
                     let var = match ir.try_node_dec(self.binding.id()) {
@@ -801,6 +863,11 @@ impl Emit for For {
                 Some(Ty::Array(_))
             );
             let elem = ir.current().get_index(seq, i, AccessKind::Direct, is_array);
+            let plain = matches!(
+                ir.resolutions.node_tys.get(&self.iterator.id()),
+                Some(Ty::Array(element) | Ty::Dict(element)) if element.is_plain()
+            );
+            let elem = owned(ir, elem, plain);
             ir.pattern(&self.binding, Some(elem))?;
         }
 
@@ -950,7 +1017,7 @@ impl Emit for If {
 impl Emit for In {
     fn emit(&self, _id: NodeId, ir: &mut Ir) -> Option<InstId> {
         let needle = self.left.lower(ir)?;
-        let target = self.right.lower(ir)?;
+        let target = lower_shared(ir, &self.right)?;
         Some(ir.current().check_in(needle, target, self.condition))
     }
 }
@@ -1490,6 +1557,52 @@ fn adt_value(ir: &mut Ir, dec: DecId, adt: AdtId) -> InstId {
     }
     let body = ir.item_body_for(dec);
     ir.current().ref_body(body)
+}
+
+// mutable parts taken out of a shared constant need their own copy
+fn owned(ir: &mut Ir, part: InstId, plain: bool) -> InstId {
+    if plain || !is_shared(ir, part) {
+        part
+    } else {
+        ir.current().deep_clone(part)
+    }
+}
+
+fn is_shared(ir: &Ir, value: InstId) -> bool {
+    match ir.current_body().instructions[value] {
+        Inst::Shared(_) => true,
+        Inst::GetIndex { set: from, .. } | Inst::GetField { src: from, .. } => is_shared(ir, from),
+        _ => false,
+    }
+}
+
+// this use only inspects the value
+fn lower_shared(ir: &mut Ir, expr: &Expr) -> Option<InstId> {
+    match expr.kind() {
+        ExprKind::Grouping(grouping) => lower_shared(ir, &grouping.inner),
+        ExprKind::Ident(_) | ExprKind::Access(Access::DoubleColon { .. }) => {
+            let dec = ir.node_dec(expr.id());
+            match &ir.resolutions.decs[dec].kind {
+                // a folded scalar or string has nothing to share
+                ResolvedDeclKind::Constant(
+                    ConstValue::Expr(_)
+                    | ConstValue::Literal(Literal::Array(_) | Literal::Tuple(_)),
+                ) => {
+                    let slot = ir.shared_for(dec);
+                    Some(ir.current().shared(slot))
+                }
+                _ => expr.lower(ir),
+            }
+        }
+        // `owned` added a clone for a part that this use only inspects
+        _ => {
+            let value = expr.lower(ir)?;
+            Some(match ir.current_body().instructions[value] {
+                Inst::DeepClone(part) => part,
+                _ => value,
+            })
+        }
+    }
 }
 
 // null when `receiver` is, and what `then` gives when it isn't

@@ -619,9 +619,12 @@ test_fail!(
     "const X = 9223372036854775807 * 2;" => "integer arithmetic overflows",
     "const X = -(-9223372036854775807 - 1);" => "integer arithmetic overflows",
     "const X = +(-9223372036854775807 - 1);" => "integer arithmetic overflows",
+    "struct Sample { value: int }
+     const SAMPLE = Sample { value = 9223372036854775807 + 1 };" => "integer arithmetic overflows",
 );
 
 test_fail!(
     invalid_constant_shift,
     "const X = 1 << 100;" => "attempted to shift by an invalid integer",
+    "const LOOKUP = ~{ value = 1 >> -1 };" => "attempted to shift by an invalid integer",
 );

@@ -20,6 +20,7 @@ pub struct Program {
     pub bytes: Vec<u8>,
     pub root: Module,
     pub sources: Sources,
+    pub shared: Vec<Constant>,
 }
 
 /// Everything a script declares, in declaration order: the fns, consts, types, and modules of
@@ -324,7 +325,7 @@ impl Decode for BinOp {
     fn decode(decoder: &mut Decoder) -> Self {
         let b = decoder.u8();
         debug_assert!(
-            (b as usize) <= BinOp::BitShiftRight as usize,
+            (b as usize) <= BinOp::StructuralEqual as usize,
             "invalid BinOp byte {b}: bytecode desync"
         );
         unsafe { std::mem::transmute::<u8, BinOp>(b) }
@@ -348,7 +349,7 @@ impl Decode for Constant {
     fn decode(decoder: &mut Decoder) -> Self {
         let b = decoder.u8();
         debug_assert!(
-            (b as usize) <= ConstantCode::Null as usize,
+            (b as usize) <= ConstantCode::Instance as usize,
             "invalid ConstantCode byte {b}: bytecode desync"
         );
         let code = unsafe { std::mem::transmute::<u8, ConstantCode>(b) };
@@ -366,6 +367,19 @@ impl Decode for Constant {
                 Constant::Array(items)
             }
             ConstantCode::Null => Constant::Null,
+            ConstantCode::Dict => {
+                let len = decoder.u32() as usize;
+                Constant::Dict(
+                    (0..len)
+                        .map(|_| (StrId::from(decoder.u32()), Constant::decode(decoder)))
+                        .collect(),
+                )
+            }
+            ConstantCode::Instance => {
+                let adt = AdtId::from(decoder.u32());
+                let len = decoder.u32() as usize;
+                Constant::Instance(adt, (0..len).map(|_| Constant::decode(decoder)).collect())
+            }
         }
     }
 }
