@@ -1,0 +1,96 @@
+module @;
+
+use std::math::Vec2;
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+struct Dart {
+    pos: Vec2,
+    vel: Vec2,
+    life: int,
+    pierce: int,
+    struck: [int],
+}
+
+pub struct Flurry {
+    cool: int,
+    side: float,
+    darts: [Dart],
+}
+
+impl Flurry {
+    const COOLDOWN = 8;
+    const DAMAGE = 16.5;
+    const PIERCE = 4;
+    const SPEED = 5.0;
+    const LIFE = 40;
+    const SIZE = 3.0;
+    const SPREAD = 3.0;
+}
+
+impl Weapon for Flurry {
+    const NAME = "FLURRY";
+    const ICON = Sprite::Flurry;
+    const EVOLVED = true;
+
+    pub fn new() -> Self {
+        Self { cool = 0, side = 1.0, darts = [] }
+    }
+
+    fn level(self) -> int {
+        1
+    }
+
+    fn level_up(self) {}
+
+    fn maxed(self) -> bool {
+        true
+    }
+
+    fn perk(self, level: int) -> str {
+        "A STREAM OF KNIVES THAT NEVER STOPS"
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.cool <= 0 {
+            self.cool = wait(Self::COOLDOWN, p);
+            self.side = -self.side;
+            self.darts.push(Dart {
+                pos = p.pos.add(p.facing.perp().scale(self.side * Self::SPREAD)),
+                vel = p.facing.scale(Self::SPEED),
+                life = Self::LIFE,
+                pierce = Self::PIERCE,
+                struck = [],
+            });
+        }
+
+        let dmg = Self::DAMAGE * p.stats.might;
+        self.darts = for dart in self.darts {
+            let from = dart.pos;
+            dart.life -= 1;
+            dart.pos = from.add(dart.vel);
+            for foe in horde.touching(dart.pos, Self::SIZE * p.stats.area) {
+                if dart.pierce > 0 && foe.id !in dart.struck {
+                    dart.struck.push(foe.id);
+                    dart.pierce -= 1;
+                    horde.hurt(foe, dmg, from, 2.0);
+                }
+            }
+            if dart.life > 0 && dart.pierce > 0 collect dart;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for dart in self.darts {
+            let (x, y) = (dart.vel.x, dart.vel.y);
+            let frame = if x == 0.0 { 0 } else if y == 0.0 { 1 } else { 2 };
+            Sprite::Knife.draw(dart.pos, p.stats.area, frame, x < 0.0, y > 0.0);
+        }
+    }
+}

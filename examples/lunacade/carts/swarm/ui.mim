@@ -7,6 +7,7 @@ use offers::Offer;
 use player::PASSIVES;
 use run::Run;
 use sprites::Sprite;
+use weapons::Weapon;
 
 const LOGO = [
     ".#### #...# .###. ####. #...#",
@@ -15,6 +16,10 @@ const LOGO = [
     "....# #.#.# #...# #..#. #...#",
     "####. .#.#. #...# #...# #...#",
 ];
+
+// the weapon menu's grid, which is this big however many weapons there are to put in it
+pub const ARSENAL_COLS = 6;
+pub const ARSENAL_ROWS = 2;
 
 // the clock as minutes and seconds
 pub fn clock(t: int) -> str {
@@ -36,7 +41,9 @@ pub fn hud(run: Run) {
         let weapon = run.weapons[slot];
         let x = 2 + slot * 20;
         gfx::sprite(weapon.ICON.id(), ivec2(x, 11));
-        label(f"{weapon.level()}", ivec2(x + 9, 14), Color::Yellow);
+        if !weapon.EVOLVED {
+            label(f"{weapon.level()}", ivec2(x + 9, 14), Color::Yellow);
+        }
     }
     let shown = 0;
     for passive in PASSIVES {
@@ -58,7 +65,7 @@ pub fn hud(run: Run) {
     }
 }
 
-pub fn title(t: int, best: int, chord: int) {
+pub fn title(t: int, best: int) {
     ground::draw(ivec2(100000 + t ~/ 2, 100000));
     gfx::camera(IVec2::zero());
     // the swarm closes in on the survivor, round and round
@@ -72,7 +79,7 @@ pub fn title(t: int, best: int, chord: int) {
     }
     gfx::sprite(Sprite::Player.id() + (t ~/ 8) % 2, ivec2(124, 96));
     logo(ivec2(40, 20));
-    center("SURVIVE TEN MINUTES", 58, Color::White);
+    center("A LICH COMES EVERY TEN MINUTES", 58, Color::White);
     if (t ~/ 30) % 2 == 0 {
         center("PRESS START", 112, Color::Yellow);
     }
@@ -80,10 +87,29 @@ pub fn title(t: int, best: int, chord: int) {
     if best > 0 {
         center(f"BEST {clock(best)}", 134, Color::Cyan);
     }
-    // the stress start fills in as X and Y are held together
-    if chord > 0 {
-        gfx::fill_rect(ivec2(88, 106), ivec2(chord * 80 ~/ 30, 2), Color::Orange);
+}
+
+pub fn arsenal(weapons: [Weapon], cursor: int) {
+    panel(ivec2(24, 8), ivec2(208, 124));
+    center("CHOOSE YOUR WEAPON", 14, Color::Yellow);
+    let size = ivec2(30, 36);
+    for slot in ARSENAL_COLS * ARSENAL_ROWS {
+        let corner = ivec2(33 + slot % ARSENAL_COLS * 32, 26 + slot ~/ ARSENAL_COLS * 38);
+        if slot == cursor {
+            gfx::fill_rect(corner, size, Color::Blue);
+        }
+        gfx::rect(corner, size, if slot == cursor Color::White else Color::Slate);
+        if slot < weapons.len() {
+            let weapon = weapons[slot];
+            let name = weapon.NAME;
+            gfx::sprite(weapon.ICON.id(), corner.add(ivec2(7, 4)), false, false, 2.0);
+            gfx::text(name, corner.add(ivec2(15 - gfx::text_width(name) ~/ 2, 25)), Color::White);
+        }
     }
+    if cursor < weapons.len() {
+        center(weapons[cursor].perk(1), 107, Color::Silver);
+    }
+    center("D-PAD CHOOSE    A TAKE", 120, Color::Slate);
 }
 
 pub fn level_up(run: Run, offers: [Offer], cursor: int) {
@@ -115,12 +141,13 @@ pub fn paused(run: Run) {
         let weapon = run.weapons[slot];
         let y = 58 + slot * 11;
         gfx::sprite(weapon.ICON.id(), ivec2(78, y - 1));
-        gfx::text(f"{weapon.NAME} LV {weapon.level()}", ivec2(90, y + 1), Color::White);
+        let name = if weapon.EVOLVED weapon.NAME else f"{weapon.NAME} LV {weapon.level()}";
+        gfx::text(name, ivec2(90, y + 1), Color::White);
     }
     center("ANY BUTTON RESUMES", 104, Color::Slate);
 }
 
-// the dead and won screens, which only differ in the words
+// the screen a run ends on
 pub fn finished(heading: str, color: Color, run: Run, ready: bool) {
     panel(ivec2(48, 32), ivec2(160, 76));
     center(heading, 40, color);

@@ -1,15 +1,18 @@
 module horde;
 
-use std::math::Vec2;
+use std::math::{TAU, Vec2};
 
 use enemies::{Enemy, EnemyKind};
 use grid::{Grid, SIDE};
+
+const MOST_SPLITS = 8;
 
 // what a dead enemy leaves behind, for the run to turn into gems and sparks
 pub struct Drop {
     pub pos: Vec2,
     pub worth: int,
     pub boss: bool,
+    pub elite: bool,
 }
 
 // every enemy alive, and the grid that finds the ones near a spot
@@ -20,13 +23,14 @@ pub struct Horde {
     pub kills: int,
     pub issued: int,
     pub boss: Enemy?,
+    splits: int,
     reach: float,
 }
 
 impl Horde {
     pub fn new() -> Self {
         Self {
-            foes = [], grid = Grid::new(), drops = [], kills = 0, issued = 0, boss = null,
+            foes = [], grid = Grid::new(), drops = [], kills = 0, issued = 0, boss = null, splits = 0,
             // Derive the broad-phase padding once; a new enemy kind can have a wider reach.
             reach = EnemyKind::*::REACH.max() ?? 0.0,
         }
@@ -46,6 +50,7 @@ impl Horde {
     // moves everyone, drops the dead, and files the rest in a grid around the player
     pub fn update(self, center: Vec2) {
         self.grid.reset(center);
+        self.splits = 0;
         let foes = self.foes;
         let kept = 0;
         // Stable compaction preserves spawn order (and collision tie-breaking) without
@@ -133,7 +138,17 @@ impl Horde {
         foe.knock = foe.knock.add(away.scale(heft / away.length().max(1.0)));
         if foe.hp <= 0.0 {
             self.kills += 1;
-            self.drops.push(Drop { pos = foe.pos, worth = foe.kind.XP, boss = foe.kind.boss() });
+            let kind = foe.kind;
+            self.drops.push(Drop {
+                pos = foe.pos, worth = kind.XP, boss = kind.boss(), elite = kind.elite(),
+            });
+            let tough = foe.max_hp / kind.HP;
+            for child in kind.split() {
+                if self.splits >= MOST_SPLITS break;
+                self.splits += 1;
+                let born = self.spawn(child, foe.pos, tough);
+                born.knock = Vec2::from_angle(float::random(TAU)).scale(2.0);
+            }
         }
     }
 

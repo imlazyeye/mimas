@@ -1,15 +1,21 @@
 module sprites;
 
-// where each picture is on the sheet. the player and the enemies have a second frame right after
-// their first, and the small enemies sit in a row in this order. the brute and the lich are
-// bigger than a sprite, and theirs is the sprite their art starts at
+use std::math::{Vec2, vec2};
+
+// where each picture is on the sheet, a row for each sort of thing: the player, pickups and
+// ground, then the small enemies, the weapons, what the evolved weapons and the throwers add, the
+// passives, and the big enemies last. the player and the enemies have a second frame right after
+// their first, and the small enemies sit in a row in this order. the cross, the axe and the knife
+// have one too, which is them a quarter turn around, and the knife has a third on a slant. the
+// brute, the ogre and the lich are bigger than a sprite, and theirs is the sprite their art
+// starts at. what a weapon throws is drawn at the size it should be next to the player, so a
+// scale of 1 is right for all of them
 pub enum Sprite {
     Player,
     Gem,
     BigGem,
     Heart,
-    Bolt,
-    Lob,
+    Crate,
     Grass,
     Flower,
     Rock,
@@ -19,18 +25,28 @@ pub enum Sprite {
     Skull,
     Wisp,
     Imp,
-    Brute,
-    Lich,
     Wand,
     Whip,
     Orbit,
     Bomb,
     Spark,
     Aura,
+    Cross,
+    Axe,
+    Knife,
+    Flurry,
+    Reaper,
+    Nova,
+    Bolt,
+    Lob,
     Speed,
     Might,
     Haste,
     Magnet,
+    Area,
+    Brute,
+    Ogre,
+    Lich,
 }
 
 impl Sprite {
@@ -40,8 +56,7 @@ impl Sprite {
             Sprite::Gem => 3,
             Sprite::BigGem => 4,
             Sprite::Heart => 5,
-            Sprite::Bolt => 6,
-            Sprite::Lob => 7,
+            Sprite::Crate => 6,
             Sprite::Grass => 8,
             Sprite::Flower => 9,
             Sprite::Rock => 10,
@@ -51,18 +66,35 @@ impl Sprite {
             Sprite::Skull => 20,
             Sprite::Wisp => 22,
             Sprite::Imp => 24,
-            Sprite::Brute => 96,
-            Sprite::Lich => 100,
-            Sprite::Wand => 26,
-            Sprite::Whip => 27,
-            Sprite::Orbit => 28,
-            Sprite::Bomb => 29,
-            Sprite::Spark => 30,
-            Sprite::Aura => 31,
-            Sprite::Speed => 32,
-            Sprite::Might => 33,
-            Sprite::Haste => 34,
-            Sprite::Magnet => 35,
+            Sprite::Wand => 32,
+            Sprite::Whip => 33,
+            Sprite::Orbit => 34,
+            Sprite::Bomb => 35,
+            Sprite::Spark => 36,
+            Sprite::Aura => 37,
+            Sprite::Cross => 38,
+            Sprite::Axe => 40,
+            Sprite::Knife => 42,
+            Sprite::Flurry => 48,
+            Sprite::Reaper => 49,
+            Sprite::Nova => 50,
+            Sprite::Bolt => 52,
+            Sprite::Lob => 53,
+            Sprite::Speed => 64,
+            Sprite::Might => 65,
+            Sprite::Haste => 66,
+            Sprite::Magnet => 67,
+            Sprite::Area => 68,
+            Sprite::Brute => 80,
+            Sprite::Ogre => 84,
+            Sprite::Lich => 112,
         }
+    }
+
+    // draws it with its middle on a spot, `scale` times as big. `frame` is how many sprites
+    // after this one to draw instead
+    pub fn draw(self, at: Vec2, scale: float, frame = 0, flip_x = false, flip_y = false) {
+        let corner = at.sub(vec2(4.0, 4.0).scale(scale)).to_ivec2();
+        gfx::sprite(self.id() + frame, corner, flip_x, flip_y, scale);
     }
 }

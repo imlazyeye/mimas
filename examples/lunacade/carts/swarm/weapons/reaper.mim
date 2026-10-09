@@ -1,0 +1,90 @@
+module @;
+
+use std::math::{IVec2, vec2};
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+pub struct Reaper {
+    cool: int,
+    swing: int,
+}
+
+impl Reaper {
+    const COOLDOWN = 30;
+    const DAMAGE = 45.0;
+    const REACH = 78.0;
+    const HALF = 16.0;
+    const SWING = 8;
+    const ARC_STEPS = 6;
+    const ARC_STEP = 0.37;
+}
+
+impl Weapon for Reaper {
+    const NAME = "REAPER";
+    const ICON = Sprite::Reaper;
+    const EVOLVED = true;
+
+    pub fn new() -> Self {
+        Self { cool = 0, swing = 0 }
+    }
+
+    fn level(self) -> int {
+        1
+    }
+
+    fn level_up(self) {}
+
+    fn maxed(self) -> bool {
+        true
+    }
+
+    fn perk(self, level: int) -> str {
+        "A HUGE SWEEP ON BOTH SIDES"
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.swing > 0 {
+            self.swing -= 1;
+        }
+        if self.cool <= 0 {
+            self.cool = wait(Self::COOLDOWN, p);
+            self.swing = Self::SWING;
+            let reach = Self::REACH * p.stats.area;
+            let half = Self::HALF * p.stats.area;
+            let dmg = Self::DAMAGE * p.stats.might;
+            for foe in horde.touching(p.pos, reach + half) {
+                let off = foe.pos.sub(p.pos);
+                let wide = foe.kind.REACH;
+                if off.x.abs() < reach + wide && off.y.abs() < half + wide {
+                    horde.hurt(foe, dmg, p.pos, 5.0);
+                }
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        if self.swing == 0 {
+            return;
+        }
+        let color = if self.swing > 4 Color::White else Color::Red;
+        let reach = Self::REACH * p.stats.area;
+        for side in [-1.0, 1.0] {
+            let last: IVec2? = null;
+            for i in 0..=Self::ARC_STEPS {
+                let a = (i - Self::ARC_STEPS ~/ 2).to_float() * Self::ARC_STEP;
+                let off = vec2(side * a.cos() * reach, a.sin() * reach * 0.45);
+                let point = p.pos.add(off).to_ivec2();
+                if let from? = last {
+                    gfx::line(from, point, color);
+                }
+                last = point;
+            }
+        }
+    }
+}

@@ -5,7 +5,9 @@ use std::math::{Vec2, ivec2, vec2};
 use sprites::Sprite;
 
 pub const MAX_RANK = 5;
-pub const PASSIVES = [Passive::Speed, Passive::Might, Passive::Haste, Passive::Magnet];
+pub const PASSIVES = [
+    Passive::Speed, Passive::Might, Passive::Haste, Passive::Magnet, Passive::Area,
+];
 const MOVE_SPEED = 1.4; // pixels per 60 Hz frame before boots
 const HURT_FRAMES = 50; // slightly less than a second of invulnerability after a bite
 
@@ -15,6 +17,7 @@ pub enum Passive {
     Might,
     Haste,
     Magnet,
+    Area,
 }
 
 impl Passive {
@@ -25,6 +28,7 @@ impl Passive {
             Passive::Might => 1,
             Passive::Haste => 2,
             Passive::Magnet => 3,
+            Passive::Area => 4,
         }
     }
 
@@ -34,6 +38,7 @@ impl Passive {
             Passive::Might => "BLADE",
             Passive::Haste => "CLOCK",
             Passive::Magnet => "MAGNET",
+            Passive::Area => "CANDLE",
         }
     }
 
@@ -43,6 +48,7 @@ impl Passive {
             Passive::Might => "WEAPONS HIT 20% HARDER",
             Passive::Haste => "WEAPONS FIRE 15% SOONER",
             Passive::Magnet => "GEMS COME FROM 50% FARTHER",
+            Passive::Area => "WEAPONS ARE 20% BIGGER",
         }
     }
 
@@ -52,6 +58,7 @@ impl Passive {
             Passive::Might => Sprite::Might,
             Passive::Haste => Sprite::Haste,
             Passive::Magnet => Sprite::Magnet,
+            Passive::Area => Sprite::Area,
         }
     }
 }
@@ -62,6 +69,8 @@ pub struct Stats {
     pub might: float,
     pub haste: float,
     pub magnet: float,
+    // how big every weapon is, both what it draws and what it reaches
+    pub area: float,
 }
 
 impl Stats {
@@ -72,6 +81,7 @@ impl Stats {
             // a wait gets multiplied by this, so more haste means a smaller number
             haste = 1.0 / (1.0 + 0.15 * ranks[2].to_float()),
             magnet = 1.0 + 0.5 * ranks[3].to_float(),
+            area = 1.0 + 0.2 * ranks[4].to_float(),
         }
     }
 }
@@ -89,14 +99,16 @@ pub struct Player {
     pub ranks: [int],
     pub stats: Stats,
     pub left: bool,
+    // the way it last walked, a unit vector that is replaced rather than changed in place
+    pub facing: Vec2,
     pub step: int,
-    // takes no damage at all (the stress start)
+    // takes no damage at all (the debug starts)
     pub god: bool,
 }
 
 impl Player {
     pub fn new(pos: Vec2, god: bool) -> Self {
-        let ranks = [0, 0, 0, 0];
+        let ranks = for _ in PASSIVES collect 0;
         Self {
             pos,
             hp = 100,
@@ -108,6 +120,7 @@ impl Player {
             ranks,
             stats = Stats::of(ranks),
             left = false,
+            facing = vec2(1.0, 0.0),
             step = 0,
             god,
         }
@@ -117,7 +130,8 @@ impl Player {
         let dir = vec2(axis(Button::Right, Button::Left), axis(Button::Down, Button::Up));
         if dir.x != 0.0 || dir.y != 0.0 {
             // normalized, so diagonals aren't faster
-            self.pos = self.pos.add(dir.normalize().scale(MOVE_SPEED * self.stats.speed));
+            self.facing = dir.normalize();
+            self.pos = self.pos.add(self.facing.scale(MOVE_SPEED * self.stats.speed));
             self.step += 1;
             if dir.x != 0.0 {
                 self.left = dir.x < 0.0;
@@ -142,7 +156,7 @@ impl Player {
         self.hp = (self.hp + n).min(self.max_hp);
     }
 
-    // says whether that was enough to level up (a god doesn't, so a stress run stays one)
+    // says whether that was enough to level up (a god doesn't, so a debug run stays one)
     pub fn gain(self, n: int) -> bool {
         if self.god {
             return false;

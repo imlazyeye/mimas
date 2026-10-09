@@ -1,0 +1,161 @@
+module @;
+
+use std::math::Vec2;
+
+use fx::Fx;
+use horde::Horde;
+use player::{Passive, Player};
+use sprites::Sprite;
+use weapons::{Evolution, Weapon};
+use weapons::wait;
+
+// a knife in the air, which flies straight until it has stuck in enough enemies
+struct Knife {
+    pos: Vec2,
+    vel: Vec2,
+    life: int,
+    wait: int,
+    // how many more enemies it can go through
+    pierce: int,
+    // the ids of the enemies it has hit, so it hits each of them once
+    struck: [int],
+}
+
+struct KnifeLevel {
+    description: str,
+    damage: float,
+    count: int,
+    pierce: int,
+}
+
+impl Knife {
+    const COOLDOWN = 60;
+    const STAGGER = 6; // frames between the knives of one throw
+    const SPEED = 5.0; // pixels it covers each frame
+    const LIFE = 40;   // frames it flies, which takes it off the screen
+    const SIZE = 3.0;  // how close it has to pass to hit
+
+    const LEVELS = [
+        KnifeLevel {
+            description = "THROWS A KNIFE THE WAY YOU FACE",
+            damage = 6.5, count = 1, pierce = 1,
+        },
+        KnifeLevel {
+            description = "THROWS TWO KNIVES",
+            damage = 6.5, count = 2, pierce = 1,
+        },
+        KnifeLevel {
+            description = "THREE KNIVES THAT HIT HARDER",
+            damage = 11.5, count = 3, pierce = 1,
+        },
+        KnifeLevel {
+            description = "THROWS FOUR KNIVES",
+            damage = 11.5, count = 4, pierce = 1,
+        },
+        KnifeLevel {
+            description = "KNIVES PIERCE A FOE",
+            damage = 11.5, count = 4, pierce = 2,
+        },
+        KnifeLevel {
+            description = "THROWS FIVE KNIVES",
+            damage = 11.5, count = 5, pierce = 2,
+        },
+        KnifeLevel {
+            description = "SIX KNIVES THAT HIT HARDER",
+            damage = 16.5, count = 6, pierce = 2,
+        },
+        KnifeLevel {
+            description = "KNIVES PIERCE TWO FOES",
+            damage = 16.5, count = 6, pierce = 3,
+        },
+    ];
+}
+
+pub struct Knives {
+    pub lv: int,
+    cool: int,
+    knives: [Knife],
+}
+
+impl Weapon for Knives {
+    const NAME = "KNIFE";
+    const ICON = Sprite::Knife;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, knives = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Knife::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Knife::LEVELS[level - 1].description
+    }
+
+    fn evolution(self) -> Evolution? {
+        Evolution { catalyst = Passive::Haste, into = flurry::Flurry::new() }
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Knife::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.cool <= 0 {
+            self.cool = wait(Knife::COOLDOWN, p);
+            for i in level.count {
+                self.knives.push(Knife {
+                    pos = p.pos,
+                    vel = p.facing.scale(Knife::SPEED),
+                    life = Knife::LIFE,
+                    wait = Knife::STAGGER * i,
+                    pierce = level.pierce,
+                    struck = [],
+                });
+            }
+        }
+
+        let dmg = level.damage * p.stats.might;
+        self.knives = for knife in self.knives {
+            if knife.wait > 0 {
+                // not thrown yet, so it stays in the player's hand and turns with them
+                knife.wait -= 1;
+                knife.pos = p.pos;
+                knife.vel = p.facing.scale(Knife::SPEED);
+                collect knife;
+            }
+            let from = knife.pos;
+            knife.life -= 1;
+            knife.pos = from.add(knife.vel);
+            for foe in horde.touching(knife.pos, Knife::SIZE * p.stats.area) {
+                if knife.pierce > 0 && foe.id !in knife.struck {
+                    knife.struck.push(foe.id);
+                    knife.pierce -= 1;
+                    horde.hurt(foe, dmg, from, 2.0);
+                }
+            }
+            if knife.life > 0 && knife.pierce > 0 collect knife;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for knife in self.knives {
+            if knife.wait > 0 {
+                continue;
+            }
+            // the sprite points up, the one after it right and the one after that up and to
+            // the right, and flipping those covers the other five ways a knife can fly
+            let (x, y) = (knife.vel.x, knife.vel.y);
+            let frame = if x == 0.0 { 0 } else if y == 0.0 { 1 } else { 2 };
+            Sprite::Knife.draw(knife.pos, p.stats.area, frame, x < 0.0, y > 0.0);
+        }
+    }
+}

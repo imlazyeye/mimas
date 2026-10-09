@@ -41,4 +41,4 @@ pub const SPRITE_SIZE: usize = 8;
 
 /// The most ops a frame, or a cart's top-level code, can run before it faults with "ran out of
 /// fuel".
-pub const FUEL: u64 = 2_000_000;
+pub const FUEL: u64 = 5_000_000;

@@ -162,11 +162,11 @@ fn swarm_grid_queries_match_a_full_scan_and_reset_cleanly() {
 fn a_piercing_bolt_can_hit_another_overlapping_enemy() {
     check(
         "swarm",
-        "weapons::test_piercing();",
+        "wand::test_piercing();",
         Some((
-            "weapons.mim",
+            "weapons/wand.mim",
             "\npub fn test_piercing() {
-                 let p = Player::new(vec2(0.0, 0.0), false);
+                 let p = Player::new(Vec2::zero(), false);
                  let horde = Horde::new();
                  let first = horde.spawn(enemies::Slime::new(), p.pos, 1.0);
                  let next = horde.spawn(enemies::Slime::new(), p.pos, 1.0);
@@ -192,16 +192,142 @@ fn capped_swarm_upgrades_still_offer_a_heal() {
     check(
         "swarm",
         "let p = game.run.player;
-         let weapons: [weapons::Weapon] = [weapons::Wand::new(), weapons::Whip::new(),
-             weapons::Orbit::new(), weapons::Bomb::new()];
-         for weapon in weapons { for _ in 5 { weapon.level_up(); } }
-         p.ranks = array::new_filled(player::MAX_RANK, 4);
+         let weapons: [weapons::Weapon] = [wand::Wand::new(), spark::Spark::new(),
+             orbit::Orbit::new(), bomb::Bomb::new()];
+         for weapon in weapons { while !weapon.maxed() { weapon.level_up(); } }
+         p.ranks = array::new_filled(player::MAX_RANK, player::PASSIVES.len());
          let rolled = Offer::roll(p, weapons);
          if rolled != [Offer::Heal] { panic(\"capped upgrades need a usable heal offer\"); }
          p.hp = 30;
          rolled[0].apply(p, weapons);
          if p.hp != 65 { panic(\"heal did not restore health\"); }",
         None,
+    );
+}
+
+#[test]
+fn a_maxed_swarm_weapon_evolves_once_its_catalyst_is_held() {
+    check(
+        "swarm",
+        "let p = game.run.player;
+         let held: [weapons::Weapon] = [knife::Knives::new()];
+         for weapon in bases() {
+             if weapon.EVOLVED { panic(\"an evolved weapon is on the menu\"); }
+         }
+         while !held[0].maxed() { held[0].level_up(); }
+         for _ in 40 {
+             for offer in Offer::roll(p, held) {
+                 if offer.title(held) == \"EVOLVE: FLURRY\" { panic(\"evolved without its catalyst\"); }
+             }
+         }
+         p.boost(player::Passive::Haste);
+         let rolled = Offer::roll(p, held);
+         if rolled[0].title(held) != \"EVOLVE: FLURRY\" { panic(\"a ready evolution wasn't offered first\"); }
+         rolled[0].apply(p, held);
+         if held.len() != 1 || held[0].NAME != \"FLURRY\" { panic(\"the knife didn't become the flurry\"); }
+         for _ in 40 {
+             for offer in Offer::roll(p, held) {
+                 if offer.title(held) in [\"NEW: KNIFE\", \"NEW: FLURRY\", \"EVOLVE: FLURRY\"] {
+                     panic(\"an evolved weapon or its base came back\");
+                 }
+             }
+         }",
+        None,
+    );
+}
+
+#[test]
+fn swarm_elites_come_on_kill_counts_and_a_lich_every_ten_minutes() {
+    check(
+        "swarm",
+        "fn elites(run: Run) -> int {
+             (for foe in run.horde.foes { if foe.kind.elite() collect foe; }).len()
+         }
+         let run = Run::new(Mode::Normal);
+         run.horde.kills = waves::ELITE_EVERY - 1;
+         run.update();
+         if elites(run) != 0 { panic(\"an elite came early\"); }
+         for count in 1..=3 {
+             run.horde.kills = waves::ELITE_EVERY * count;
+             run.update();
+             run.update();
+             if elites(run) != count { panic(\"one elite for every count of kills\"); }
+         }
+         if run.horde.boss != null { panic(\"a lich came on kills\"); }
+         run.t = waves::LICH_EVERY - 1;
+         run.update();
+         let first? = run.horde.boss else panic(\"no lich at ten minutes\");
+         first.hp = 0.0;
+         if run.update() == Event::Died { panic(\"the run ended with the lich\"); }
+         run.t = waves::LICH_EVERY * 2 - 1;
+         run.update();
+         let second? = run.horde.boss else panic(\"no lich at twenty minutes\");
+         if second.id == first.id || second.max_hp != first.max_hp * 2.0 {
+             panic(\"the second lich should be new and twice as tough\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn swarm_splits_are_capped_each_frame() {
+    check(
+        "swarm",
+        "use std::math::Vec2;
+         let at = Vec2::zero();
+         let horde = horde::Horde::new();
+         let brutes = for _ in 5 collect horde.spawn(enemies::Brute::new(), at, 2.0);
+         horde.update(at);
+         for brute in brutes.reversed() {
+             if brute.id != 0 { horde.hurt(brute, 9999.0, at, 0.0); }
+         }
+         if horde.kills != 4 || horde.len() != 5 + 8 { panic(\"four brutes should leave eight skulls\"); }
+         let born = horde.foes[5];
+         if born.kind.boss() || born.max_hp != born.kind.HP * 2.0 || born.kind.SIZE != 8 { panic(\"a child lost its parent's toughness\"); }
+         if horde.touching(at, 50.0).len() != 1 { panic(\"children were hittable in their birth frame\"); }
+         horde.update(at);
+         horde.hurt(brutes[0], 9999.0, at, 0.0);
+         if horde.len() != 1 + 8 + 3 { panic(\"the cap didn't reset on the next frame\"); }",
+        None,
+    );
+}
+
+#[test]
+fn a_swarm_crate_heals_or_clears_the_screen_but_spares_the_lich() {
+    check(
+        "swarm",
+        "use std::math::vec2;
+         let run = Run::new(Mode::Normal);
+         let p = run.player;
+         let near = for i in 6 collect run.horde.spawn(enemies::Slime::new(), p.pos.add(vec2(40.0 + i.to_float(), 30.0)), 1.0);
+         let far = run.horde.spawn(enemies::Slime::new(), p.pos.add(vec2(260.0, 0.0)), 1.0);
+         let lich = run.horde.spawn(enemies::Lich::new(), p.pos.add(vec2(-60.0, 0.0)), 1.0);
+         run.horde.boss = lich;
+         crates::test_put(run.crates, p.pos, crates::Loot::Bomb);
+         run.update();
+         for foe in near { if foe.hp > 0.0 { panic(\"the bomb left a foe on the screen\"); } }
+         if far.hp <= 0.0 { panic(\"the bomb reached past the screen\"); }
+         if lich.hp != lich.max_hp { panic(\"the bomb hurt the lich\"); }
+         if run.horde.kills != 6 { panic(\"bomb kills weren't counted\"); }
+         p.hp = 50;
+         crates::test_put(run.crates, p.pos, crates::Loot::Heal);
+         run.update();
+         if p.hp != 80 { panic(\"the crate didn't heal\"); }
+         for _ in 12 {
+             if crates::test_drop(run.crates, p) != null { panic(\"a new crate landed on the player\"); }
+         }
+         if crates::test_count(run.crates) != 5 { panic(\"crates piled up\"); }",
+        Some((
+            "crates.mim",
+            "\npub fn test_put(all: Crates, pos: Vec2, loot: Loot) {
+                 all.list.push(Crate { pos, loot });
+             }
+             pub fn test_drop(all: Crates, p: Player) -> Loot? {
+                 all.wait = 1;
+                 all.update(p)
+             }
+             pub fn test_count(all: Crates) -> int { all.list.len() }",
+        )),
     );
 }
 

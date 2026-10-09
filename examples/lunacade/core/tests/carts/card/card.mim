@@ -70,6 +70,13 @@ fn sprites() {
     // half off each side of the screen
     gfx::sprite(1, ivec2(252, 64));
     gfx::sprite(1, ivec2(-4, 76));
+
+    // twice the size, half again as big with uneven pixels and flipped, half the size, and a
+    // piece of the sheet a quarter bigger
+    gfx::sprite(0, ivec2(160, 62), false, false, 2.0);
+    gfx::sprite(0, ivec2(180, 62), true, true, 1.5);
+    gfx::sprite(1, ivec2(196, 62), false, false, 0.5);
+    gfx::blit(IVec2::zero(), ivec2(16, 8), ivec2(204, 62), 1.25);
 }
 
 fn state() {

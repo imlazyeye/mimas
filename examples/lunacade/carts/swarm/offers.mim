@@ -5,6 +5,7 @@ use player::{Passive, Player};
 use player::{MAX_RANK, PASSIVES};
 use sprites::Sprite;
 use weapons::Weapon;
+use weapons::bases;
 
 // how many weapons a player can carry
 pub const MOST_WEAPONS = 4;
@@ -18,6 +19,7 @@ pub enum Offer {
     New(Weapon),
     // the weapon in this slot of the list, one level up
     Grow(int),
+    Evolve(int, Weapon),
     Boost(Passive),
     Heal,
 }
@@ -26,20 +28,34 @@ impl Offer {
     // up to three different offers from what's left to improve, with a heal if that's not enough
     pub fn roll(p: Player, weapons: [Weapon]) -> [Offer] {
         let pool: [Offer] = [];
+        let ready: [Offer] = [];
         if weapons.len() < MOST_WEAPONS {
             let held = for weapon in weapons collect weapon.NAME;
-            pool.extend(for weapon in Weapon::*::new() {
-                if weapon.NAME !in held collect Offer::New(weapon);
+            pool.extend(for weapon in bases() {
+                if weapon.NAME in held continue;
+                if let next? = weapon.evolution() {
+                    if next.into.NAME in held continue;
+                }
+                collect Offer::New(weapon);
             });
         }
-        for slot in weapons.len() {
-            if !weapons[slot].maxed() { pool.push(Offer::Grow(slot)); }
+        for (slot, weapon) in weapons.enumerate() {
+            if !weapon.maxed() {
+                pool.push(Offer::Grow(slot));
+                continue;
+            }
+            if let next? = weapon.evolution() {
+                if p.ranks[next.catalyst.slot()] > 0 { ready.push(Offer::Evolve(slot, next.into)); }
+            }
         }
         for passive in PASSIVES {
             if p.ranks[passive.slot()] < MAX_RANK { pool.push(Offer::Boost(passive)); }
         }
         // Remove each selected offer: sampling without replacement cannot offer it twice.
-        let picked = for _ in pool.len().min(CHOICES) collect pool.remove(int::random(pool.len()));
+        let picked = for _ in (ready.len() + pool.len()).min(CHOICES) {
+            let from = if ready.is_empty() pool else ready;
+            collect from.remove(int::random(from.len()));
+        };
         if picked.len() < CHOICES {
             picked.push(Offer::Heal);
         }
@@ -50,6 +66,7 @@ impl Offer {
         match self {
             Offer::New(weapon) => f"NEW: {weapon.NAME}",
             Offer::Grow(slot) => f"{weapons[slot].NAME} LV {weapons[slot].level() + 1}",
+            Offer::Evolve(_, weapon) => f"EVOLVE: {weapon.NAME}",
             Offer::Boost(passive) => passive.name(),
             Offer::Heal => "SNACK",
         }
@@ -59,6 +76,7 @@ impl Offer {
         match self {
             Offer::New(weapon) => weapon.perk(1),
             Offer::Grow(slot) => weapons[slot].perk(weapons[slot].level() + 1),
+            Offer::Evolve(_, weapon) => weapon.perk(1),
             Offer::Boost(passive) => passive.perk(),
             Offer::Heal => f"GET {HEAL} HEALTH BACK",
         }
@@ -68,6 +86,7 @@ impl Offer {
         match self {
             Offer::New(weapon) => weapon.ICON,
             Offer::Grow(slot) => weapons[slot].ICON,
+            Offer::Evolve(_, weapon) => weapon.ICON,
             Offer::Boost(passive) => passive.icon(),
             Offer::Heal => Sprite::Heart,
         }
@@ -77,6 +96,7 @@ impl Offer {
         match self {
             Offer::New(weapon) => weapons.push(weapon),
             Offer::Grow(slot) => weapons[slot].level_up(),
+            Offer::Evolve(slot, weapon) => { weapons[slot] = weapon; },
             Offer::Boost(passive) => p.boost(passive),
             Offer::Heal => p.heal(HEAL),
         }

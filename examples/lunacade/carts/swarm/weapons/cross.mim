@@ -1,0 +1,172 @@
+module @;
+
+use std::math::Vec2;
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+// a cross in the air. it leaves fast, slows to a stop and comes back the way it went, gaining
+// speed until it is gone past the player
+struct Cross {
+    pos: Vec2,
+    vel: Vec2,
+    // what `vel` loses every frame, which is what turns it around
+    drag: Vec2,
+    age: int,
+    wait: int,
+    // the ids of the enemies it went through on this leg, so each is hit once out and once back
+    struck: [int],
+}
+
+struct CrossLevel {
+    description: str,
+    damage: float,
+    // pixels a frame it leaves at, which also sets how far it gets before it turns
+    speed: float,
+    area: float,
+    count: int,
+}
+
+impl Cross {
+    const COOLDOWN = 120;
+    const RANGE = 150.0; // how far off a foe can be and still get aimed at
+    const STAGGER = 10;  // frames between the crosses of one throw
+    const TURN = 50;     // frames it flies before it stops and comes back
+    const LIFE = 140;    // frames in the air, by which time it is off the screen behind you
+    const SIZE = 4.0;    // how close it has to pass to hit
+    const SPIN = 4;      // frames it holds each quarter turn
+
+    const LEVELS = [
+        CrossLevel {
+            description = "BOOMERANGS AT THE NEAREST FOE",
+            damage = 5.0, speed = 3.0, area = 1.0, count = 1,
+        },
+        CrossLevel {
+            description = "HITS HARDER",
+            damage = 15.0, speed = 3.0, area = 1.0, count = 1,
+        },
+        CrossLevel {
+            description = "BIGGER AND FASTER",
+            damage = 15.0, speed = 3.75, area = 1.25, count = 1,
+        },
+        CrossLevel {
+            description = "THROWS TWO CROSSES",
+            damage = 15.0, speed = 3.75, area = 1.25, count = 2,
+        },
+        CrossLevel {
+            description = "HITS HARDER",
+            damage = 25.0, speed = 3.75, area = 1.25, count = 2,
+        },
+        CrossLevel {
+            description = "BIGGER AND FASTER",
+            damage = 25.0, speed = 4.5, area = 1.5, count = 2,
+        },
+        CrossLevel {
+            description = "THROWS THREE CROSSES",
+            damage = 25.0, speed = 4.5, area = 1.5, count = 3,
+        },
+        CrossLevel {
+            description = "HITS HARDER",
+            damage = 35.0, speed = 4.5, area = 1.5, count = 3,
+        },
+    ];
+}
+
+pub struct Crosses {
+    pub lv: int,
+    cool: int,
+    crosses: [Cross],
+}
+
+impl Weapon for Crosses {
+    const NAME = "CROSS";
+    const ICON = Sprite::Cross;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, crosses = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Cross::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Cross::LEVELS[level - 1].description
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Cross::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.cool <= 0 {
+            self.cool = wait(Cross::COOLDOWN, p);
+            // at the nearest foe, or the way the player faces when nobody is near
+            let aim = if let foe? = horde.nearest(p.pos, Cross::RANGE, null) {
+                foe.pos.sub(p.pos).normalize()
+            } else {
+                p.facing
+            };
+            let vel = aim.scale(level.speed);
+            for i in level.count {
+                self.crosses.push(Cross {
+                    pos = p.pos,
+                    vel,
+                    drag = vel.scale(1.0 / Cross::TURN.to_float()),
+                    age = 0,
+                    wait = Cross::STAGGER * i,
+                    struck = [],
+                });
+            }
+        }
+
+        let dmg = level.damage * p.stats.might;
+        let size = Cross::SIZE * level.area * p.stats.area;
+        self.crosses = for cross in self.crosses {
+            if cross.wait > 0 {
+                // not thrown yet, so it stays in the player's hand
+                cross.wait -= 1;
+                cross.pos = p.pos;
+                collect cross;
+            }
+            let from = cross.pos;
+            cross.age += 1;
+            if cross.age == Cross::TURN {
+                cross.struck = [];
+            }
+            cross.vel = cross.vel.sub(cross.drag);
+            cross.pos = from.add(cross.vel);
+            for foe in horde.touching(cross.pos, size) {
+                if foe.id !in cross.struck {
+                    cross.struck.push(foe.id);
+                    horde.hurt(foe, dmg, from, 2.0);
+                }
+            }
+            if cross.age < Cross::LIFE collect cross;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        let area = Cross::LEVELS[self.lv - 1].area * p.stats.area;
+        for cross in self.crosses {
+            if cross.wait > 0 {
+                continue;
+            }
+            // four quarter turns: the sprite, the one after it that lies on its side, and then
+            // each of those turned over
+            let turn = (cross.age ~/ Cross::SPIN) % 4;
+            Sprite::Cross.draw(cross.pos, area, turn % 2, turn >= 2, turn >= 2);
+        }
+    }
+}

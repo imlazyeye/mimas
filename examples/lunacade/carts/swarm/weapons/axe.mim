@@ -1,0 +1,163 @@
+module @;
+
+use std::math::{Vec2, vec2};
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+// an axe in the air. it is tossed up and a little to the side, and then falls back down past
+// the player and off the screen
+struct Axe {
+    pos: Vec2,
+    vel: Vec2,
+    age: int,
+    wait: int,
+    // how many more enemies it can cut through
+    pierce: int,
+    // the ids of the enemies it has cut, so it cuts each of them once
+    struck: [int],
+}
+
+struct AxeLevel {
+    description: str,
+    damage: float,
+    count: int,
+    pierce: int,
+}
+
+impl Axe {
+    const COOLDOWN = 240;
+    const STAGGER = 8;    // frames between the axes of one throw
+    const TOSS = 3.2;     // pixels a frame it leaves at, straight up
+    const DRIFT = 0.5;    // and sideways, the way the player looks
+    const SPREAD = 0.4;   // more sideways for each further axe of one throw, so they fan out
+    const GRAVITY = 0.09; // pixels a frame the fall gains every frame
+    const LIFE = 100;     // frames in the air, by which time it has dropped off the screen
+    const SIZE = 5.0;     // how close it has to pass to cut
+    const SPIN = 4;       // frames it holds each quarter turn
+
+    const LEVELS = [
+        AxeLevel {
+            description = "LOBS A HEAVY AXE OVERHEAD",
+            damage = 20.0, count = 1, pierce = 3,
+        },
+        AxeLevel {
+            description = "THROWS TWO AXES",
+            damage = 20.0, count = 2, pierce = 3,
+        },
+        AxeLevel {
+            description = "HITS HARDER",
+            damage = 40.0, count = 2, pierce = 3,
+        },
+        AxeLevel {
+            description = "CUTS THROUGH TWO MORE FOES",
+            damage = 40.0, count = 2, pierce = 5,
+        },
+        AxeLevel {
+            description = "THROWS THREE AXES",
+            damage = 40.0, count = 3, pierce = 5,
+        },
+        AxeLevel {
+            description = "HITS HARDER",
+            damage = 60.0, count = 3, pierce = 5,
+        },
+        AxeLevel {
+            description = "CUTS THROUGH TWO MORE FOES",
+            damage = 60.0, count = 3, pierce = 7,
+        },
+        AxeLevel {
+            description = "HITS HARDER",
+            damage = 80.0, count = 3, pierce = 7,
+        },
+    ];
+}
+
+pub struct Axes {
+    pub lv: int,
+    cool: int,
+    axes: [Axe],
+}
+
+impl Weapon for Axes {
+    const NAME = "AXE";
+    const ICON = Sprite::Axe;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, axes = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Axe::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Axe::LEVELS[level - 1].description
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Axe::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.cool <= 0 {
+            self.cool = wait(Axe::COOLDOWN, p);
+            let side = if p.left { -1.0 } else { 1.0 };
+            for i in level.count {
+                let drift = Axe::DRIFT + Axe::SPREAD * i.to_float();
+                self.axes.push(Axe {
+                    pos = p.pos,
+                    vel = vec2(side * drift, -Axe::TOSS),
+                    age = 0,
+                    wait = Axe::STAGGER * i,
+                    pierce = level.pierce,
+                    struck = [],
+                });
+            }
+        }
+
+        let dmg = level.damage * p.stats.might;
+        self.axes = for axe in self.axes {
+            if axe.wait > 0 {
+                // not thrown yet, so it stays in the player's hand
+                axe.wait -= 1;
+                axe.pos = p.pos;
+                collect axe;
+            }
+            let from = axe.pos;
+            axe.age += 1;
+            axe.vel = axe.vel.add(vec2(0.0, Axe::GRAVITY));
+            axe.pos = from.add(axe.vel);
+            for foe in horde.touching(axe.pos, Axe::SIZE * p.stats.area) {
+                if axe.pierce > 0 && foe.id !in axe.struck {
+                    axe.struck.push(foe.id);
+                    axe.pierce -= 1;
+                    horde.hurt(foe, dmg, from, 4.0);
+                }
+            }
+            if axe.age < Axe::LIFE && axe.pierce > 0 collect axe;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for axe in self.axes {
+            if axe.wait > 0 {
+                continue;
+            }
+            // four quarter turns: the sprite, the one after it that lies on its side, and then
+            // each of those turned over
+            let turn = (axe.age ~/ Axe::SPIN) % 4;
+            Sprite::Axe.draw(axe.pos, p.stats.area, turn % 2, turn >= 2, turn >= 2);
+        }
+    }
+}

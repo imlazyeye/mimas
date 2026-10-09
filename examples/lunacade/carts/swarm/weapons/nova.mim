@@ -1,0 +1,70 @@
+module @;
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+pub struct Nova {
+    cool: int,
+    pulse: int,
+}
+
+impl Nova {
+    const COOLDOWN = 18;
+    const DAMAGE = 16.0;
+    const RADIUS = 76.0;
+    const PULSE = 8;
+}
+
+impl Weapon for Nova {
+    const NAME = "NOVA";
+    const ICON = Sprite::Nova;
+    const EVOLVED = true;
+
+    pub fn new() -> Self {
+        Self { cool = 0, pulse = 0 }
+    }
+
+    fn level(self) -> int {
+        1
+    }
+
+    fn level_up(self) {}
+
+    fn maxed(self) -> bool {
+        true
+    }
+
+    fn perk(self, level: int) -> str {
+        "A BLAZING RING THAT FILLS THE SCREEN"
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        self.cool -= 1;
+        if self.pulse > 0 {
+            self.pulse -= 1;
+        }
+        if self.cool <= 0 {
+            self.cool = wait(Self::COOLDOWN, p);
+            self.pulse = Self::PULSE;
+            let dmg = Self::DAMAGE * p.stats.might;
+            for foe in horde.touching(p.pos, Self::RADIUS * p.stats.area) {
+                horde.hurt(foe, dmg, p.pos, 6.0);
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        let at = p.pos.to_ivec2();
+        let r = (Self::RADIUS * p.stats.area).to_int();
+        if self.pulse > 0 {
+            gfx::circle(at, r, Color::White);
+            gfx::circle(at, r - 2, Color::Yellow);
+        } else {
+            gfx::circle(at, r, Color::Orange);
+        }
+    }
+}

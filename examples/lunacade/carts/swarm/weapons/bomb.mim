@@ -1,0 +1,135 @@
+module @;
+
+use std::math::{PI, Vec2, vec2};
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+// a bomb in the air, and then the blast it leaves
+struct Lob {
+    from: Vec2,
+    to: Vec2,
+    age: int,
+}
+
+struct BombLevel {
+    description: str,
+    cooldown: int,
+    damage: float,
+    area: float,
+}
+
+// lobs a bomb at the nearest enemy
+pub struct Bomb {
+    pub lv: int,
+    cool: int,
+    lobs: [Lob],
+}
+
+impl Bomb {
+    const RANGE = 130.0; // how far off a foe can be and still get a bomb thrown at it
+    const RADIUS = 31.0; // how far from where it lands the blast reaches
+    const FLIGHT = 36;   // 0.6 seconds along a sine arc before impact
+    const BLAST = 12;    // keep the impact ring visible for another 0.2 seconds
+    const RISE = 26.0;   // pixels the arc lifts a bomb at its highest
+
+    const LEVELS = [
+        BombLevel {
+            description = "LOBS A BOMB AT THE NEAREST FOE",
+            cooldown = 102, damage = 19.0, area = 1.0,
+        },
+        BombLevel {
+            description = "THROWS MORE OFTEN",
+            cooldown = 94, damage = 24.0, area = 1.0,
+        },
+        BombLevel {
+            description = "A BIGGER BLAST",
+            cooldown = 86, damage = 29.0, area = 1.25,
+        },
+        BombLevel {
+            description = "HITS HARDER",
+            cooldown = 78, damage = 34.0, area = 1.25,
+        },
+        BombLevel {
+            description = "THROWS MORE OFTEN",
+            cooldown = 70, damage = 39.0, area = 1.25,
+        },
+        BombLevel {
+            description = "A BIGGER BLAST",
+            cooldown = 62, damage = 44.0, area = 1.5,
+        },
+    ];
+}
+
+impl Weapon for Bomb {
+    const NAME = "BOMB";
+    const ICON = Sprite::Bomb;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, lobs = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Self::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Self::LEVELS[level - 1].description
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Self::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.cool <= 0 {
+            if let foe? = horde.nearest(p.pos, Self::RANGE, null) {
+                self.cool = wait(level.cooldown, p);
+                self.lobs.push(Lob { from = p.pos, to = foe.pos, age = 0 });
+            }
+        }
+
+        let dmg = level.damage * p.stats.might;
+        let radius = Self::RADIUS * level.area * p.stats.area;
+        self.lobs = for lob in self.lobs {
+            lob.age += 1;
+            if lob.age == Self::FLIGHT {
+                for foe in horde.touching(lob.to, radius) {
+                    horde.hurt(foe, dmg, lob.to, 6.0);
+                }
+                fx.burst(lob.to, 14, Color::Orange);
+                fx.shake(3.0);
+            }
+            if lob.age < Self::FLIGHT + Self::BLAST collect lob;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        let area = Self::LEVELS[self.lv - 1].area * p.stats.area;
+        for lob in self.lobs {
+            if lob.age < Self::FLIGHT {
+                // along the line to the target, and up in an arc
+                let u = lob.age.to_float() / Self::FLIGHT.to_float();
+                let rise = vec2(0.0, (u * PI).sin() * Self::RISE);
+                Sprite::Lob.draw(lob.from.lerp(lob.to, u).sub(rise), area);
+            } else {
+                let grown = ((lob.age - Self::FLIGHT).to_float() / 6.0).min(1.0);
+                let r = Self::RADIUS * area * grown;
+                let at = lob.to.to_ivec2();
+                gfx::circle(at, r.to_int(), Color::Yellow);
+                gfx::circle(at, (r * 0.7).to_int(), Color::Orange);
+            }
+        }
+    }
+}

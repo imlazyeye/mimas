@@ -12,7 +12,7 @@ const ROWS = luna::HEIGHT ~/ TILE + 1;
 // paints the field around the camera and leaves the camera there. nothing is stored, since every
 // tile's look comes from a hash of where it is, and that's what makes the field go on forever
 pub fn draw(camera: IVec2) {
-    gfx::clear(Color::Teal);
+    gfx::clear(Color::Charcoal);
     gfx::camera(camera);
     // Arithmetic shifts floor division by sixteen, including negative world coordinates.
     let first_x = camera.x >> TILE_SHIFT;

@@ -1,0 +1,111 @@
+module @;
+
+use fx::Fx;
+use horde::Horde;
+use player::{Passive, Player};
+use sprites::Sprite;
+use weapons::{Evolution, Weapon};
+use weapons::wait;
+
+struct AuraLevel {
+    description: str,
+    cooldown: int,
+    damage: float,
+    area: float,
+}
+
+// a ring around the player that pulses
+pub struct Aura {
+    pub lv: int,
+    cool: int,
+    pulse: int,
+}
+
+impl Aura {
+    const RADIUS = 29.0; // how far out the ring is
+    const PULSE = 8;     // frames the ring stays lit after it hits
+
+    const LEVELS = [
+        AuraLevel {
+            description = "HURTS EVERYTHING AROUND YOU",
+            cooldown = 32, damage = 5.5, area = 1.0,
+        },
+        AuraLevel {
+            description = "A WIDER RING THAT PULSES FASTER",
+            cooldown = 30, damage = 7.0, area = 1.2,
+        },
+        AuraLevel {
+            description = "A WIDER RING THAT PULSES FASTER",
+            cooldown = 28, damage = 8.5, area = 1.4,
+        },
+        AuraLevel {
+            description = "A WIDER RING THAT PULSES FASTER",
+            cooldown = 26, damage = 10.0, area = 1.6,
+        },
+        AuraLevel {
+            description = "A WIDER RING THAT PULSES FASTER",
+            cooldown = 24, damage = 11.5, area = 1.8,
+        },
+        AuraLevel {
+            description = "A WIDER RING THAT PULSES FASTER",
+            cooldown = 22, damage = 13.0, area = 2.0,
+        },
+    ];
+}
+
+impl Weapon for Aura {
+    const NAME = "AURA";
+    const ICON = Sprite::Aura;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, pulse = 0 }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Self::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Self::LEVELS[level - 1].description
+    }
+
+    fn evolution(self) -> Evolution? {
+        Evolution { catalyst = Passive::Area, into = nova::Nova::new() }
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Self::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.pulse > 0 {
+            self.pulse -= 1;
+        }
+        if self.cool <= 0 {
+            self.cool = wait(level.cooldown, p);
+            self.pulse = Self::PULSE;
+            let dmg = level.damage * p.stats.might;
+            for foe in horde.touching(p.pos, Self::RADIUS * level.area * p.stats.area) {
+                horde.hurt(foe, dmg, p.pos, 4.0);
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        let at = p.pos.to_ivec2();
+        let r = (Self::RADIUS * Self::LEVELS[self.lv - 1].area * p.stats.area).to_int();
+        if self.pulse > 0 {
+            gfx::circle(at, r, Color::Lime);
+            gfx::circle(at, r - 2, Color::Green);
+        } else {
+            gfx::circle(at, r, Color::Green);
+        }
+    }
+}

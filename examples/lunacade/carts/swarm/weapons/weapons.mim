@@ -1,0 +1,53 @@
+module weapons;
+
+use fx::Fx;
+use horde::Horde;
+use player::{Passive, Player};
+use sprites::Sprite;
+
+const MIN_WAIT = 6; // at least a tenth of a second between attacks, even with high haste
+
+// a weapon looks after itself. the run calls `update` every frame and `draw` after the player,
+// and the weapon decides when to fire, whom to hit, and what that looks like. each one is a file
+// in this folder, with a `LEVELS` table that holds what every level of it is. how big a weapon
+// is, in what it draws and in what it can reach, gets multiplied by the player's `stats.area`,
+// and by the `area` of its level when its levels have one.
+pub pact Weapon {
+    const NAME: str;
+    const ICON: Sprite;
+    const EVOLVED: bool = false;
+
+    // a weapon at its first level. `bases()` is one of every weapon that isn't evolved, which is
+    // where the weapon menu and the level up screen find the ones to offer
+    fn new() -> Self;
+    fn level(self) -> int;
+    fn level_up(self);
+    fn maxed(self) -> bool;
+
+    // what reaching a level adds, for the level up screen
+    fn perk(self, level: int) -> str;
+
+    fn update(self, p: Player, horde: Horde, fx: Fx);
+
+    fn draw(self, p: Player) {}
+
+    fn evolution(self) -> Evolution? {
+        null
+    }
+}
+
+pub struct Evolution {
+    pub catalyst: Passive,
+    pub into: Weapon,
+}
+
+pub fn bases() -> [Weapon] {
+    for weapon in Weapon::*::new() {
+        if !weapon.EVOLVED collect weapon;
+    }
+}
+
+// a wait in frames, shortened by the player's haste
+pub fn wait(frames: int, p: Player) -> int {
+    (frames.to_float() * p.stats.haste).to_int().max(MIN_WAIT)
+}

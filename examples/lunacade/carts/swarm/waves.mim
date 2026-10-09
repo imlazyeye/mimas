@@ -9,26 +9,32 @@ use player::Player;
 // a minute of play, in frames
 const MINUTE = 3600;
 
-// the run is over when the lich falls, and it shows up at the ten minute mark
-pub const BOSS_AT = 10 * MINUTE;
+// an elite shows up every this many kills, and a lich every ten minutes, each tougher than the
+// one before. nothing ends the run but dying
+pub const ELITE_EVERY = 300;
+pub const LICH_EVERY = 10 * MINUTE;
 
 // most enemies that are out at once
-pub const CROWD = 300;
-const INITIAL = 8;
-const PER_MINUTE = 24;
-const BOSS_ESCORT = 40;
-const MOST_SPAWN = 6; // spread catch-up work across frames instead of spawning a whole wave
+pub const CROWD = 3000;
+const INITIAL = 18;
+const PER_MINUTE = 42;
+const SURGE = 4;
+const MOST_SPAWN = 12; // spread catch-up work across frames instead of spawning a whole wave
 
 // how many enemies the swarm tries to keep alive, and which kinds it draws them from
 pub struct Waves {
     // what it draws kinds from, with the common ones listed more than once
     mix: [EnemyKind],
-    summoned: bool,
+    elites: [EnemyKind],
+    sent: int,
 }
 
 impl Waves {
     pub fn new() -> Self {
-        Self { mix = Waves::mix_at(0), summoned = false }
+        let elites = for kind in EnemyKind::*::new() {
+            if kind.elite() collect kind;
+        };
+        Self { mix = Waves::mix_at(0), elites, sent = 0 }
     }
 
     // `t` is the frames since the run began. `stress` keeps the crowd at its limit
@@ -37,21 +43,22 @@ impl Waves {
         if t % MINUTE == 0 && !stress {
             self.mix = Waves::mix_at(minute);
         }
-        if t >= BOSS_AT && !self.summoned && !stress {
-            self.summoned = true;
-            horde.boss = Waves::spawn(horde, p, Lich::new(), 1.0);
+        let tough = 1.0 + 0.1 * minute.to_float();
+        if !stress && horde.kills >= (self.sent + 1) * ELITE_EVERY {
+            self.sent += 1;
+            Waves::spawn(horde, p, self.elites.choose()!, tough);
+        }
+        if !stress && t % LICH_EVERY == 0 {
+            horde.boss = Waves::spawn(horde, p, Lich::new(), (t ~/ LICH_EVERY).to_float());
         }
         let want = if stress {
             CROWD
-        } else if self.summoned {
-            BOSS_ESCORT
         } else {
-            (INITIAL + PER_MINUTE * minute).min(CROWD)
+            (INITIAL + PER_MINUTE * minute + SURGE * minute * minute).min(CROWD)
         };
         // a few at a time, and quicker the more it is behind
         let behind = want - horde.len();
         if behind > 0 && (stress || t % 2 == 0) {
-            let tough = 1.0 + 0.1 * minute.to_float();
             // Each twenty missing enemies adds one spawn, capped at six per update.
             for _ in (1 + behind ~/ 20).min(MOST_SPAWN) {
                 Waves::spawn(horde, p, self.mix.choose()!, tough);

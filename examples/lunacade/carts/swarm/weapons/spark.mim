@@ -1,0 +1,135 @@
+module @;
+
+use std::math::{IVec2, ivec2};
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+// a bolt of lightning that jumps from enemy to enemy
+struct Strike {
+    points: [IVec2],
+    life: int,
+}
+
+struct SparkLevel {
+    description: str,
+    cooldown: int,
+    damage: float,
+    jumps: int,
+}
+
+pub struct Spark {
+    pub lv: int,
+    cool: int,
+    strikes: [Strike],
+}
+
+impl Spark {
+    const RANGE = 110.0; // how far off the first foe can be
+    const HOP = 60.0;    // how far the bolt can jump from one foe to the next
+    const LIFE = 7;      // frames a strike stays drawn
+
+    const LEVELS = [
+        SparkLevel {
+            description = "CHAINS THROUGH 3 FOES",
+            cooldown = 76, damage = 12.0, jumps = 3,
+        },
+        SparkLevel {
+            description = "CHAINS THROUGH 4 FOES",
+            cooldown = 68, damage = 15.0, jumps = 4,
+        },
+        SparkLevel {
+            description = "CHAINS THROUGH 5 FOES",
+            cooldown = 60, damage = 18.0, jumps = 5,
+        },
+        SparkLevel {
+            description = "CHAINS THROUGH 6 FOES",
+            cooldown = 52, damage = 21.0, jumps = 6,
+        },
+        SparkLevel {
+            description = "CHAINS THROUGH 7 FOES",
+            cooldown = 44, damage = 24.0, jumps = 7,
+        },
+        SparkLevel {
+            description = "CHAINS THROUGH 8 FOES",
+            cooldown = 36, damage = 27.0, jumps = 8,
+        },
+    ];
+}
+
+impl Weapon for Spark {
+    const NAME = "SPARK";
+    const ICON = Sprite::Spark;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, strikes = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Self::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Self::LEVELS[level - 1].description
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Self::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.cool <= 0 {
+            if let first? = horde.nearest(p.pos, Self::RANGE, null) {
+                self.cool = wait(level.cooldown, p);
+                // hits `first` and then whichever enemy is nearest to the last one hit
+                let dmg = level.damage * p.stats.might;
+                let points = [p.pos.to_ivec2()];
+                let seen = [first.id];
+                let foe = first;
+                for hop in level.jumps {
+                    horde.hurt(foe, dmg, p.pos, 1.0);
+                    points.push(foe.pos.to_ivec2());
+                    if hop + 1 == level.jumps { break; }
+                    if let next? = horde.nearest(foe.pos, Self::HOP * p.stats.area, seen) {
+                        seen.push(next.id);
+                        foe = next;
+                    } else {
+                        break;
+                    }
+                }
+                self.strikes.push(Strike { points, life = Self::LIFE });
+            }
+        }
+
+        self.strikes = for strike in self.strikes {
+            strike.life -= 1;
+            if strike.life > 0 collect strike;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for strike in self.strikes {
+            for i in strike.points.len() - 1 {
+                let a = strike.points[i];
+                let b = strike.points[i + 1];
+                // a kink in the middle that changes every frame
+                let mx = (a.x + b.x) ~/ 2 + int::random(9) - 4;
+                let my = (a.y + b.y) ~/ 2 + int::random(9) - 4;
+                let mid = ivec2(mx, my);
+                gfx::line(a, mid, Color::Cyan);
+                gfx::line(mid, b, Color::White);
+            }
+        }
+    }
+}

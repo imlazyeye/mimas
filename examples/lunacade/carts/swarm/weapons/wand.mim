@@ -1,0 +1,137 @@
+module @;
+
+use std::math::Vec2;
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+use weapons::wait;
+
+struct Bolt {
+    pos: Vec2,
+    vel: Vec2,
+    life: int,
+    pierce: int,
+    // the id of the last enemy it hit, so a bolt passing through one doesn't hit it twice
+    last: int?,
+}
+
+struct WandLevel {
+    description: str,
+    cooldown: int,
+    damage: float,
+    count: int,
+    pierce: int,
+}
+
+// shoots the nearest enemy, and then more of them as it levels
+pub struct Wand {
+    pub lv: int,
+    cool: int,
+    bolts: [Bolt],
+}
+
+impl Wand {
+    const RANGE = 150.0; // how far off a foe can be and still get shot at
+    const SPEED = 3.4;   // pixels a bolt covers each frame
+    const LIFE = 45;     // frames a bolt flies before it fizzles
+    const SIZE = 3.0;    // how close a bolt has to pass to hit
+    const FAN = 0.22;    // radians between the bolts of one shot
+
+    const LEVELS = [
+        WandLevel {
+            description = "SHOOTS THE NEAREST FOE",
+            cooldown = 42, damage = 8.0, count = 1, pierce = 1,
+        },
+        WandLevel {
+            description = "SHOOTS FASTER",
+            cooldown = 38, damage = 10.0, count = 1, pierce = 1,
+        },
+        WandLevel {
+            description = "FIRES TWO BOLTS",
+            cooldown = 34, damage = 12.0, count = 2, pierce = 1,
+        },
+        WandLevel {
+            description = "SHOOTS FASTER",
+            cooldown = 30, damage = 14.0, count = 2, pierce = 1,
+        },
+        WandLevel {
+            description = "BOLTS PIERCE A FOE",
+            cooldown = 26, damage = 16.0, count = 2, pierce = 2,
+        },
+        WandLevel {
+            description = "FIRES THREE BOLTS",
+            cooldown = 22, damage = 18.0, count = 3, pierce = 2,
+        },
+    ];
+}
+
+impl Weapon for Wand {
+    const NAME = "WAND";
+    const ICON = Sprite::Wand;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, bolts = [] }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Self::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Self::LEVELS[level - 1].description
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Self::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.cool <= 0 {
+            // `nearest` gives back an option, since there may be nobody in range
+            if let foe? = horde.nearest(p.pos, Self::RANGE, null) {
+                self.cool = wait(level.cooldown, p);
+                // the bolts of one shot, fanned out around the aim
+                let aim = foe.pos.sub(p.pos).angle();
+                for i in level.count {
+                    let a = aim + (i.to_float() - (level.count - 1).to_float() / 2.0) * Self::FAN;
+                    self.bolts.push(Bolt {
+                        pos = p.pos,
+                        vel = Vec2::from_angle(a).scale(Self::SPEED),
+                        life = Self::LIFE,
+                        pierce = level.pierce,
+                        last = null,
+                    });
+                }
+            }
+        }
+
+        let dmg = level.damage * p.stats.might;
+        self.bolts = for bolt in self.bolts {
+            let from = bolt.pos;
+            bolt.pos = from.add(bolt.vel);
+            bolt.life -= 1;
+            if let foe? = horde.first_touching(bolt.pos, Self::SIZE * p.stats.area, bolt.last) {
+                horde.hurt(foe, dmg, from, 2.0);
+                bolt.last = foe.id;
+                bolt.pierce -= 1;
+            }
+            if bolt.life > 0 && bolt.pierce > 0 collect bolt;
+        };
+    }
+
+    fn draw(self, p: Player) {
+        for bolt in self.bolts {
+            Sprite::Bolt.draw(bolt.pos, p.stats.area);
+        }
+    }
+}

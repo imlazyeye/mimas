@@ -2,7 +2,7 @@ module fx;
 
 use std::math::{IVec2, TAU, Vec2, ivec2};
 
-const MOST = 150; // bound visual work independently of the size of the horde
+const MOST = 500; // bound visual work independently of the size of the horde
 const SHAKE_DECAY = 0.85;
 const DRAG = 0.93;
 
@@ -13,7 +13,6 @@ struct Part {
     color: Color,
 }
 
-// sparks and screen shake, which change how the run looks and nothing about how it plays
 pub struct Fx {
     parts: [Part],
     shake: float,
@@ -36,7 +35,7 @@ impl Fx {
         self.shake = self.shake.max(amount);
     }
 
-    // how far to nudge the camera this frame
+    /// How far to nudge the camera this frame.
     pub fn offset(self) -> IVec2 {
         if self.shake < 0.5 {
             return IVec2::zero();
@@ -53,9 +52,14 @@ impl Fx {
             part.pos = part.pos.add(part.vel);
             part.vel = part.vel.scale(DRAG);
             part.life -= 1;
-            if part.life > 0 { parts[kept] = part; kept += 1; }
+            if part.life > 0 { 
+                parts[kept] = part; 
+                kept += 1; 
+            }
         }
-        while parts.len() > kept { parts.pop(); }
+        while parts.len() > kept { 
+            parts.pop(); 
+        }
     }
 
     pub fn draw(self) {

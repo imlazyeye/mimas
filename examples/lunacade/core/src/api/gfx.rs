@@ -238,33 +238,46 @@ fn fill_circle<'gc>(ctx: Ctx<'gc>, center: I64Vec2, r: i64, c: Color) {
 /// in the second row. A number off the sheet draws nothing.
 ///
 /// Pixels of the [transparent](#transparent) color are skipped. `flip_x` and `flip_y` mirror the
-/// sprite, and both can be left out.
+/// sprite, and `scale` draws it that many times as big from the same corner. All three can be
+/// left out. A scale that isn't a whole number draws the sprite's pixels in uneven sizes, and one
+/// that isn't above zero draws nothing.
 ///
 /// ```mimas
 /// use std::math::ivec2;
 ///
 /// gfx::sprite(0, ivec2(100, 60));
 /// gfx::sprite(0, ivec2(108, 60), true);
+/// gfx::sprite(0, ivec2(116, 60), false, false, 2.0);
 /// ```
 #[native]
-fn sprite<'gc>(ctx: Ctx<'gc>, n: i64, pos: I64Vec2, flip_x: Option<bool>, flip_y: Option<bool>) {
+fn sprite<'gc>(
+    ctx: Ctx<'gc>,
+    n: i64,
+    pos: I64Vec2,
+    flip_x: Option<bool>,
+    flip_y: Option<bool>,
+    scale: Option<f64>,
+) {
     let (flip_x, flip_y) = (flip_x.unwrap_or(false), flip_y.unwrap_or(false));
-    screen(ctx).sprite(n, pos.x, pos.y, flip_x, flip_y);
+    screen(ctx).sprite(n, pos.x, pos.y, flip_x, flip_y, scale.unwrap_or(1.0));
 }
 
 /// Copies the `size.x` by `size.y` part of the sprite sheet that starts at `src` to the screen,
 /// with its top left corner at `pos`. It draws a larger piece of the sheet than a sprite, and skips
 /// the [transparent](#transparent) color the same way. Whatever part of it is off the sheet
-/// draws nothing.
+/// draws nothing. `scale` draws it that many times as big, the way it does for a sprite, and can
+/// be left out.
 ///
 /// ```mimas
 /// use std::math::ivec2;
 ///
 /// gfx::blit(ivec2(0, 0), ivec2(32, 16), ivec2(8, 8));
+/// gfx::blit(ivec2(0, 0), ivec2(32, 16), ivec2(8, 32), 1.5);
 /// ```
 #[native]
-fn blit<'gc>(ctx: Ctx<'gc>, src: I64Vec2, size: I64Vec2, pos: I64Vec2) {
-    screen(ctx).blit(src.x, src.y, size.x, size.y, pos.x, pos.y);
+fn blit<'gc>(ctx: Ctx<'gc>, src: I64Vec2, size: I64Vec2, pos: I64Vec2, scale: Option<f64>) {
+    let source = [src.x, src.y, size.x, size.y];
+    screen(ctx).blit(source, pos.x, pos.y, scale.unwrap_or(1.0));
 }
 
 /// Draws the text with its top left corner at `pos` and returns how wide it is in pixels. The

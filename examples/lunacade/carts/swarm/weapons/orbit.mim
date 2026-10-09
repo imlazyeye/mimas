@@ -1,0 +1,116 @@
+module @;
+
+use std::math::{TAU, Vec2};
+
+use fx::Fx;
+use horde::Horde;
+use player::Player;
+use sprites::Sprite;
+use weapons::Weapon;
+
+struct OrbitLevel {
+    description: str,
+    damage: float,
+    blades: int,
+    // radians the ring turns each frame
+    spin: float,
+    area: float,
+}
+
+// blades that circle the player and cut whatever they pass through
+pub struct Orbit {
+    pub lv: int,
+    angle: float,
+}
+
+impl Orbit {
+    const RADIUS = 28.0; // how far out from the player the blades ride
+    const SIZE = 4.0;    // how close a blade has to pass to cut
+    const IFRAMES = 14;  // one orbit contact per enemy per roughly quarter-second
+
+    const LEVELS = [
+        OrbitLevel {
+            description = "TWO BLADES CIRCLE YOU",
+            damage = 7.0, blades = 2, spin = 0.054, area = 1.0,
+        },
+        OrbitLevel {
+            description = "A THIRD BLADE",
+            damage = 9.0, blades = 3, spin = 0.058, area = 1.0,
+        },
+        OrbitLevel {
+            description = "SPINS FASTER AND WIDER",
+            damage = 11.0, blades = 3, spin = 0.062, area = 1.2,
+        },
+        OrbitLevel {
+            description = "A FOURTH BLADE",
+            damage = 13.0, blades = 4, spin = 0.066, area = 1.2,
+        },
+        OrbitLevel {
+            description = "SPINS FASTER AND WIDER",
+            damage = 15.0, blades = 4, spin = 0.07, area = 1.4,
+        },
+        OrbitLevel {
+            description = "A FIFTH BLADE",
+            damage = 17.0, blades = 5, spin = 0.074, area = 1.4,
+        },
+    ];
+
+    // even angular spacing puts every blade on the same ring
+    fn blade(self, p: Player, level: OrbitLevel, i: int) -> Vec2 {
+        let a = self.angle + TAU * i.to_float() / level.blades.to_float();
+        p.pos.add(Vec2::from_angle(a).scale(Self::RADIUS * level.area * p.stats.area))
+    }
+}
+
+impl Weapon for Orbit {
+    const NAME = "ORBIT";
+    const ICON = Sprite::Orbit;
+
+    pub fn new() -> Self {
+        Self { lv = 1, angle = 0.0 }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Self::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Self::LEVELS[level - 1].description
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Self::LEVELS[self.lv - 1];
+
+        self.angle += level.spin;
+        let dmg = level.damage * p.stats.might;
+        let size = Self::SIZE * level.area * p.stats.area;
+        for i in level.blades {
+            let blade = self.blade(p, level, i);
+            for foe in horde.touching(blade, size) {
+                // a blade that is still inside an enemy shouldn't hit it every frame
+                if foe.iframes == 0 {
+                    foe.iframes = Self::IFRAMES;
+                    horde.hurt(foe, dmg, blade, 3.0);
+                }
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        let level = Self::LEVELS[self.lv - 1];
+        let area = level.area * p.stats.area;
+        for i in level.blades {
+            let at = self.blade(p, level, i).to_ivec2();
+            gfx::fill_circle(at, (3.0 * area).round().to_int(), Color::Sky);
+            gfx::fill_circle(at, area.round().to_int(), Color::White);
+        }
+    }
+}

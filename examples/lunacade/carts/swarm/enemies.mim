@@ -3,8 +3,8 @@ module @;
 use std::math::{IVec2, Vec2, ivec2};
 use sprites::Sprite;
 
-// what sets one kind of enemy apart from the next. every kind is its own type, and
-// `EnemyKind::*::new()` is one of each, which is where the waves find the kinds to send
+/// What sets one kind of enemy apart from the next. every kind is its own type, and
+/// `EnemyKind::*::new()` is one of each, which is where the waves find the kinds to send
 pub pact EnemyKind {
     /// The total HP this enemy starts with.
     const HP: float;
@@ -17,7 +17,7 @@ pub pact EnemyKind {
     /// How much XP this enemy drops.
     const XP: int;
     /// The sprite this enemy should use. Assumed to have two frames, one after another!
-    const ART: sprites::Sprite;
+    const ART: Sprite;
     /// The art's square size in pixels: 8 uses a sprite, larger sizes blit from ART's slot.
     const SIZE: int;
     /// The color that should be remapped during hit flashes.
@@ -36,9 +36,19 @@ pub pact EnemyKind {
         (0.0, self.SPEED)
     }
 
-    /// Whether defeating this kind ends the run.
+    /// Whether this kind is the boss the waves send on the clock, which a crate's bomb spares.
     fn boss(self) -> bool {
         false
+    }
+
+    /// Whether this kind is a mid-run boss, which the waves send in on kill counts.
+    fn elite(self) -> bool {
+        false
+    }
+
+    /// The kinds it breaks into when it dies.
+    fn split(self) -> [EnemyKind] {
+        []
     }
 }
 
@@ -52,7 +62,7 @@ impl EnemyKind for Bat {
     const XP = 1;
     const ART = Sprite::Bat;
     const SIZE = 8;
-    const HIT_COLOR_REMAP = Color::Plum;
+    const HIT_COLOR_REMAP = Color::Slate;
     const VOTES = [(0, 2)];
 
     pub fn new() -> Self {
@@ -155,15 +165,45 @@ impl EnemyKind for Brute {
     const XP = 20;
     const ART = Sprite::Brute;
     const SIZE = 16;
-    const HIT_COLOR_REMAP = Color::Silver;
+    const HIT_COLOR_REMAP = Color::White;
     const VOTES = [(5, 1)];
 
     pub fn new() -> Self {
         Self {}
     }
+
+    fn split(self) -> [EnemyKind] {
+        [Skull::new(), Skull::new(), Skull::new()]
+    }
 }
 
-/// The final boss! Tough as hell! Hurts!
+/// A mid-run boss that leaves a pair of brutes behind.
+pub struct Ogre;
+impl EnemyKind for Ogre {
+    const HP = 400.0;
+    const SPEED = 0.5;
+    const REACH = 9.0;
+    const DAMAGE = 14;
+    const XP = 60;
+    const ART = Sprite::Ogre;
+    const SIZE = 16;
+    const HIT_COLOR_REMAP = Color::Lime;
+    const VOTES = [];
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn elite(self) -> bool {
+        true
+    }
+
+    fn split(self) -> [EnemyKind] {
+        [Brute::new(), Brute::new()]
+    }
+}
+
+/// The boss! Tough as hell! Hurts! Comes back tougher every ten minutes.
 pub struct Lich;
 impl EnemyKind for Lich {
     const HP = 2400.0;
@@ -173,7 +213,7 @@ impl EnemyKind for Lich {
     const XP = 500;
     const ART = Sprite::Lich;
     const SIZE = 24;
-    const HIT_COLOR_REMAP = Color::Plum;
+    const HIT_COLOR_REMAP = Color::Sky;
     const VOTES = [];
 
     pub fn new() -> Self {

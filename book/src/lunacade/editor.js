@@ -357,15 +357,9 @@ export function mountEditor(el, store) {
         }
     }
 
-    // the files in the order of the tree: the script, the modules, sprites.txt, the rest
+    // the files in the order of the tree, which is alphabetical
     function ordered() {
-        const files = store.cart.files;
-        const rank = (file) =>
-            isModule(file) ? 1 : file.endsWith('.mim') ? 0 : file === 'sprites.txt' ? 2 : 3;
-        const ranks = new Map(Object.keys(files).map((file) => [file, rank(file)]));
-        return [...ranks.keys()].sort(
-            (a, b) => ranks.get(a) - ranks.get(b) || (a < b ? -1 : a > b ? 1 : 0),
-        );
+        return Object.keys(store.cart.files).sort();
     }
 
     // the folders directly under `prefix`, each a `details` holding its own branch, then the
@@ -414,8 +408,10 @@ export function mountEditor(el, store) {
         return text !== undefined && file.endsWith('.mim') && store.isModule(text);
     }
 
+    // the cart's script, which is what opens when nothing else is showing
     function fallback() {
-        return ordered()[0] ?? null;
+        const paths = ordered();
+        return paths.find((file) => file.endsWith('.mim') && !isModule(file)) ?? paths[0] ?? null;
     }
 
     // the tree and the problems

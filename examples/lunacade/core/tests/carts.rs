@@ -124,10 +124,10 @@ fn swarm_stress() {
         println!("no swarm cart, skipping its stress run");
         return;
     };
-    let holds = [Button::X, Button::Y].map(|button| Hold {
-        button,
-        frames: 60..=90,
-    });
+    let holds = [Hold {
+        button: Button::X,
+        frames: 60..=61,
+    }];
     let lines =
         play(&dir, &holds, STRESS_FRAMES).unwrap_or_else(|message| panic!("swarm: {message}"));
     let crowd = lines

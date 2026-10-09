@@ -11,6 +11,9 @@ const FRAME = 1000 / 60;
 // machine slows the game down instead of falling behind for good
 const MAX_FRAMES = 2;
 
+// how far back the frame time reported in `stats` averages
+const AVERAGE_OVER = 5000;
+
 // which keys press which button, as the bit `Console.frame` wants: up, down, left, right, A, B,
 // X, Y, Start
 const KEYS = {
@@ -62,7 +65,8 @@ export function mountConsole(frame, hooks, options = {}) {
     let owed = 0;
     let last = 0;
     let ran = 0;
-    let ms = 0;
+    // every frame of the last `AVERAGE_OVER` as `[when it ended, how long it took]`
+    let recent = [];
     let tick = 0;
 
     // Move the live frame into a page modal, keeping the same canvas, machine and input
@@ -195,6 +199,9 @@ export function mountConsole(frame, hooks, options = {}) {
         last = now;
         if (now - tick >= 500) {
             tick = now;
+            recent = recent.filter(([at]) => now - at < AVERAGE_OVER);
+            const total = recent.reduce((sum, [, took]) => sum + took, 0);
+            const ms = recent.length ? total / recent.length : null;
             hooks.stats({ fps: ran * 2, ms, state: state() });
             ran = 0;
         }
@@ -210,7 +217,8 @@ export function mountConsole(frame, hooks, options = {}) {
                 );
                 pressed = released = mousePressed = 0;
                 if (drewFrame) {
-                    ms = performance.now() - start;
+                    const end = performance.now();
+                    recent.push([end, end - start]);
                     ran += 1;
                     drew = true;
                 }
@@ -245,6 +253,7 @@ export function mountConsole(frame, hooks, options = {}) {
             halted = false;
             paused = false;
             owed = 0;
+            recent = [];
             hooks.loaded();
             try {
                 show();

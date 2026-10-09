@@ -1,0 +1,58 @@
+module crates;
+
+use std::math::{TAU, Vec2, ivec2};
+
+use player::Player;
+use sprites::Sprite;
+
+const MOST = 5;
+const EVERY = 600;
+const PICKUP = 7.0;
+const RING = 165.0;
+
+pub enum Loot {
+    Heal,
+    Bomb,
+}
+
+struct Crate {
+    pos: Vec2,
+    loot: Loot,
+}
+
+pub struct Crates {
+    list: [Crate],
+    wait: int,
+}
+
+impl Crates {
+    pub fn new() -> Self {
+        Self { list = [], wait = EVERY }
+    }
+
+    pub fn update(self, p: Player) -> Loot? {
+        self.wait -= 1;
+        if self.wait <= 0 {
+            self.wait = EVERY;
+            if self.list.len() >= MOST {
+                self.list.remove(0);
+            }
+            let off = Vec2::from_angle(float::random(TAU)).scale(RING + float::random(25.0));
+            let loot = if int::random(3) == 0 Loot::Bomb else Loot::Heal;
+            self.list.push(Crate { pos = p.pos.add(off), loot });
+        }
+        for (slot, crate) in self.list.enumerate() {
+            if crate.pos.distance_squared(p.pos) < PICKUP * PICKUP {
+                self.list.remove(slot);
+                return crate.loot;
+            }
+        }
+        null
+    }
+
+    pub fn draw(self) {
+        for crate in self.list {
+            gfx::sprite(Sprite::Crate.id(), crate.pos.to_ivec2().sub(ivec2(4, 4)));
+        }
+    }
+}

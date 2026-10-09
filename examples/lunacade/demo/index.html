@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lunacade demo</title>
+<style>
+    body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0f1117;
+        color: #c8cee0;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    main {
+        width: min(100%, 1024px);
+        padding: 16px;
+        display: grid;
+        gap: 8px;
+    }
+
+    #frame {
+        display: grid;
+        place-items: center;
+        aspect-ratio: 16 / 9;
+        background: #000;
+    }
+
+    #frame canvas {
+        display: block;
+        outline: none;
+        image-rendering: pixelated;
+    }
+
+    #log {
+        margin: 0;
+        max-height: 12em;
+        overflow: auto;
+        white-space: pre-wrap;
+    }
+
+    #log:empty {
+        display: none;
+    }
+</style>
+</head>
+<body>
+<main>
+    <div id="frame"></div>
+    <pre id="log" role="log"></pre>
+</main>
+<script type="module">
+import init, { Console } from './wasm/lunacade.js';
+import { mountConsole } from './console.js';
+
+const log = document.getElementById('log');
+
+function say(line) {
+    log.append(`${line}\n`);
+    log.scrollTop = log.scrollHeight;
+}
+
+function problem(diagnostic) {
+    const { file, line, col, message, label, help } = diagnostic;
+    say([`${file}:${line}:${col} ${message}`, label, help].filter(Boolean).join(' -- '));
+}
+
+const fetched = fetch('cart.json', { cache: 'no-store' }).then((body) => body.json());
+const [cart] = await Promise.all([fetched, init()]);
+const machine = mountConsole(document.getElementById('frame'), {
+    loaded: () => {},
+    print: say,
+    fault: problem,
+    stats: () => {},
+    crash: (error) => say(String(error)),
+});
+for (const diagnostic of machine.load(Console, cart.files, Date.now()) ?? []) problem(diagnostic);
+machine.focus();
+</script>
+</body>
+</html>

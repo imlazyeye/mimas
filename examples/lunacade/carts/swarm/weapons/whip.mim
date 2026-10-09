@@ -1,0 +1,161 @@
+module @;
+
+use std::math::vec2;
+
+use fx::Fx;
+use horde::Horde;
+use player::{Passive, Player};
+use sprites::Sprite;
+use weapons::{Evolution, Weapon};
+use weapons::wait;
+
+struct WhipLevel {
+    description: str,
+    cooldown: int,
+    damage: float,
+    area: float,
+    both: bool,
+}
+
+// slashes to one side and then the other
+pub struct Whip {
+    pub lv: int,
+    cool: int,
+    side: float,
+    swing: int,
+}
+
+impl Whip {
+    const REACH = 41.0;    // how far out to the side a slash gets
+    const HALF = 11.0;     // half the height of the strip it covers
+    const SWING = 8;       // frames a crescent stays drawn
+    const ARC_STEPS = 6;   // six line segments approximate each whip crescent
+    const ARC_STEP = 0.37; // radians: three steps on either side cover roughly +/-64 degrees
+    const ARC_START = -3.0 * Self::ARC_STEP;
+    const ARC_LAYERS = [1.0, 0.8];
+
+    const LEVELS = [
+        WhipLevel {
+            description = "SLASHES LEFT AND RIGHT IN TURN",
+            cooldown = 64, damage = 13.0, area = 1.0, both = false,
+        },
+        WhipLevel {
+            description = "REACHES FARTHER",
+            cooldown = 58, damage = 17.0, area = 1.25, both = false,
+        },
+        WhipLevel {
+            description = "HITS HARDER",
+            cooldown = 52, damage = 21.0, area = 1.25, both = false,
+        },
+        WhipLevel {
+            description = "SLASHES BOTH SIDES AT ONCE",
+            cooldown = 46, damage = 25.0, area = 1.25, both = true,
+        },
+        WhipLevel {
+            description = "REACHES FARTHER",
+            cooldown = 40, damage = 29.0, area = 1.5, both = true,
+        },
+        WhipLevel {
+            description = "HITS HARDER",
+            cooldown = 34, damage = 33.0, area = 1.5, both = true,
+        },
+    ];
+
+    // hits what's in the strip on one side of the player
+    fn lash(self, p: Player, horde: Horde, level: WhipLevel, side: float) {
+        let area = level.area * p.stats.area;
+        let reach = Self::REACH * area;
+        let half = Self::HALF * area;
+        let dmg = level.damage * p.stats.might;
+        let middle = p.pos.add(vec2(side * reach / 2.0, 0.0));
+        for foe in horde.touching(middle, reach / 2.0 + half) {
+            let off = foe.pos.sub(p.pos);
+            let along = off.x * side;
+            let wide = foe.kind.REACH;
+            if along > -4.0 && along < reach + wide && off.y.abs() < half + wide {
+                horde.hurt(foe, dmg, p.pos, 3.0);
+            }
+        }
+    }
+
+    // a crescent bulging out to one side
+    fn crescent(self, p: Player, reach: float, side: float, color: Color) {
+        let start = Self::ARC_START;
+        for scale in Self::ARC_LAYERS {
+            let r = reach * scale;
+            let last = p.pos.add(vec2(side * start.cos() * r, start.sin() * r * 0.45)).to_ivec2();
+            for i in 1..=Self::ARC_STEPS {
+                let a = (i.to_float() - 3.0) * Self::ARC_STEP;
+                let point = p.pos.add(vec2(side * a.cos() * r, a.sin() * r * 0.45)).to_ivec2();
+                gfx::line(last, point, color);
+                last = point;
+            }
+        }
+    }
+}
+
+impl Weapon for Whip {
+    const NAME = "WHIP";
+    const ICON = Sprite::Whip;
+
+    pub fn new() -> Self {
+        Self { lv = 1, cool = 0, side = 1.0, swing = 0 }
+    }
+
+    fn level(self) -> int {
+        self.lv
+    }
+
+    fn level_up(self) {
+        self.lv += 1;
+    }
+
+    fn maxed(self) -> bool {
+        self.lv >= Self::LEVELS.len()
+    }
+
+    fn perk(self, level: int) -> str {
+        Self::LEVELS[level - 1].description
+    }
+
+    fn evolution(self) -> Evolution? {
+        Evolution { catalyst = Passive::Might, into = reaper::Reaper::new() }
+    }
+
+    fn update(self, p: Player, horde: Horde, fx: Fx) {
+        let level = Self::LEVELS[self.lv - 1];
+
+        self.cool -= 1;
+        if self.swing > 0 {
+            self.swing -= 1;
+        }
+        if self.cool <= 0 {
+            self.cool = wait(level.cooldown, p);
+            self.swing = Self::SWING;
+            self.side = -self.side;
+            self.lash(p, horde, level, self.side);
+            if level.both {
+                self.lash(p, horde, level, -self.side);
+            }
+        }
+    }
+
+    fn draw(self, p: Player) {
+        if self.swing == 0 {
+            return;
+        }
+        let level = Self::LEVELS[self.lv - 1];
+        let color = if self.swing > 5 {
+            Color::White
+        } else if self.swing > 2 {
+            Color::Silver
+        } else {
+            Color::Slate
+        };
+        let reach = Self::REACH * level.area * p.stats.area;
+        self.crescent(p, reach, self.side, color);
+        if level.both {
+            self.crescent(p, reach, -self.side, color);
+        }
+    }
+}

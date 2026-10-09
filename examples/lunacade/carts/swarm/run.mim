@@ -2,59 +2,86 @@ module run;
 
 use std::math::{IVec2, ivec2, vec2};
 
+use crates::{Crates, Loot};
 use fx::Fx;
 use gems::Gems;
 use ground;
 use horde::Horde;
 use player::Player;
 use waves::Waves;
-use weapons::{Weapon, Wand};
+use weapons::Weapon;
+use weapons::bases;
 
 // the run starts in the middle of a field with no edges
 const START = 100000.0;
+
+// the one weapon the lab hands you, by its `NAME`. change it to watch another one on its own
+const LAB_WEAPON = "CROSS";
+
+const CRATE_HEAL = 30;
+const BLAST = 170.0;
+
+// how a run was started
+pub enum Mode {
+    Normal,
+    // a full crowd from the first frame, to see what the console can take
+    Stress,
+    // an empty field and a single weapon, to watch what it does
+    Lab,
+}
 
 // what a frame of the run turned up, for the scenes to react to
 pub enum Event {
     Nothing,
     LevelUp,
     Died,
-    Won,
 }
 
 // one run's worth of state, so starting over is making a new one
 pub struct Run {
     pub t: int,
-    // the stress start, which has a crowd from the first frame and can't hurt the player
-    pub stress: bool,
+    // either debug mode also makes the player untouchable
+    pub mode: Mode,
     pub player: Player,
     pub weapons: [Weapon],
     pub horde: Horde,
     pub gems: Gems,
+    pub crates: Crates,
     pub waves: Waves,
     pub fx: Fx,
 }
 
 impl Run {
-    pub fn new(stress: bool) -> Self {
+    pub fn new(mode: Mode) -> Self {
         let run = Self {
             t = 0,
-            stress,
-            player = Player::new(vec2(START, START), stress),
-            weapons = [Wand::new()],
+            mode,
+            player = Player::new(vec2(START, START), mode != Mode::Normal),
+            // a normal run gets its first one from the weapon menu
+            weapons = [],
             horde = Horde::new(),
             gems = Gems::new(),
+            crates = Crates::new(),
             waves = Waves::new(),
             fx = Fx::new(),
         };
-        if stress {
-            // every weapon at once, which is the most the console will ever be asked to do
-            run.weapons = Weapon::*::new();
-            for weapon in run.weapons {
-                weapon.level_up();
-                weapon.level_up();
-            }
-            run.waves.crowd(run.horde, run.player);
-            print(f"enemies {run.horde.len()}");
+        match mode {
+            Mode::Normal => {},
+            Mode::Stress => {
+                // every weapon at once, which is the most the console will ever be asked to do
+                run.weapons = bases();
+                for weapon in run.weapons {
+                    weapon.level_up();
+                    weapon.level_up();
+                }
+                run.waves.crowd(run.horde, run.player);
+                print(f"enemies {run.horde.len()}");
+            },
+            Mode::Lab => {
+                run.weapons = for weapon in Weapon::*::new() {
+                    if weapon.NAME == LAB_WEAPON collect weapon;
+                };
+            },
         }
         run
     }
@@ -68,19 +95,35 @@ impl Run {
         for weapon in self.weapons {
             weapon.update(p, self.horde, self.fx);
         }
+        if self.mode == Mode::Normal {
+            if let loot? = self.crates.update(p) {
+                match loot {
+                    Loot::Heal => {
+                        p.heal(CRATE_HEAL);
+                        self.fx.burst(p.pos, 12, Color::Red);
+                    },
+                    Loot::Bomb => {
+                        for foe in self.horde.touching(p.pos, BLAST) {
+                            if !foe.kind.boss() {
+                                self.horde.hurt(foe, foe.hp, p.pos, 0.0);
+                            }
+                        }
+                        self.fx.shake(6.0);
+                        self.fx.burst(p.pos, 60, Color::Yellow);
+                    },
+                }
+            }
+        }
         self.reap();
-        self.waves.update(self.horde, p, self.t, self.stress);
+        if self.mode != Mode::Lab {
+            self.waves.update(self.horde, p, self.t, self.mode == Mode::Stress);
+        }
         self.fx.update();
-        if self.stress && self.t % 60 == 0 {
+        if self.mode == Mode::Stress && self.t % 60 == 0 {
             print(f"enemies {self.horde.len()}");
         }
         if p.hp <= 0 {
             return Event::Died;
-        }
-        if let lich? = self.horde.boss {
-            if lich.hp <= 0.0 {
-                return Event::Won;
-            }
         }
         if p.gain(self.gems.update(p)) Event::LevelUp else Event::Nothing
     }
@@ -90,6 +133,7 @@ impl Run {
         let view = p.pos.to_ivec2().sub(ivec2(128, 72));
         ground::draw(view.add(self.fx.offset()));
         self.gems.draw();
+        self.crates.draw();
         self.horde.draw();
         p.draw();
         for weapon in self.weapons {
@@ -115,7 +159,11 @@ impl Run {
     fn reap(self) {
         for drop in self.horde.drops {
             self.gems.drop(drop.pos, drop.worth);
-            self.fx.burst(drop.pos, if drop.boss 40 else 5, Color::White);
+            let sparks = if drop.boss { 40 } else if drop.elite { 20 } else { 5 };
+            self.fx.burst(drop.pos, sparks, Color::White);
+            if drop.elite {
+                self.fx.shake(3.0);
+            }
         }
         if !self.horde.drops.is_empty() {
             self.horde.drops = [];

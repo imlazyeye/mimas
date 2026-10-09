@@ -358,9 +358,11 @@ function notify(text, sticky = false) {
 
 function renderStats({ state, fps, ms }) {
     const el = $('state');
+    const timed = state === 'running' && Number.isFinite(ms);
     el.dataset.state = state;
     el.textContent = state === 'running' ? `${fps} fps` : state;
-    el.title = state === 'running' && Number.isFinite(ms) ? `${ms.toFixed(2)} ms a frame` : '';
+    el.textContent += timed ? `, ${ms.toFixed(1)} ms` : '';
+    el.title = timed ? 'how long a frame took on average over the last 5 seconds' : '';
 }
 
 function describe(diagnostic) {

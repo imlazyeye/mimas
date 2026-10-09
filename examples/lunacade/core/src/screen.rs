@@ -161,22 +161,21 @@ impl Screen {
         widest.unwrap_or(0) as i64 * font::CELL_W
     }
 
-    /// Draws sprite `n` with its top left corner at the position, skipping the transparent color.
-    /// A sprite number off the sheet draws nothing.
-    pub fn sprite(&mut self, n: i64, x: i64, y: i64, flip_x: bool, flip_y: bool) {
+    /// Draws sprite `n` with its top left corner at the position, `scale` times as big, skipping
+    /// the transparent color. A sprite number off the sheet draws nothing.
+    pub fn sprite(&mut self, n: i64, x: i64, y: i64, flip_x: bool, flip_y: bool, scale: f64) {
         let size = SPRITE_SIZE as i64;
         let per_row = SHEET_SIZE as i64 / size;
         if (0..per_row * per_row).contains(&n) {
             let source = [n % per_row * size, n / per_row * size, size, size];
-            self.region(source, x, y, (flip_x, flip_y));
+            self.region(source, x, y, (flip_x, flip_y), scale);
         }
     }
 
-    /// Draws the `w` by `h` part of the sheet that starts at `(sx, sy)` with its top left corner
-    /// at the position, the way [`sprite`](Self::sprite) does. Whatever part of it is off the sheet
-    /// draws nothing.
-    pub fn blit(&mut self, sx: i64, sy: i64, w: i64, h: i64, x: i64, y: i64) {
-        self.region([sx, sy, w, h], x, y, (false, false));
+    /// Draws the `[sx, sy, w, h]` part of the sheet with its top left corner at the position, the
+    /// way [`sprite`](Self::sprite) does. Whatever part of it is off the sheet draws nothing.
+    pub fn blit(&mut self, source: [i64; 4], x: i64, y: i64, scale: f64) {
+        self.region(source, x, y, (false, false), scale);
     }
 
     /// The circle's outline, one pixel thick, around the position. A negative radius draws
@@ -295,41 +294,52 @@ impl Screen {
         self.plot(x, y, color);
     }
 
-    /// Draws the `[sx, sy, w, h]` part of the sheet at the position, flipped inside its own
-    /// rectangle, skipping the pixels that match the transparent color.
-    fn region(&mut self, source: [i64; 4], x: i64, y: i64, (flip_x, flip_y): (bool, bool)) {
+    /// Draws the `[sx, sy, w, h]` part of the sheet at the position, `scale` times as big and
+    /// flipped inside its own rectangle, skipping the pixels that match the transparent color.
+    /// Every pixel it covers takes the sheet pixel it falls on, so a scale that isn't a whole
+    /// number draws the sheet's pixels in uneven sizes.
+    fn region(
+        &mut self,
+        source: [i64; 4],
+        x: i64,
+        y: i64,
+        (flip_x, flip_y): (bool, bool),
+        scale: f64,
+    ) {
         let [sx, sy, w, h] = source;
         let (x, y) = self.at(x, y);
+        // nothing is drawn unless it comes out at least a pixel each way, which also turns away a
+        // scale that isn't a number
+        let (across, down) = ((w as f64 * scale).round(), (h as f64 * scale).round());
+        if !(w > 0 && h > 0 && across >= 1.0 && down >= 1.0) {
+            return;
+        }
         // the ranges are worked out as i128 (the rectangle can be as far out as an int goes)
-        let [sx, sy, w, h, x, y] = [sx, sy, w, h, x, y].map(i128::from);
-        let sheet = SHEET_SIZE as i128;
-        // the offsets into the rectangle that are on the sheet
-        let (ox0, ox1) = ((-sx).max(0), (sheet - sx).min(w));
-        let (oy0, oy1) = ((-sy).max(0), (sheet - sy).min(h));
-        let (dx0, dx1) = if flip_x {
-            (x + w - ox1, x + w - ox0)
-        } else {
-            (x + ox0, x + ox1)
-        };
-        let (dy0, dy1) = if flip_y {
-            (y + h - oy1, y + h - oy0)
-        } else {
-            (y + oy0, y + oy1)
-        };
-        // then the part of that inside the clip
         let clip = self.clip;
-        let (dx0, dx1) = (dx0.max(clip.left.into()), dx1.min(clip.right.into()));
-        let (dy0, dy1) = (dy0.max(clip.top.into()), dy1.min(clip.bottom.into()));
+        let (left, top) = (i128::from(x), i128::from(y));
+        let (right, bottom) = (
+            left.saturating_add(across as i128),
+            top.saturating_add(down as i128),
+        );
+        let (dx0, dx1) = (left.max(clip.left.into()), right.min(clip.right.into()));
+        let (dy0, dy1) = (top.max(clip.top.into()), bottom.min(clip.bottom.into()));
         if dx0 >= dx1 || dy0 >= dy1 {
             return;
         }
         // all of it is small now
-        let [sx, sy, w, h, x, y] = [sx, sy, w, h, x, y].map(|n| n as i64);
+        let offset = |d: i64, size: i64, flip: bool| {
+            let offset = ((d as f64 / scale) as i64).min(size - 1);
+            if flip { size - 1 - offset } else { offset }
+        };
         for dy in dy0 as i64..dy1 as i64 {
-            let oy = if flip_y { h - 1 - (dy - y) } else { dy - y };
+            let oy = offset(dy - y, h, flip_y);
             for dx in dx0 as i64..dx1 as i64 {
-                let ox = if flip_x { w - 1 - (dx - x) } else { dx - x };
-                let color = self.sheet[((sy + oy) * SHEET_SIZE as i64 + sx + ox) as usize];
+                let ox = offset(dx - x, w, flip_x);
+                let Some(index) = Self::sheet_index(sx.saturating_add(ox), sy.saturating_add(oy))
+                else {
+                    continue;
+                };
+                let color = self.sheet[index];
                 if self.transparent != Some(color) {
                     self.pixels[dy as usize * WIDTH + dx as usize] =
                         self.remap[color as usize & 15];
