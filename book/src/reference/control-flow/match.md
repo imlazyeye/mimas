@@ -54,7 +54,7 @@ Binding the whole value is how an arm changes a variant's fields in place. Enum 
 enum Shape {
     Circle(float),
 }
-let scene = Scene::Circle(5.0);
+let scene = Shape::Circle(5.0);
 match scene {
     // Shape::Circle(r) => r = 10.0, // this would only edit the local variable `r`
     shape @ Shape::Circle(_) => { shape.0 = 10.0; }, // this lets you mutate
