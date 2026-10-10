@@ -183,6 +183,67 @@ button.armed {
     touch-action: none;
 }
 
+.screen-tools {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 6px;
+}
+
+.screen-tools button {
+    padding: 2px 10px;
+    font-size: 13px;
+}
+
+/* Keep the page's layout and scroll position while its live frame is in the dialog. */
+.screen-slot {
+    aspect-ratio: 16 / 9;
+}
+
+html.screen-expanded {
+    overflow: hidden;
+}
+
+.screen-dialog {
+    width: calc(100% - 32px);
+    height: calc(100% - 32px);
+    max-width: none;
+    max-height: none;
+    margin: auto;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--ground);
+    color: var(--text);
+}
+
+.screen-dialog[open] {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.screen-dialog::backdrop {
+    background: rgb(0 0 0 / 75%);
+}
+
+.screen-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.screen-dialog .frame {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    aspect-ratio: auto;
+}
+
+.screen-dialog > .px-notice {
+    margin: 0;
+}
+
 .notice {
     position: absolute;
     z-index: 1;

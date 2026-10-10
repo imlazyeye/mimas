@@ -1,7 +1,7 @@
 // The console on the page: a canvas the machine's screen is copied into, the keyboard and mouse
 // as the machine wants them, and a loop that runs the cart's frames at 60 a second.
 
-import { h } from './dom.js';
+import { button, h } from './dom.js';
 
 const WIDTH = 256;
 const HEIGHT = 144;
@@ -64,6 +64,34 @@ export function mountConsole(frame, hooks, options = {}) {
     let ran = 0;
     let ms = 0;
     let tick = 0;
+
+    // Move the live frame into a page modal, keeping the same canvas, machine and input
+    // listeners. ResizeObserver fits it again when it opens and when it returns home.
+    const title = options.title ?? 'Game';
+    const home = h('div', { class: 'screen-slot' });
+    const dialog = h('dialog', { class: 'screen-dialog', 'aria-label': `Expanded ${title.toLowerCase()}` });
+    const expand = button('Expand', () => {
+        releaseInput();
+        mouse = [-1, -1];
+        dialog.append(frame);
+        if (options.notice) dialog.append(options.notice);
+        document.documentElement.classList.add('screen-expanded');
+        dialog.showModal();
+        canvas.focus({ preventScroll: true });
+    }, { 'aria-label': `Expand ${title.toLowerCase()}`, 'aria-haspopup': 'dialog' });
+    const close = button('Close (Esc)', () => dialog.close());
+    dialog.append(h('div', { class: 'screen-dialog-head' }, h('strong', {}, title), close));
+    document.body.append(dialog);
+    frame.before(h('div', { class: 'screen-tools' }, expand), home);
+    home.append(frame);
+    dialog.addEventListener('close', () => {
+        releaseInput();
+        mouse = [-1, -1];
+        home.append(frame);
+        if (options.notice) home.after(options.notice);
+        document.documentElement.classList.remove('screen-expanded');
+        expand.focus({ preventScroll: true });
+    });
 
     // the screen keeps a whole number of device pixels for each of its own, in the middle of the
     // frame

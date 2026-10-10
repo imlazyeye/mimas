@@ -42,6 +42,8 @@ export function mountPixels(el, store) {
             }
         },
     }, {
+        title: 'Pixel editor',
+        notice,
         label: 'Sprite editor. Choose a sprite, draw, select a color, undo or redo.',
         clampDrag: true,
         shortcut(event) {

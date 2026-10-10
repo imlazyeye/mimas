@@ -10,6 +10,8 @@ lunacade is in the book as an example of embedding the VM directly. [The Bevy pl
 
 The page has the console on one side, with a picker for the example carts under it, and two tabs on the other.
 
+Use Expand above the game or sprite editor to draw its canvas larger in a page overlay. Close or Escape returns it to the layout, keeping the game and edits where they were.
+
 | Tab | What it does |
 | :-- | :-- |
 | Code | Edits a cart's files, listed as a tree with a folder for each part of a path. It checks the cart as you type, marks the errors, and runs the cart again a moment after the code checks clean (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it now). Hovering a name shows what it is and its docs, <kbd>Ctrl</kbd>-click goes to where it's declared, <kbd>F2</kbd> renames it everywhere, and a `let` without a type shows the one it got. |
