@@ -18,6 +18,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 mod carts;
+mod pixels;
 
 thread_local! {
     static LIBRARY: OnceCell<Rc<Library<()>>> = const { OnceCell::new() };
@@ -29,6 +30,9 @@ thread_local! {
 #[wasm_bindgen]
 pub struct Console {
     machine: Machine,
+    /// Only the editor exports its sheet. A running game's sprite mutations stay local.
+    saved_sheet: Option<pixels::Sheet>,
+    sheet_clean: bool,
 }
 
 #[wasm_bindgen]
@@ -43,7 +47,39 @@ impl Console {
         let cart: Cart = serde_json::from_str(cart_json)
             .map_err(|error| problems(vec![Diagnostic::at("", "", 0..0, error.to_string())]))?;
         let machine = Machine::load(&cart, seed as u64).map_err(problems)?;
-        Ok(Console { machine })
+        Ok(Console {
+            machine,
+            saved_sheet: None,
+            sheet_clean: true,
+        })
+    }
+
+    /// Opens the built-in pixel editor cart on a working copy of `sprites.txt`. Invalid text
+    /// is ignored in the preview, and preserved in the file until the user actually edits it.
+    pub fn pixel_editor(text: &str) -> Result<Console, JsValue> {
+        let (cart, sheet, clean) = pixels::cart(text);
+        let mut console = Self::new(&serde_json::to_string(&cart).unwrap(), 0.0)?;
+        console.saved_sheet = Some(sheet);
+        console.sheet_clean = clean;
+        Ok(console)
+    }
+
+    /// Whether the editor's sheet can represent all the text it was opened with.
+    pub fn sheet_is_clean(&self) -> bool {
+        self.sheet_clean
+    }
+
+    /// Takes a changed editor sheet as `sprites.txt`, or nothing if no pixels changed. The
+    /// page writes this through its usual file store, so autosave, sharing and auto-run agree.
+    pub fn take_sheet(&mut self) -> Option<String> {
+        let saved = self.saved_sheet.as_mut()?;
+        let screen = self.machine.screen();
+        if *saved == screen.sheet {
+            return None;
+        }
+        *saved = screen.sheet;
+        self.sheet_clean = true;
+        Some(pixels::serialize(saved))
     }
 
     /// Plays one frame. `held` has a bit for each button in the order of `Button`'s variants (up,

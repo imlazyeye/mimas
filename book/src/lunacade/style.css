@@ -180,6 +180,7 @@ button.armed {
     display: block;
     outline: none;
     image-rendering: pixelated;
+    touch-action: none;
 }
 
 .notice {

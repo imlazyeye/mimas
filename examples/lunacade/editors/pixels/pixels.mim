@@ -1,0 +1,197 @@
+use std::math::{IVec2, ivec2};
+
+// The sheet being edited is this cart's sprite sheet. The host imports sprites.txt when it
+// opens the cart and saves changes to the sheet; selection, strokes and history live here.
+const SHEET = IVec2 { x = 4, y = 8 };
+const EDIT = IVec2 { x = 148, y = 8 };
+const SCALE = 12;
+const PALETTE = IVec2 { x = 148, y = 108 };
+const HEX = "0123456789abcdef";
+const COLORS = [
+    "Black #1a1c2c", "Plum #5d275d", "Red #b13e53", "Orange #ef7d57",
+    "Yellow #ffcd75", "Lime #a7f070", "Green #38b764", "Teal #257179",
+    "Navy #29366f", "Blue #3b5dc9", "Sky #41a6f6", "Cyan #73eff7",
+    "White #f4f4f4", "Silver #94b0c2", "Slate #566c86", "Charcoal #333c57",
+];
+const DIRECTIONS = [
+    (Button::Left, -1, 0), (Button::Right, 1, 0),
+    (Button::Up, 0, -1), (Button::Down, 0, 1),
+];
+const UNDO_LIMIT = 50;
+
+struct Step {
+    n: int,
+    pixels: [Color],
+}
+
+struct Stroke {
+    before: Step,
+    last: IVec2,
+    color: Color,
+    button: Mouse,
+}
+
+struct Editor {
+    sprite: int,
+    color: int,
+    undo: [Step],
+    redo: [Step],
+    stroke: Stroke?,
+    hold: int,
+}
+
+fn origin(n: int) -> IVec2 { ivec2(n % 16 * 8, n ~/ 16 * 8) }
+
+fn grab(n: int) -> Step {
+    let at = origin(n);
+    Step { n, pixels = for i in 0..64 collect gfx::sheet_pixel(at.add(ivec2(i % 8, i ~/ 8))) }
+}
+
+fn put(step: Step) {
+    let at = origin(step.n);
+    for i in 0..64 {
+        gfx::set_sheet_pixel(at.add(ivec2(i % 8, i ~/ 8)), step.pixels[i]);
+    }
+}
+
+fn inside(pos: IVec2, at: IVec2, size: IVec2) -> bool {
+    pos.x >= at.x && pos.y >= at.y && pos.x < at.x + size.x && pos.y < at.y + size.y
+}
+
+fn cell(pos: IVec2) -> IVec2 {
+    ivec2(((pos.x - EDIT.x).max(0) ~/ SCALE).min(7),
+          ((pos.y - EDIT.y).max(0) ~/ SCALE).min(7))
+}
+
+impl Editor {
+    fn update(self) {
+        if let stroke? = self.stroke {
+            if let pos? = input::mouse() { self.draw_to(cell(pos)); }
+            if input::mouse_held(stroke.button) { return; }
+            self.finish();
+        }
+
+        if input::pressed(Button::A) { self.travel(self.undo, self.redo); }
+        if input::pressed(Button::B) { self.travel(self.redo, self.undo); }
+
+        let held = false;
+        for (button, dx, dy) in DIRECTIONS {
+            held = held || input::held(button);
+            if input::pressed(button) || (input::held(button) && self.hold >= 18 && self.hold % 4 == 0) {
+                let x = (self.sprite % 16 + dx).clamp(0, 15);
+                let y = (self.sprite ~/ 16 + dy).clamp(0, 15);
+                self.sprite = y * 16 + x;
+            }
+        }
+        self.hold = if held self.hold + 1 else 0;
+
+        let left = input::mouse_pressed(Mouse::Left);
+        let right = input::mouse_pressed(Mouse::Right);
+        if let pos? = input::mouse() {
+            if inside(pos, EDIT, ivec2(96, 96)) && (left || right) {
+                let start = cell(pos);
+                self.stroke = Stroke {
+                    before = grab(self.sprite), last = start,
+                    color = if right Color::Black else Color::from_int(self.color),
+                    button = if right Mouse::Right else Mouse::Left,
+                };
+                self.draw_to(start);
+                // A tap can be pressed and released between two frames.
+                if !input::mouse_held(if right Mouse::Right else Mouse::Left) { self.finish(); }
+            } else if left {
+                if inside(pos, SHEET, ivec2(128, 128)) {
+                    self.sprite = (pos.y - SHEET.y) ~/ 8 * 16 + (pos.x - SHEET.x) ~/ 8;
+                } else if inside(pos, PALETTE, ivec2(96, 18)) {
+                    self.color = (pos.y - PALETTE.y) ~/ 9 * 8 + (pos.x - PALETTE.x) ~/ 12;
+                } else if inside(pos, ivec2(148, 130), ivec2(46, 12)) {
+                    self.travel(self.undo, self.redo);
+                } else if inside(pos, ivec2(198, 130), ivec2(46, 12)) {
+                    self.travel(self.redo, self.undo);
+                }
+            }
+        }
+    }
+
+    // A continuous line between sampled pointer positions keeps fast strokes gap-free.
+    fn draw_to(self, to: IVec2) {
+        if let stroke? = self.stroke {
+            let at = origin(stroke.before.n);
+            let x = stroke.last.x;
+            let y = stroke.last.y;
+            let dx = (to.x - x).abs();
+            let dy = -(to.y - y).abs();
+            let sx = if x < to.x 1 else -1;
+            let sy = if y < to.y 1 else -1;
+            let error = dx + dy;
+            loop {
+                gfx::set_sheet_pixel(at.add(ivec2(x, y)), stroke.color);
+                if x == to.x && y == to.y { break; }
+                let doubled = error * 2;
+                if doubled >= dy { error += dy; x += sx; }
+                if doubled <= dx { error += dx; y += sy; }
+            }
+            stroke.last = to;
+        }
+    }
+
+    fn finish(self) {
+        if let stroke? = self.stroke {
+            self.stroke = null;
+            let before = stroke.before;
+            if grab(before.n).pixels == before.pixels { return; }
+            self.undo.push(before);
+            if self.undo.len() > UNDO_LIMIT { self.undo.remove(0); }
+            self.redo = [];
+        }
+    }
+
+    fn travel(self, from: [Step], to: [Step]) {
+        if let step? = from.pop() {
+            to.push(grab(step.n));
+            self.sprite = step.n;
+            put(step);
+        }
+    }
+
+    fn draw(self) {
+        gfx::clear(Color::Black);
+        gfx::transparent(null);
+        gfx::text("SHEET", ivec2(4, 1), Color::Silver);
+        gfx::blit(ivec2(0, 0), ivec2(128, 128), SHEET);
+        for i in 1..16 {
+            gfx::line(SHEET.add(ivec2(i * 8, 0)), SHEET.add(ivec2(i * 8, 127)), Color::Charcoal);
+            gfx::line(SHEET.add(ivec2(0, i * 8)), SHEET.add(ivec2(127, i * 8)), Color::Charcoal);
+        }
+        let at = origin(self.sprite);
+        gfx::rect(SHEET.add(at), ivec2(8, 8), Color::Yellow);
+        gfx::text(f"SPRITE {self.sprite}  X{at.x} Y{at.y}", ivec2(4, 138), Color::Silver);
+
+        for i in 0..64 {
+            let x = i % 8;
+            let y = i ~/ 8;
+            gfx::fill_rect(EDIT.add(ivec2(x * SCALE, y * SCALE)), ivec2(SCALE, SCALE), Color::Charcoal);
+            gfx::fill_rect(EDIT.add(ivec2(x * SCALE, y * SCALE)), ivec2(SCALE - 1, SCALE - 1),
+                gfx::sheet_pixel(at.add(ivec2(x, y))));
+        }
+        gfx::text(f"{HEX[self.color]} {COLORS[self.color]}", ivec2(144, 1), Color::Silver);
+        for i in 0..16 {
+            let pos = PALETTE.add(ivec2(i % 8 * 12, i ~/ 8 * 9));
+            gfx::fill_rect(pos, ivec2(11, 8), Color::from_int(i));
+            if i == self.color {
+                gfx::rect(pos, ivec2(11, 8), Color::White);
+                gfx::rect(pos.add(ivec2(1, 1)), ivec2(9, 6), Color::Black);
+            }
+        }
+        self.history_button("Z UNDO", 148, !self.undo.is_empty());
+        self.history_button("X REDO", 198, !self.redo.is_empty());
+    }
+
+    fn history_button(self, text: str, x: int, enabled: bool) {
+        gfx::rect(ivec2(x, 130), ivec2(46, 12), if enabled Color::Slate else Color::Charcoal);
+        gfx::text(text, ivec2(x + 11, 133), if enabled Color::White else Color::Slate);
+    }
+}
+
+let editor = Editor { sprite = 0, color = 12, undo = [], redo = [], stroke = null, hold = 0 };
+luna::update(|| editor.update());
+luna::draw(|| editor.draw());

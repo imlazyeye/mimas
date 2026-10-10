@@ -15,6 +15,8 @@ The page has the console on one side, with a picker for the example carts under 
 | Code | Edits a cart's files, listed as a tree with a folder for each part of a path. It checks the cart as you type, marks the errors, and runs the cart again a moment after the code checks clean (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs it now). Hovering a name shows what it is and its docs, <kbd>Ctrl</kbd>-click goes to where it's declared, <kbd>F2</kbd> renames it everywhere, and a `let` without a type shows the one it got. |
 | Sprites | A pixel editor for `sprites.txt`. |
 
+In Sprites, choose one of the 256 sprites on the left and draw on the enlarged sprite on the right. Pick a color below it; right-click erases to black. The arrow keys select a sprite. Z undoes a stroke and X redoes it; Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y work too (Command on Mac). Edits appear in `sprites.txt` and use the same saving, sharing and auto-run as code edits.
+
 The [Cart API](./lunacade-api.md) chapter is the reference for everything a cart can call. Edits are saved in your browser for each cart. Share compresses the whole cart into the part of the link after the `#`. Nothing is sent to a server, and the page sets no cookies. The page needs WebAssembly, and it loads its code editor and the font of its title from CDNs.
 
 ## A cart
@@ -159,6 +161,8 @@ if !machine.frame(&input) {
 `luna::update` and `luna::draw` take a closure and keep it with `ctx.stash`, which is the host side of [Function Values](../extension/function-values.md), and `frame` calls them back with `vm.call_value`. The cap on a frame is `Vm::set_fuel`, which makes a script that runs too many ops fault with "ran out of fuel" and leaves the Vm usable afterwards.
 
 `frame` never reads a clock, and the front end times its own frames. On the page that front end is a few hundred lines of JavaScript: the `lunacade` crate wraps a `Machine` in a `Console` class through wasm-bindgen, and the page draws the screen it copies out into a canvas, reads the keyboard and mouse, and runs the frames from `requestAnimationFrame`. The crate also checks a cart against the installed API for the editor, and ships the example carts. `cargo test -p lunacade-core` plays every cart in `carts` for a minute of frames with scripted input.
+
+The Sprites tab runs the cart in `examples/lunacade/editors/pixels` in a second console. It uses the ordinary cart API for drawing, input and sprite-sheet changes, and keeps selection and undo history in Mimas. The web host loads the current `sprites.txt` into this cart and writes changes from its sheet back through the file store. Game consoles keep their runtime sheet changes local. The editor cart is bundled separately from the games, so it doesn't become part of the user's cart or share link.
 
 ```admonish note title="Why not the Bevy plugin?"
 The plugin is for scripts that read and write a game's components and resources, with Bevy's schedule running them. A cart has one screen and a cap on its ops, and none of that lives in a Bevy world. lunacade also needs the fuel limit and its own say over when each hook runs, which the plugin doesn't offer.

@@ -7,7 +7,9 @@
 // `on(event, fn)`, `setFile(path, text)` (`null` deletes, so a rename is a set and a delete),
 // `select(path, range)` (shows the Code tab and emits "select") and `focusConsole()`. The events
 // are "cart" (read `store.cart`), "file" (the path that changed), "diagnostics" (the list) and
-// "select" (`{path, range}`, a range having the shape of a diagnostic).
+// "select" (`{path, range}`, a range having the shape of a diagnostic), "tab" (the active tab)
+// and "runtime" (the wasm module was stopped or replaced). The sprite editor also reads `tab`
+// and `runtime` so its own console pauses when hidden and recovers with the game console.
 
 import { mountConsole } from './console.js';
 import { decodeCart, encodeCart, validFiles } from './share.js';
@@ -83,6 +85,7 @@ function emit(event, arg) {
 
 const store = {
     cart: null,
+    tab: 'code',
     diagnostics: [],
     on,
     setFile,
@@ -96,6 +99,7 @@ const store = {
     },
     ensureAnalysis,
     notify,
+    get runtime() { return wasm; },
 };
 
 // the carts: the examples from the console, and a cart from a link
@@ -223,7 +227,9 @@ function runNow() {
     if (!ensureAnalysis()) return;
     let problems;
     try {
-        problems = screen.load(wasm.Console, store.cart.files, Math.floor(Math.random() * 2 ** 53));
+        problems = screen.load(() => new wasm.Console(
+            JSON.stringify({ files: store.cart.files }), Math.floor(Math.random() * 2 ** 53),
+        ));
     } catch (error) {
         crashed(error);
         return;
@@ -322,6 +328,7 @@ function crashed(error) {
     wasm = null;
     analysisCurrent = false;
     screen.stop();
+    emit('runtime');
     renderStats({ state: 'crashed' });
     notify('The console crashed. Press Restart to start it again.', true);
 }
@@ -336,6 +343,7 @@ async function recover() {
         return false;
     }
     notice.hidden = true;
+    emit('runtime');
     return true;
 }
 
@@ -503,12 +511,14 @@ window.addEventListener('hashchange', async () => {
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 
 function showTab(name) {
+    store.tab = name;
     for (const tab of tabs) {
         const selected = tab.dataset.tab === name;
         tab.setAttribute('aria-selected', selected);
         tab.tabIndex = selected ? 0 : -1;
         $(`panel-${tab.dataset.tab}`).hidden = !selected;
     }
+    emit('tab', name);
 }
 
 function select(path, range) {

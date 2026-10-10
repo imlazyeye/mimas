@@ -35,13 +35,14 @@ const KEYS = {
 
 // `hooks` gets `loaded()` when a cart has taken over, before its first output, `print(line)`,
 // `fault(diagnostic)`, `stats({fps, ms, state})` twice a second and `crash(error)` when the wasm
-// throws, after which nothing runs until the next `load`
-export function mountConsole(frame, hooks) {
+// throws, after which nothing runs until the next `load`. An editor can also read `changed`
+// after a frame, map keyboard shortcuts and clamp captured drags to the screen.
+export function mountConsole(frame, hooks, options = {}) {
     const canvas = h('canvas', {
         width: WIDTH,
         height: HEIGHT,
         tabindex: 0,
-        'aria-label': 'The console. Click it so it has the keyboard.',
+        'aria-label': options.label ?? 'The console. Click it so it has the keyboard.',
     });
     frame.prepend(canvas);
     const context = canvas.getContext('2d');
@@ -75,6 +76,12 @@ export function mountConsole(frame, hooks) {
     }).observe(frame);
 
     function key(event, down) {
+        const shortcut = down ? options.shortcut?.(event) : undefined;
+        if (shortcut !== undefined) {
+            pressed |= 1 << shortcut;
+            event.preventDefault();
+            return;
+        }
         const bit = KEYS[event.code];
         if (bit === undefined) return;
         const before = held;
@@ -88,22 +95,29 @@ export function mountConsole(frame, hooks) {
     }
     canvas.addEventListener('keydown', (event) => key(event, true));
     canvas.addEventListener('keyup', (event) => key(event, false));
-    canvas.addEventListener('blur', () => {
+    function releaseInput() {
         keys.clear();
         released |= held;
         held = 0;
         mouseHeld = 0;
-    });
+    }
+    canvas.addEventListener('blur', releaseInput);
+    window.addEventListener('blur', releaseInput);
     function moveMouse(event) {
         const rect = canvas.getBoundingClientRect();
         const x = Math.floor(((event.clientX - rect.left) / rect.width) * WIDTH);
         const y = Math.floor(((event.clientY - rect.top) / rect.height) * HEIGHT);
-        mouse = [x, y];
+        mouse = options.clampDrag && canvas.hasPointerCapture(event.pointerId)
+            ? [Math.max(0, Math.min(WIDTH - 1, x)), Math.max(0, Math.min(HEIGHT - 1, y))]
+            : [x, y];
     }
     canvas.addEventListener('pointermove', moveMouse);
-    canvas.addEventListener('pointerleave', () => (mouse = [-1, -1]));
+    canvas.addEventListener('pointerleave', (event) => {
+        if (!canvas.hasPointerCapture(event.pointerId)) mouse = [-1, -1];
+    });
     canvas.addEventListener('pointerdown', (event) => {
         if (event.button !== 0 && event.button !== 2) return;
+        canvas.setPointerCapture(event.pointerId);
         moveMouse(event);
         const bit = 1 << (event.button === 2 ? 1 : 0);
         mousePressed |= bit & ~mouseHeld;
@@ -111,6 +125,9 @@ export function mountConsole(frame, hooks) {
         canvas.focus({ preventScroll: true });
         event.preventDefault();
     });
+    canvas.addEventListener('pointerup', moveMouse);
+    canvas.addEventListener('pointercancel', releaseInput);
+    canvas.addEventListener('lostpointercapture', () => { mouseHeld = 0; });
     window.addEventListener('pointerup', (event) => {
         if (event.button === 0 || event.button === 2) {
             mouseHeld &= ~(1 << (event.button === 2 ? 1 : 0));
@@ -136,6 +153,7 @@ export function mountConsole(frame, hooks) {
             halted = true;
             hooks.fault(JSON.parse(fault));
         }
+        hooks.changed?.(console);
     }
 
     function crash(error) {
@@ -181,18 +199,20 @@ export function mountConsole(frame, hooks) {
     requestAnimationFrame(loop);
 
     return {
-        // loads a cart from the wasm module's `Console` class, and gives back the diagnostics of
+        // creates a console, and gives back the diagnostics of
         // one that doesn't load (the one that was running keeps running then)
-        load(Console, files, seed) {
+        load(create) {
             let next;
             try {
-                next = new Console(JSON.stringify({ files }), seed);
+                next = create();
             } catch (error) {
                 if (typeof error !== 'string') throw error;
                 return JSON.parse(error);
             }
             console?.free();
             console = next;
+            releaseInput();
+            mouse = [-1, -1];
             pressed = released = mousePressed = 0;
             halted = false;
             paused = false;
@@ -214,6 +234,7 @@ export function mountConsole(frame, hooks) {
             return paused;
         },
         set paused(value) {
+            if (value) releaseInput();
             paused = value;
         },
         get state() {
