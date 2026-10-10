@@ -10,14 +10,16 @@ use shared::Located;
 use super::Solve;
 
 pub trait Query: Located {
-    /// Enforces this item to fulfill the provided Ty, registering whatever subtitutions are
+    /// Enforces this item to fulfill the provided Ty, registering whatever substitutions are
     /// discovered along the way.
     fn fulfill_ty(&self, ty: Ty, solver: &mut Solver) -> Result<()> {
         // query mutates subs, so normalize `ty` afterward -- otherwise a Vid->Vid chain from query
         // can cycle on commit. `found` normalizes too: a bound vid left raw would hit unify's
         // vid arm and re-unify inside register_sub with the found/expected roles reversed
         // (the cross-module-const inverted-mismatch bug).
-        let mut found = self.query(solver)?.normalized(solver);
+        let mut found = self
+            .query_with(Some(ty.clone()), solver)?
+            .normalized(solver);
         let mut ty = ty.normalized(solver);
         Unification::unify(&mut found, &mut ty, solver)
             .map(|v| v.commit(solver))
@@ -27,67 +29,20 @@ pub trait Query: Located {
     /// Returns the Ty for this item normalized with all substitutions the solver has
     /// currently found. If this expression has never been visited, it is first solved.
     fn query(&self, solver: &mut Solver) -> Result<Ty>;
+
+    /// Uses the expected type to guide inference, without checking or replacing the result.
+    /// Only unsolved expressions consume this hint; existing values keep their original types.
+    fn query_with(&self, _expected: Option<Ty>, solver: &mut Solver) -> Result<Ty> {
+        self.query(solver)
+    }
 }
 
 impl Query for Expr {
-    fn fulfill_ty(&self, ty: Ty, solver: &mut Solver) -> Result<()> {
-        let ty = ty.normalized(solver);
-        let mut context = &ty;
-        while let Ty::Option(inner) | Ty::Result(inner) = context {
-            context = inner;
-        }
-        let members: Option<Vec<(&Expr, Ty)>> = match (self.kind(), context) {
-            (ExprKind::Literal(Literal::Array(values)), Ty::Array(inner))
-                if !matches!(inner.as_ref(), Ty::Vid(_)) =>
-            {
-                Some(values.iter().map(|v| (v, (**inner).clone())).collect())
-            }
-            (ExprKind::Literal(Literal::Dictionary(values)), Ty::Dict(inner))
-                if !matches!(inner.as_ref(), Ty::Vid(_)) =>
-            {
-                Some(values.iter().map(|(_, v)| (v, (**inner).clone())).collect())
-            }
-            (ExprKind::Literal(Literal::Tuple(values)), Ty::Tuple(types))
-                if values.len() == types.len() =>
-            {
-                Some(
-                    values
-                        .iter()
-                        .zip(types)
-                        .map(|(v, ty)| (v, ty.clone()))
-                        .collect(),
-                )
-            }
-            _ => None,
-        };
-        if let Some(members) = members
-            && !solver.node_to_vid.contains_key(&self.id())
-        {
-            let mut literal_ty = context.clone();
-            for (member, expected) in members {
-                member.fulfill_ty(expected, solver)?;
-                if member.query(solver)? == Ty::Never {
-                    literal_ty = Ty::Never;
-                }
-            }
-            solver.touch_node(self.id());
-            let vid = solver.node_vid(self.id());
-            solver
-                .register_sub(vid, literal_ty)
-                .map_err(|e| e.into_type_mismatch(solver, self.location()))?;
-        } else if let ExprKind::Grouping(group) = self.kind() {
-            group.inner.fulfill_ty(ty.clone(), solver)?;
-        }
-        let mut found = self.query(solver)?.normalized(solver);
-        let mut ty = ty.normalized(solver);
-        Unification::unify(&mut found, &mut ty, solver)
-            .map(|sub| sub.commit(solver))
-            .map_err(|e| e.into_type_mismatch(solver, self.location()))
+    fn query(&self, solver: &mut Solver) -> Result<Ty> {
+        self.query_with(None, solver)
     }
 
-    /// Returns the Ty for this expression normalized with all substitutions the solver has
-    /// currently found. If this expression has never been visited, it is first solved.
-    fn query(&self, solver: &mut Solver) -> Result<Ty> {
+    fn query_with(&self, expected: Option<Ty>, solver: &mut Solver) -> Result<Ty> {
         /// Returns the inner member of this Expr. Placeholder for moving everything to a more
         /// dyn API.
         fn inner(expr: &Expr) -> &dyn Solve {
@@ -194,8 +149,17 @@ impl Query for Expr {
                     #[cfg(feature = "logging")]
                     println!("{}", utils::Printer::query(self));
 
+                    // A fresh literal or closure needs the destination's shape, before any
+                    // optional/result wrapping. The caller still checks the full expected type.
+                    let expected = expected.map(|ty| {
+                        let mut ty = ty.normalized(solver);
+                        while let Ty::Option(inner) | Ty::Result(inner) = ty {
+                            ty = *inner;
+                        }
+                        ty
+                    });
                     inner(self)
-                        .solve(self.id(), self.location(), solver)
+                        .solve(self.id(), self.location(), expected, solver)
                         .and_then(|mut ty| {
                             for input in inputs(self) {
                                 if input.query(solver)? == Ty::Never {

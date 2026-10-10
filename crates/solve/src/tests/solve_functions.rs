@@ -421,6 +421,68 @@ test_success!(
      let r = twice(|n| n * n, 3);"
 );
 
+test_success!(
+    closure_parameter_from_binding_annotation,
+    "let f: (int) -> int = |n| n + 1;"
+);
+
+test_success!(
+    unit_body_fulfills_wrapped_unit_return,
+    "fn accept(f: () -> ()!) { f(); }
+     accept(|| {});
+     fn option() -> ()? {}"
+);
+
+test_success!(
+    collected_closure_infers_parameter,
+    "let functions: [(int) -> int] = for i in 3 collect |n| n + i;"
+);
+
+test_success!(
+    closure_literal_return_from_argument_context,
+    "fn make(f: (int) -> [int?]) { f(1); }
+     make(|n| [n]);"
+);
+
+test_success!(
+    closure_literal_return_from_function_context,
+    "fn maker() -> () -> [int?] { || [1] }"
+);
+
+test_success!(
+    closure_early_return_uses_expected_type,
+    "let f: (int) -> [int?]? = |n| {
+         if n > 0 { return [n]; }
+         null
+     };"
+);
+
+test_success!(
+    absolve_handler_uses_result_context,
+    "fn tried() -> [int?]! { raise \"none\" }
+     let saved = tried() absolve |_| [1];"
+);
+
+test_fail!(
+    closure_context_respects_explicit_annotations,
+    "let f: (int) -> int = |n: str| 1;" => "mismatched types",
+    "let f: () -> int = || -> str { \"wrong\" };" => "mismatched types",
+    "let f: (int?) -> int = |n: int| n;" => "mismatched types",
+);
+
+test_fail!(
+    closure_context_still_requires_a_return,
+    "let f: () -> int? = || {};" => "not all paths return",
+    "let f: () -> int! = || {};" => "not all paths return",
+);
+
+test_success!(
+    contextual_closure_accepts_broader_parameter,
+    "fn apply(f: (int) -> int) -> int { f(3) }
+     let f: (int) -> int = |n: int?| n ?? 0;
+     let result = apply(|n: int?| n ?? 0);"
+);
+
 test_fail!(
     closure_return_mismatch,
     "fn apply(f: (int) -> int, n: int) -> int { f(n) }
@@ -548,6 +610,9 @@ test_fail!(
      }" => "not all paths return",
     "fn f(c: bool) -> int {
          if c { return 1; } else {}
+     }" => "not all paths return",
+    "fn f(c: bool) -> [int]? {
+         if c {} else {}
      }" => "not all paths return",
     "let f = || -> int {
          while false { return 1; }

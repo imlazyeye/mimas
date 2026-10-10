@@ -4,6 +4,28 @@ mod vm_test_utils;
 use vm::Captured::*;
 
 test_vm!(
+    result_wrapping_preserves_loop_exhaustion,
+    "fn find_for(count: int) -> int?! { for i in count { break i; } }
+     fn find_while(run: bool) -> int?! { while run { break 7; } }",
+    "find_for(3)!" => Int(0),
+    "find_for(0) absolve |_| 99" => Null,
+    "find_while(true)!" => Int(7),
+    "find_while(false) absolve |_| 99" => Null,
+);
+
+test_vm!(
+    unit_valued_break_stops_collection,
+    "fn stop() {}
+     fn items() -> [int] {
+         for i in 3 {
+             if i == 2 { break stop(); }
+             collect i;
+         }
+     }",
+    "items()" => Array(vec![Int(0), Int(1)]),
+);
+
+test_vm!(
     r#if,
     "if false { 1 } else if true { 2 } else { 3 }" => Int(2),
 );

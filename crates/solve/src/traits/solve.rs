@@ -80,12 +80,25 @@ fn pick_method_overload(
 }
 
 pub trait Solve {
-    /// Evaluates this T and its inner nodes on the provided Session to discover its Ty.
-    fn solve(&self, id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty>;
+    /// Discovers the type of a node. `expected` is the normalized destination shape, with outer
+    /// option/result wrappers removed. It guides fresh values without asserting the result type.
+    fn solve(
+        &self,
+        id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty>;
 }
 
 impl Solve for Access {
-    fn solve(&self, id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         fn handle_adt_access(
             id: NodeId,
             solver: &mut Solver,
@@ -582,7 +595,13 @@ impl Solve for Access {
 }
 
 impl Solve for Block {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         solver.ribs.push_block();
         solver.hoist_block_consts(&self.body);
         let mut diverged = false;
@@ -603,7 +622,7 @@ impl Solve for Block {
         let yielded = self
             .yielded_expr
             .as_ref()
-            .map(|v| v.query(solver))
+            .map(|v| v.query_with(expected, solver))
             .transpose()?;
         let ty = if diverged {
             Ty::Never
@@ -616,11 +635,20 @@ impl Solve for Block {
 }
 
 impl Solve for Break {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
+        let expected = solver.loop_stack.last().and_then(|l| l.expected_ty.clone());
+        // Keep the actual break type: unit terminates collection, and for/while add their own
+        // option. The expected loop type only guides fresh literals and closures in the value.
         let ty = self
             .value
             .as_ref()
-            .map_or(Ok(Ty::Unit), |v| v.query(solver))?;
+            .map_or(Ok(Ty::Unit), |value| value.query_with(expected, solver))?;
         let src = solver.src(location);
         solver.with_loop_mut(
             || {
@@ -641,7 +669,13 @@ impl Solve for Break {
 }
 
 impl Solve for Call {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let adt = match self.left.kind() {
             ExprKind::Access(Access::DoubleColon { left, right }) => {
                 let adt = match adt_from_type_path(left, solver) {
@@ -876,13 +910,6 @@ impl Solve for Call {
                         name: name.lexeme.clone(),
                     })?
                 }
-                if let ExprKind::Closure(_) = arg.value.kind()
-                    && let Ty::Fn(header) = params[slot].ty.clone().normalized(solver)
-                {
-                    solver
-                        .expected_closures
-                        .insert(arg.value.id(), header.parameters);
-                }
                 solver.fn_arg = Some(arg.value.id());
                 arg.value.fulfill_ty(params[slot].ty.clone(), solver)?;
                 filled[slot] = true;
@@ -913,26 +940,33 @@ impl Solve for Call {
 }
 
 impl Solve for Closure {
-    fn solve(&self, id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        id: NodeId,
+        _location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         solver.ribs.push_closure(id);
 
-        // a call site may have stashed the fn-typed parameter it expects here -- seed each closure
-        // param's vid with it before the body solves, so `|n| n + 1` learns `n: int` from the
-        // annotation rather than erroring on an unresolved vid. only when arities match; a mismatch
-        // falls through to the call-site unification, which reports it.
-        let expected = solver
-            .expected_closures
-            .swap_remove(&id)
-            .filter(|e| e.len() == self.parameters.len());
+        // Seed parameters and the return type before solving the body. An arity mismatch falls
+        // through to the caller's function-type check.
+        let expected = match expected {
+            Some(Ty::Fn(header)) if header.parameters.len() == self.parameters.len() => {
+                Some(header)
+            }
+            _ => None,
+        };
 
         let mut parameters = vec![];
         for (i, binding) in self.parameters.iter().enumerate() {
             let mut param = solver.bind_parameter(binding)?;
             if let Some(expected) = &expected {
-                let mut want = expected[i].ty.clone();
-                param
-                    .ty
-                    .fulfill_ty(&mut want, solver)
+                // Callers supply the expected parameter type; an annotated closure may accept
+                // a broader type. This is the same direction as function unification.
+                let mut supplied = expected.parameters[i].ty.clone();
+                supplied
+                    .fulfill_ty(&mut param.ty, solver)
                     .map_err(|e| e.into_type_mismatch(solver, binding.location()))?;
                 param.ty = param.ty.normalized(solver);
             }
@@ -947,11 +981,11 @@ impl Solve for Closure {
             parameters.push(param);
         }
 
-        // a `return` in here exits the closure (not the enclosing fn). without an annotation,
-        // the first return or the body's value settles the type.
+        // a `return` in here exits the closure (not the enclosing fn). without an annotation or an
+        // expected type, the first return or the body's value settles the type.
         let expected_ty = match &self.return_type {
             Some(annotation) => Ty::from_annotation(annotation.clone(), solver)?,
-            None => Ty::Vid(solver.vid()),
+            None => expected.map_or_else(|| Ty::Vid(solver.vid()), |e| *e.return_ty),
         };
         solver.check_body(&self.body, expected_ty.clone())?;
 
@@ -963,7 +997,13 @@ impl Solve for Closure {
 }
 
 impl Solve for Coalescence {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let lhs = self.left.query(solver)?.normalized(solver);
         match lhs {
             Ty::Option(inner) => {
@@ -982,8 +1022,25 @@ impl Solve for Coalescence {
 }
 
 impl Solve for Collect {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
-        let ty = self.value.query(solver)?;
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
+        let expected = solver
+            .loop_stack
+            .last()
+            .and_then(|l| l.expected_ty.clone())
+            .map(|ty| ty.normalized(solver));
+        let ty = match expected {
+            Some(Ty::Array(inner)) if !matches!(inner.as_ref(), Ty::Vid(_)) => {
+                self.value.fulfill_ty((*inner).clone(), solver)?;
+                *inner
+            }
+            _ => self.value.query(solver)?,
+        };
         let src = solver.src(location);
         solver.with_loop_mut(
             || {
@@ -1004,7 +1061,13 @@ impl Solve for Collect {
 }
 
 impl Solve for Continue {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         if solver.loop_stack.last().is_none() {
             Err(ContinueOutOfLoop {
                 src: solver.src(location),
@@ -1016,7 +1079,13 @@ impl Solve for Continue {
 }
 
 impl Solve for Enum {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let Ty::Adt(adt) = self.head.query(solver)? else {
             unreachable!()
         };
@@ -1086,7 +1155,13 @@ impl Solve for Enum {
 }
 
 impl Solve for Equality {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let lhs = self.left.query(solver)?;
         let rhs = self.right.query(solver)?;
         match (&lhs, &rhs) {
@@ -1121,7 +1196,13 @@ impl Solve for Equality {
 }
 
 impl Solve for Evaluation {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         fn eval(
             op: EvaluationOp,
             lhs: &Ty,
@@ -1177,7 +1258,13 @@ impl Solve for Evaluation {
 }
 
 impl Solve for For {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         // Run the loop
         solver.ribs.push_block();
 
@@ -1210,7 +1297,7 @@ impl Solve for For {
             break_ty,
             collect_ty,
             ..
-        } = solver.run_loop_body(&self.body)?;
+        } = solver.run_loop_body(&self.body, expected)?;
         solver.ribs.pop();
 
         // Validate the types
@@ -1228,7 +1315,13 @@ impl Solve for For {
 }
 
 impl Solve for FString {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         for part in &self.parts {
             if let FStringPart::Expr(expr) = part {
                 expr.query(solver)?;
@@ -1239,7 +1332,13 @@ impl Solve for FString {
 }
 
 impl Solve for Function {
-    fn solve(&self, id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let vid = solver.node_vid(id);
 
         #[cfg(feature = "logging")]
@@ -1278,13 +1377,25 @@ impl Solve for Function {
 }
 
 impl Solve for Grouping {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
-        self.inner.query(solver)
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
+        self.inner.query_with(expected, solver)
     }
 }
 
 impl Solve for Ident {
-    fn solve(&self, id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let ty = self.query(solver)?;
         let resolved = solver.ribs.resolve_with_closures(self);
         let bound = resolved.is_some();
@@ -1336,7 +1447,13 @@ impl Solve for Ident {
 }
 
 impl Solve for If {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         if let Some(binding) = self.binding.as_ref() {
             let scrut_ty = self.condition.query(solver)?;
             solver.ribs.push_block();
@@ -1345,13 +1462,14 @@ impl Solve for If {
             self.condition.fulfill_ty(Ty::Bool, solver)?;
         }
 
-        let positive_ty = self.main_body.query(solver)?;
         let ty = if let Some(else_expr) = self.else_expr.as_ref() {
-            let negative_ty = else_expr.query(solver)?;
+            let positive_ty = self.main_body.query_with(expected.clone(), solver)?;
+            let negative_ty = else_expr.query_with(expected, solver)?;
             positive_ty
                 .join(negative_ty, solver)
                 .map_err(|e| e.into_type_mismatch(solver, else_expr.location()))?
         } else {
+            self.main_body.query(solver)?;
             self.main_body
                 .fulfill_ty(Ty::Unit, solver)
                 .map_err(|_| IfNeedsElse {
@@ -1370,7 +1488,13 @@ impl Solve for If {
 }
 
 impl Solve for Impl {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         // Find our target
         let Ty::Adt(aid) = solver.resolve_name(&self.target, self.target.location())? else {
             Err(InvalidImplTarget {
@@ -1440,7 +1564,7 @@ impl Solve for Impl {
             // visit_stmt, but impl method items only flow through here so we have to do it
             // ourselves.
             if solver.touch_node(item.id()) {
-                let ty = function.solve(item.id(), item.location(), solver)?;
+                let ty = function.solve(item.id(), item.location(), None, solver)?;
                 let vid = solver.node_vid(item.id());
                 solver
                     .register_sub(vid, ty)
@@ -1515,7 +1639,13 @@ impl Solve for Impl {
 }
 
 impl Solve for In {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let rhs = self.right.query(solver)?;
         match rhs {
             Ty::Array(ref inner) => {
@@ -1538,8 +1668,22 @@ impl Solve for In {
 }
 
 impl Solve for Literal {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
-        fn assemble(exprs: Vec<&Expr>, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
+        fn assemble(exprs: Vec<&Expr>, expected: Option<&Ty>, solver: &mut Solver) -> Result<Ty> {
+            if let Some(Ty::Array(inner) | Ty::Dict(inner)) = expected
+                && !matches!(inner.as_ref(), Ty::Vid(_))
+            {
+                for expr in exprs {
+                    expr.fulfill_ty((**inner).clone(), solver)?;
+                }
+                return Ok((**inner).clone());
+            }
             let mut ty = None;
             for expr in exprs {
                 let found = expr.query(solver)?;
@@ -1552,10 +1696,16 @@ impl Solve for Literal {
             let ty = ty.unwrap_or_else(|| Ty::Vid(solver.vid()));
             Ok(ty)
         }
+        let context = expected.as_ref();
         Ok(match self {
-            Literal::Array(exprs) => Ty::Array(Box::new(assemble(exprs.iter().collect(), solver)?)),
+            Literal::Array(exprs) => Ty::Array(Box::new(assemble(
+                exprs.iter().collect(),
+                context.filter(|ty| matches!(ty, Ty::Array(_))),
+                solver,
+            )?)),
             Literal::Dictionary(fields) => Ty::Dict(Box::new(assemble(
                 fields.iter().map(|(_, v)| v).collect(),
+                context.filter(|ty| matches!(ty, Ty::Dict(_))),
                 solver,
             )?)),
             Literal::Struct(StructLiteral { name, fields }) => {
@@ -1723,19 +1873,33 @@ impl Solve for Literal {
                 solver.shadow_expr_ty(name.id(), Ty::Adt(layout), name.location())?;
                 Ty::Adt(adt)
             }
-            Literal::Tuple(members) => Ty::Tuple(
-                members
-                    .iter()
-                    .map(|v| v.query(solver))
-                    .collect::<Result<_>>()?,
-            ),
+            Literal::Tuple(members) => match context {
+                Some(Ty::Tuple(types)) if types.len() == members.len() => {
+                    for (member, ty) in members.iter().zip(types) {
+                        member.fulfill_ty(ty.clone(), solver)?;
+                    }
+                    Ty::Tuple(types.clone())
+                }
+                _ => Ty::Tuple(
+                    members
+                        .iter()
+                        .map(|v| v.query(solver))
+                        .collect::<Result<_>>()?,
+                ),
+            },
             _ => unreachable!(),
         })
     }
 }
 
 impl Solve for Logical {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         self.left.fulfill_ty(Ty::Bool, solver)?;
         self.right.fulfill_ty(Ty::Bool, solver)?;
         Ok(Ty::Bool)
@@ -1743,12 +1907,18 @@ impl Solve for Logical {
 }
 
 impl Solve for Loop {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let LoopRun {
             break_ty,
             collect_ty,
             ..
-        } = solver.run_loop_body(&self.body)?;
+        } = solver.run_loop_body(&self.body, expected)?;
         let ty = match (break_ty, collect_ty) {
             (None, _) => Ty::Never,
             (Some(Ty::Unit), None) => Ty::Unit,
@@ -1764,7 +1934,13 @@ impl Solve for Loop {
 }
 
 impl Solve for Match {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let scrut_ty = self.identity.query(solver)?.normalized(solver);
 
         let mut result: Option<Ty> = None;
@@ -1775,10 +1951,11 @@ impl Solve for Match {
                 guard.fulfill_ty(Ty::Bool, solver)?;
             }
             let body = case.body();
+            let ty = body.query_with(expected.clone(), solver)?;
             result = Some(match result {
-                None => body.query(solver)?,
+                None => ty,
                 Some(acc) => acc
-                    .join(body.query(solver)?, solver)
+                    .join(ty, solver)
                     .map_err(|e| e.into_type_mismatch(solver, body.location()))?,
             });
             solver.ribs.pop();
@@ -1806,12 +1983,13 @@ impl Solve for Match {
 }
 
 impl Solve for Return {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
-        let mut this_ty = self
-            .value
-            .as_ref()
-            .map_or(Ok(Ty::Unit), |e| e.query(solver))?;
-
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let mut expected_ty = solver
             .fn_stack
             .last()
@@ -1822,6 +2000,11 @@ impl Solve for Return {
             .expected_ty
             .clone();
 
+        let mut this_ty = match &self.value {
+            Some(value) => value.query_with(Some(expected_ty.clone()), solver)?,
+            None => Ty::Unit,
+        };
+
         this_ty
             .fulfill_ty(&mut expected_ty, solver)
             .map_err(|e| e.into_type_mismatch(solver, location))?;
@@ -1831,7 +2014,13 @@ impl Solve for Return {
 }
 
 impl Solve for Struct {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let Ty::Adt(adt) = self.name.query(solver)? else {
             unreachable!()
         };
@@ -1871,7 +2060,13 @@ impl Solve for Struct {
 }
 
 impl Solve for Unary {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         fn unary(op: UnaryOp, ty: &Ty, location: Location, solver: &Solver) -> Result<Ty> {
             match (op, ty) {
                 (UnaryOp::Not, Ty::Bool) => Ok(Ty::Bool),
@@ -1908,7 +2103,13 @@ impl Solve for Unary {
 }
 
 impl Solve for Unwrap {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let ty = self.expr.query(solver)?;
         let new_ty = match ty.normalized(solver) {
             Ty::Option(inner) | Ty::Result(inner) => *inner,
@@ -1923,7 +2124,13 @@ impl Solve for Unwrap {
 }
 
 impl Solve for parse::Raise {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let expected_ty = solver
             .fn_stack
             .last()
@@ -1947,7 +2154,13 @@ impl Solve for parse::Raise {
 }
 
 impl Solve for parse::Range {
-    fn solve(&self, _: NodeId, _: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _: NodeId,
+        _: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         self.start.fulfill_ty(Ty::Int, solver)?;
         self.end.fulfill_ty(Ty::Int, solver)?;
         Ok(Ty::Int)
@@ -1955,7 +2168,13 @@ impl Solve for parse::Range {
 }
 
 impl Solve for parse::Absolve {
-    fn solve(&self, _id: NodeId, _location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        _location: Location,
+        _expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let lhs = self.left.query(solver)?.normalized(solver);
         let Ty::Result(inner) = lhs else {
             Err(AbsolveNonResult {
@@ -1976,7 +2195,13 @@ impl Solve for parse::Absolve {
 }
 
 impl Solve for While {
-    fn solve(&self, _id: NodeId, location: Location, solver: &mut Solver) -> Result<Ty> {
+    fn solve(
+        &self,
+        _id: NodeId,
+        location: Location,
+        expected: Option<Ty>,
+        solver: &mut Solver,
+    ) -> Result<Ty> {
         let mut pushed_rib = false;
         if let Some(binding) = self.binding.as_ref() {
             solver.ribs.push_block();
@@ -1991,7 +2216,7 @@ impl Solve for While {
             break_ty,
             collect_ty,
             ..
-        } = solver.run_loop_body(&self.body)?;
+        } = solver.run_loop_body(&self.body, expected)?;
 
         if pushed_rib {
             solver.ribs.pop();

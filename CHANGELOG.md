@@ -60,6 +60,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - Imported types or pacts, and pacts declared later in a module, could fail to resolve in pact signatures. Pact signatures now resolve imported names and forward pact references.
 - Nested struct, enum, pact, and impl declarations now produce compile errors instead of being accepted or silently dropped.
 - An impl's pact constant could have the wrong type (`const NAME = 4;` for a pact's `const NAME: str;`). Impl constants are now checked against the pact declaration, and an unannotated initializer takes its expected type from the pact, including collection literals and `null`.
+- Fresh array, dict and tuple literals use the expected element types in function returns, branches, blocks and loop values, just as they do under a `let` annotation. For example, a function returning `[Pact]` can return `[Adt::new()]` or collect pact implementers in a loop. Existing collections keep their original element types.
+- A closure without annotations takes its parameter and return types from its destination, as in `let f: (int) -> int = |n| n + 1;`, where before only a call argument's parameter type was used.
 
 ## [0.3.0] - 2026-09-26
 

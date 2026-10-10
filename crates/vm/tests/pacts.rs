@@ -753,3 +753,36 @@ test_vm!(
     "A::VALUES[0] == null" => Bool(true),
     "C::VALUES[0] == null" => Bool(true),
 );
+
+test_vm!(
+    pact_method_returns_implementer_in_tuple,
+    "pact Kind {
+         fn size(self) -> int;
+         fn split(self) -> (int, Kind)? { null }
+     }
+     struct Parent;
+     impl Kind for Parent {
+         fn size(self) -> int { 4 }
+         fn split(self) -> (int, Kind)? { (2, Child) }
+     }
+     struct Child;
+     impl Kind for Child {
+         fn size(self) -> int { 1 }
+     }
+
+     let parent: Kind = Parent;
+     let (count, child) = parent.split()!;",
+    "count" => Int(2),
+    "child.size()" => Int(1),
+    "child.split() == null" => Bool(true),
+);
+
+test_vm!(
+    collected_implementer_dispatches_through_pact,
+    "pact Sized { fn size(self) -> int; }
+     struct Small;
+     impl Sized for Small { fn size(self) -> int { 1 } }
+
+     fn items() -> [Sized] { for i in 2 collect Small }",
+    "items()[1].size()" => Int(1),
+);
