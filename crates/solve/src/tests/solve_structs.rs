@@ -118,6 +118,44 @@ test_ty!(
     }),
 );
 
+test_fail!(
+    adt_nested,
+    "fn main() {
+        struct Foo { bar: int }
+    }" => "nested `struct` declaration",
+    "struct Foo { bar: int }
+    fn main() {
+        struct Foo { baz: str }
+    }" => "nested `struct` declaration",
+    "{
+        struct Foo {}
+    }" => "nested `struct` declaration",
+);
+
+test_fail!(
+    impl_adt_nested,
+    "struct Foo {}
+    fn main() {
+        impl Foo {}
+    }" => "nested `impl` declaration",
+    "struct Foo {}
+    fn main() {
+        impl Foo {
+            const BAR = 0;
+        }
+    }" => "nested `impl` declaration",
+    "struct Foo {}
+    fn main() {
+        impl Foo {
+            fn bar() {}
+        }
+    }" => "nested `impl` declaration",
+    "struct Foo {}
+    {
+        impl Foo {}
+    }" => "nested `impl` declaration",
+);
+
 test_ty!(
     adt_colon_access_const,
     "struct Foo {}

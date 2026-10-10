@@ -10,7 +10,6 @@ use crate::{
     errors::{DuplicateImplDeclaration, DuplicatePactImpl, InvalidImplTarget},
     *,
 };
-use indexmap::IndexMap;
 use parse::{
     components::{Annotation, Binding},
     *,
@@ -353,29 +352,29 @@ impl Hoist for Impl {
 
         ctx.solver.ribs.pop();
 
+        // only a top-level impl gets here, and `visit_stmt` rejects one whose vid has no type yet
+        if let Some(node_id) = ctx.node_id {
+            let vid = ctx.solver.node_vid(node_id);
+            ctx.solver
+                .register_sub(vid, Ty::Unit)
+                .map_err(|e| e.into_type_mismatch(ctx.solver, ctx.location))?;
+        }
+
         Ok(())
     }
 }
 
 impl Hoist for Pact {
     fn hoist(&self, ctx: HoistCtx) -> Result<()> {
-        // push the empty pact and set it as `pact_self` before resolving signatures, so `Self`
-        // and the pact's own name resolve to it within its own method types (see `resolve_name`)
-        let pact_id = ctx.solver.pacts.push(shared::Pact {
-            name: self.name.lexeme.clone(),
-            functions: IndexMap::new(),
-            constants: IndexMap::new(),
-        });
-        shared::name_pact(pact_id.index(), &self.name.lexeme);
+        // `declare_pacts` made every pact before any signature is read, so one can name another
+        // in a later file. ours is `pact_self` while its signatures resolve, which is what `Self`
+        // stands for in them (see `resolve_name`)
+        let pact_id = ctx
+            .node_id
+            .map(|id| ctx.solver.node_vid(id))
+            .and_then(|vid| ctx.solver.sub(vid)?.as_single_pact())
+            .expect("`declare_pacts` gives every pact item its id");
         let prev_self = ctx.solver.pact_self.replace(pact_id);
-
-        let dec = ctx.solver.dec_id(
-            &self.name,
-            Ty::pacts(vec![pact_id]),
-            DecKind::Pact(pact_id),
-            ctx.vis,
-        );
-        ctx.solver.ribs.module_mut().insert(self.name.clone(), dec);
 
         for item in self.items.iter() {
             match item {
