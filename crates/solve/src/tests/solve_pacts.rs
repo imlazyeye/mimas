@@ -400,6 +400,24 @@ test_fail!(
 );
 
 test_fail!(
+    pact_nested,
+    "fn main() {
+         pact Marker {}
+     }" => "nested `pact` declaration",
+    "pact Named { fn name(self) -> str; }
+     fn main() {
+         pact Named { fn id(self) -> int { 0 } }
+     }" => "nested `pact` declaration",
+);
+
+test_fail!(
+    pact_impl_in_a_block,
+    "pact Marker {}
+     struct Foo { tag: int }
+     fn main() { impl Marker for Foo { } }" => "nested `impl` declaration",
+);
+
+test_fail!(
     pact_unsatisfied_argument,
     "pact Draw { fn draw(self) -> int; }
      struct Circle { r: int }
@@ -934,4 +952,173 @@ test_multi_file_fail!(
           pact Hidden {}",
     b => "module b;
           pub fn f(x: Hidden) {}";
+);
+
+test_multi_file!(
+    pact_signatures_see_imports,
+    weapons => "module @;
+                use things::Thing;
+                pub pact Weapon {
+                    fn plain(self, thing: Thing) -> Thing;
+                    fn maybe(self) -> Thing?;
+                    fn tried(self) -> Thing!;
+                    fn many(self) -> [Thing];
+                    fn pair(self) -> (int, Thing);
+                    fn with(self, make: (Thing) -> Thing) -> int;
+                }",
+    wand => "module @;
+             use things::Thing;
+             use weapons::Weapon;
+             pub struct Wand {}
+             impl Weapon for Wand {
+                 fn plain(self, thing: Thing) -> Thing { thing }
+                 fn maybe(self) -> Thing? { null }
+                 fn tried(self) -> Thing! { Thing { x = 1 } }
+                 fn many(self) -> [Thing] { [Thing { x = 2 }] }
+                 fn pair(self) -> (int, Thing) { (0, Thing { x = 3 }) }
+                 fn with(self, make: (Thing) -> Thing) -> int { make(Thing { x = 4 }).x }
+             }
+             pub fn held() -> Weapon { Wand {} }",
+    things => "module @;
+               pub struct Thing {
+                   pub x: int,
+               }";
+    "wand::held().plain(things::Thing { x = 0 }).x" => Int,
+    "wand::held().maybe()?.x" => option!(Int),
+    "wand::held().tried()!.x" => Int,
+    "wand::held().many()[0].x" => Int,
+    "wand::held().pair().1.x" => Int,
+    "wand::held().with(|thing| thing)" => Int,
+);
+
+test_multi_file!(
+    pact_const_annotation_sees_imports,
+    weapons => "module @;
+                use things::Icon;
+                pub pact Weapon {
+                    const ICON: Icon;
+                }
+                pub fn icon(weapon: Weapon) -> Icon { weapon.ICON }",
+    wand => "module @;
+             use things::Icon;
+             use weapons::Weapon;
+             pub struct Wand {}
+             impl Weapon for Wand {
+                 const ICON = Icon::Star;
+             }",
+    things => "module @;
+               pub enum Icon { Star, Moon }";
+    "weapons::icon(wand::Wand {}) == things::Icon::Star" => Bool,
+);
+
+test_multi_file!(
+    pact_signatures_see_braced_and_glob_imports,
+    braced => "module @;
+               use things::{ Thing, Icon, make };
+               pub pact Braced {
+                   fn icon(self, thing: Thing) -> Icon;
+               }
+               pub fn thing() -> Thing { make() }",
+    glob => "module @;
+             use things::*;
+             pub pact Glob {
+                 fn icon(self, thing: Thing) -> Icon;
+             }",
+    wand => "module @;
+             use braced::Braced;
+             use things::{ Thing, Icon };
+             pub struct Wand {}
+             impl Braced for Wand {
+                 pub fn icon(self, thing: Thing) -> Icon { Icon::Star }
+             }",
+    orb => "module @;
+            use glob::Glob;
+            use things::{ Thing, Icon };
+            pub struct Orb {}
+            impl Glob for Orb {
+                pub fn icon(self, thing: Thing) -> Icon { Icon::Moon }
+            }",
+    things => "module @;
+               pub struct Thing {
+                   pub x: int,
+               }
+               pub enum Icon { Star, Moon }
+               pub fn make() -> Thing { Thing { x = 0 } }";
+    "wand::Wand {}.icon(braced::thing()) == things::Icon::Star" => Bool,
+    "orb::Orb {}.icon(braced::thing()) == things::Icon::Moon" => Bool,
+);
+
+test_multi_file!(
+    pact_signatures_name_other_pacts,
+    weapons => "module @;
+                use ammo::Ammo;
+                pub pact Weapon {
+                    fn load(self, ammo: Ammo) -> Weapon;
+                    fn spare(self) -> ammo::Ammo;
+                    fn twin(self) -> Weapon?;
+                }",
+    wand => "module @;
+             use ammo::Ammo;
+             use weapons::Weapon;
+             pub struct Wand {}
+             impl Weapon for Wand {
+                 pub fn load(self, ammo: Ammo) -> Weapon { self }
+                 pub fn spare(self) -> Ammo { Spark {} }
+                 pub fn twin(self) -> Weapon? { null }
+             }
+             pub struct Spark {}
+             impl Ammo for Spark {
+                 pub fn count(self) -> int { 1 }
+             }",
+    ammo => "module @;
+             pub pact Ammo {
+                 fn count(self) -> int;
+             }";
+    "wand::Wand {}.load(wand::Spark {}).spare().count()" => Int,
+    "wand::Wand {}.twin()?.spare()?.count()" => option!(Int),
+);
+
+test_multi_file!(
+    pact_signatures_keep_module_paths,
+    weapons => "module @;
+                pub pact Weapon {
+                    fn plain(self, thing: things::Thing) -> things::Thing;
+                }",
+    wand => "module @;
+             use weapons::Weapon;
+             pub struct Wand {}
+             impl Weapon for Wand {
+                 pub fn plain(self, thing: things::Thing) -> things::Thing { thing }
+             }",
+    things => "module @;
+               pub struct Thing {
+                   pub x: int,
+               }";
+    "wand::Wand {}.plain(things::Thing { x = 0 }).x" => Int,
+);
+
+test_multi_file_fail!(
+    pact_signature_names_private_import,
+    weapons => "module @;
+                use things::Thing;
+                pub pact Weapon {
+                    fn plain(self, thing: Thing) -> int;
+                }",
+    things => "module @;
+               struct Thing {
+                   pub x: int,
+               }";
+);
+
+test_multi_file_fail!(
+    pact_signature_names_missing_import,
+    weapons => "module @;
+                use things::Missing;
+                pub pact Weapon {
+                    fn plain(self, thing: Missing) -> int;
+                }",
+    things => "module @;
+               pub struct Thing {
+                   pub x: int,
+               }";
 );

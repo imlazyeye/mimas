@@ -204,6 +204,16 @@ test_fail!(
 // EnumNotConstructable / ExpectedTupleStruct
 test_fail!(enum_constructed_with_parens, "enum E { A } let e = E();");
 test_fail!(
+    enum_nested,
+    "fn main() {
+        enum E { A, B }
+    }" => "nested `enum` declaration",
+    "enum E { A, B }
+    fn main() {
+        enum E { C(int) }
+    }" => "nested `enum` declaration",
+);
+test_fail!(
     enum_constructed_with_struct_literal,
     "enum E { A } let e = E {};"
 );

@@ -598,3 +598,34 @@ test_vm!(
                  let TEST_VALUE = shapes::total();",
     } => Int(7),
 );
+
+test_vm!(
+    pact_signature_uses_import,
+    files {
+        weapons => "module @;
+                    use things::Thing;
+                    pub pact Weapon {
+                        fn hit(self, thing: Thing) -> Thing?;
+                    }",
+        wand => "module @;
+                 use things::Thing;
+                 use weapons::Weapon;
+                 pub struct Wand {
+                     pub power: int,
+                 }
+                 impl Weapon for Wand {
+                     fn hit(self, thing: Thing) -> Thing? {
+                         Thing { hp = thing.hp - self.power }
+                     }
+                 }
+                 pub fn held() -> Weapon {
+                     Wand { power = 3 }
+                 }",
+        things => "module @;
+                   pub struct Thing {
+                       pub hp: int,
+                   }",
+        main => "let hit = wand::held().hit(things::Thing { hp = 10 });
+                 let TEST_VALUE = hit!.hp;",
+    } => Int(7),
+);

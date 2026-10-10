@@ -55,6 +55,9 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - A top-level constant holding a struct could fail with a type mismatch when a field was an option or a result. With `x: int?`, `const A = P { x = null };` followed by `const B = P { x = 1 };` was rejected, because constants were checked before the struct's field types were known.
 - A struct or dict as a parameter default (`fn spawn(at: Point = Point { x = 0 })`) iced the compiler. It's now a compile error. A default has to be a number, string, bool, `null`, or an array or tuple of those.
 - A constant set to a comparison of two arrays or tuples compared how they were written, not their values, so `const SAME = [X] == [1];` was `false` with `const X = 1;`. It's now `true`. Setting a constant to a comparison of structs or dicts had the same problem and is now a compile error.
+- A braced `use` that mixed a type or pact with a function or constant of the same module (`use module::{Pact, foo};`) could leave the type out of scope for the file's signatures and impls. A signature naming it reported an undefined variable, and an `impl Pact for ..` was dropped without an error, so the type didn't count as implementing the pact.
+- Imported types or pacts, and pacts declared later in a module, could fail to resolve in pact signatures. Pact signatures now resolve imported names and forward pact references.
+- Nested struct, enum, pact, and impl declarations now produce compile errors instead of being accepted or silently dropped.
 
 ## [0.3.0] - 2026-09-26
 

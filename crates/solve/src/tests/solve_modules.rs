@@ -104,6 +104,101 @@ test_multi_file!(
 );
 
 test_multi_file!(
+    braced_import_of_type_and_function,
+    fizz => "module @;
+             use foo::{ Bar, make };
+             pub fn get() -> Bar {
+                 make()
+             }",
+    foo => "module @;
+            pub struct Bar {
+                pub x: int,
+            }
+            pub fn make() -> Bar {
+                Bar { x = 0 }
+            }";
+    "fizz::get().x" => Int,
+);
+
+test_multi_file!(
+    braced_import_of_type_and_const,
+    foo => "module @;
+            pub struct Bar {
+                pub x: int,
+            }
+            pub const START = 3;",
+    fizz => "module @;
+             use foo::{ Bar, START };
+             pub fn get() -> Bar {
+                 Bar { x = START }
+             }";
+    "fizz::get().x" => Int,
+);
+
+test_multi_file!(
+    braced_import_of_pact_and_function,
+    wand => "module @;
+             use weapons::{ Weapon, wait };
+             pub struct Wand {
+                 pub lv: int,
+             }
+             impl Weapon for Wand {
+                 const NAME = \"WAND\";
+                 pub fn new() -> Self {
+                     Self { lv = wait(1) }
+                 }
+             }",
+    weapons => "module @;
+                pub pact Weapon {
+                    const NAME: str;
+                    fn new() -> Self;
+                }
+                pub fn wait(frames: int) -> int {
+                    frames * 2
+                }
+                pub fn name(weapon: Weapon) -> str {
+                    weapon.NAME
+                }";
+    "weapons::name(wand::Wand::new())" => Str,
+);
+
+test_multi_file!(
+    braced_import_of_pact_and_const,
+    weapons => "module @;
+                pub pact Weapon {
+                    fn new() -> Self;
+                }
+                pub const START = 1;
+                pub fn level(weapon: Weapon) -> int {
+                    START
+                }",
+    wand => "module @;
+             use weapons::{ Weapon, START };
+             pub struct Wand {
+                 pub lv: int,
+             }
+             impl Weapon for Wand {
+                 pub fn new() -> Self {
+                     Self { lv = START }
+                 }
+             }";
+    "weapons::level(wand::Wand::new())" => Int,
+);
+
+test_multi_file_fail!(
+    braced_import_reports_a_missing_name,
+    foo => "module @;
+            pub struct Bar {
+                pub x: int,
+            }",
+    fizz => "module @;
+             use foo::{ Bar, missing };
+             pub fn get() -> Bar {
+                 Bar { x = 0 }
+             }";
+);
+
+test_multi_file!(
     modules_are_hoisted_before_solving,
     fizz => "module @; use foo; pub fn buzz() -> int { foo::BAR }",
     foo => "module @; pub const BAR: int = 0;";

@@ -771,6 +771,16 @@ pub struct NestedFn {
 }
 
 #[derive(Error, Debug, Diagnostic)]
+#[error("nested `{keyword}` declaration")]
+pub struct NestedItem {
+    #[source_code]
+    pub src: NamedSource<Arc<str>>,
+    #[label("`{keyword}` can only be declared at the top level")]
+    pub at: SourceSpan,
+    pub keyword: &'static str,
+}
+
+#[derive(Error, Debug, Diagnostic)]
 #[error("invalid iterator target")]
 pub struct InvalidIterTarget {
     #[source_code]

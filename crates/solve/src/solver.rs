@@ -4,7 +4,7 @@ use crate::{
     errors::{
         AssignToConst, AssignToLoopVar, AssignToStringIndex, BareNullBinding, FieldNotFound,
         FnIsNotAValue, InvalidAssignTarget, InvalidPattern, InvalidUseTarget,
-        MultipleConstDeclarations, NonConstantValue, NotFound, SelfOutOfContext,
+        MultipleConstDeclarations, NestedItem, NonConstantValue, NotFound, SelfOutOfContext,
     },
     traits::*,
 };
@@ -218,6 +218,7 @@ impl Solver {
         };
 
         run_phase(self, Self::hoist_types, &mut saved_ribs)?;
+        run_phase(self, Self::declare_pacts, &mut saved_ribs)?;
         run_phase(self, Self::hoist_pacts, &mut saved_ribs)?;
         run_phase(self, Self::hoist_callables, &mut saved_ribs)?;
         run_phase(self, Self::hoist_constants, &mut saved_ribs)?;
@@ -262,7 +263,44 @@ impl Solver {
         })
     }
 
+    // fns and consts don't exist yet in the hoist phases that need imported types, so a name that
+    // fails is left for the strict `hoist_uses` to report
+    fn hoist_uses_leniently(&mut self, ast: &Ast) -> Result<()> {
+        Self::for_each_item(ast, |item| {
+            if let ItemKind::Use(us) = item.kind() {
+                let _ = self.process_use(us, item.location());
+            }
+            Ok(())
+        })
+    }
+
+    fn declare_pacts(&mut self, ast: &Ast) -> Result<()> {
+        Self::for_each_item(ast, |item| {
+            let ItemKind::Pact(p) = item.kind() else {
+                return Ok(());
+            };
+            let vis = if item.public() {
+                Vis::Public
+            } else {
+                Vis::Private
+            };
+            let pact_id = self.pacts.push(shared::Pact {
+                name: p.name.lexeme.clone(),
+                functions: IndexMap::new(),
+                constants: IndexMap::new(),
+            });
+            shared::name_pact(pact_id.index(), &p.name.lexeme);
+            let ty = Ty::pacts(vec![pact_id]);
+            let dec = self.dec_id(&p.name, ty.clone(), DecKind::Pact(pact_id), vis);
+            self.ribs.module_mut().insert(p.name.clone(), dec);
+            let vid = self.node_vid(item.id());
+            self.register_sub(vid, ty)
+                .map_err(|e| e.into_type_mismatch(self, item.location()))
+        })
+    }
+
     fn hoist_pacts(&mut self, ast: &Ast) -> Result<()> {
+        self.hoist_uses_leniently(ast)?;
         Self::for_each_item(ast, |item| {
             let ItemKind::Pact(p) = item.kind() else {
                 return Ok(());
@@ -305,12 +343,7 @@ impl Solver {
     }
 
     fn hoist_callables(&mut self, ast: &Ast) -> Result<()> {
-        Self::for_each_item(ast, |item| {
-            if let ItemKind::Use(us) = item.kind() {
-                let _ = self.process_use(us, item.location());
-            }
-            Ok(())
-        })?;
+        self.hoist_uses_leniently(ast)?;
         Self::for_each_item(ast, |item| {
             let vis = if item.public() {
                 Vis::Public
@@ -526,6 +559,7 @@ impl Solver {
             self.note(ident, target.ty.clone(), target.dec);
         }
 
+        let mut result = Ok(());
         let imports: Vec<ImportBinding> = match us {
             Use::Singular(_, _) => vec![target],
             Use::Multi(_, items) => {
@@ -535,14 +569,23 @@ impl Solver {
                         at: location.into(),
                     })?
                 };
+                // the lenient pre-pass in `hoist_callables` runs before any fn or const exists and
+                // still needs the types
                 items
                     .iter()
-                    .map(|i| {
-                        let binding = self.module_field(adt, i)?;
-                        self.note(i, binding.ty.clone(), binding.dec);
-                        Ok(binding)
+                    .filter_map(|i| match self.module_field(adt, i) {
+                        Ok(binding) => {
+                            self.note(i, binding.ty.clone(), binding.dec);
+                            Some(binding)
+                        }
+                        Err(e) => {
+                            if result.is_ok() {
+                                result = Err(e);
+                            }
+                            None
+                        }
                     })
-                    .collect::<Result<Vec<_>>>()?
+                    .collect()
             }
             Use::All(_) => {
                 let Some(adt) = target.ty.as_adt().copied() else {
@@ -581,7 +624,7 @@ impl Solver {
         for import in imports {
             self.declare_import(import)?;
         }
-        Ok(())
+        result
     }
 
     /// Pre-binds every `const` declared directly inside this block into the current rib so refs
@@ -1554,6 +1597,28 @@ impl Solver {
     pub(crate) fn visit_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         #[cfg(feature = "logging")]
         println!("{}", crate::utils::Printer::stmt(stmt));
+
+        // hoisting only walks the top level, where it gives each of these a type. one without
+        // it is nested, and would be solved against whatever top-level item shares its name
+        if let StmtKind::Item(item) = stmt.kind()
+            && let Some((keyword, name)) = match item.kind() {
+                ItemKind::Struct(s) => Some(("struct", &s.name)),
+                ItemKind::Enum(e) => Some(("enum", &e.head)),
+                ItemKind::Pact(p) => Some(("pact", &p.name)),
+                ItemKind::Impl(i) => Some(("impl", &i.target)),
+                _ => None,
+            }
+        {
+            let vid = self.node_vid(item.id());
+            if self.sub(vid).is_none() {
+                Err(NestedItem {
+                    src: self.src(name.location),
+                    at: name.location.into(),
+                    keyword,
+                })?;
+            }
+        }
+
         match stmt.kind() {
             StmtKind::Assignment(Assignment { left, right, op }) => {
                 fn find_root(left: &Expr) -> std::result::Result<&Ident, Location> {
