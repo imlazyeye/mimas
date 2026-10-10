@@ -68,10 +68,16 @@ pub fn walk_item(item: &Item, visitor: &mut impl Visitor) {
             for item in &pact.items {
                 match item {
                     PactItem::Const {
-                        name, annotation, ..
+                        name,
+                        annotation,
+                        default,
+                        ..
                     } => {
                         visitor.ident(name);
                         walk_annotation(annotation, visitor);
+                        if let Some(default) = default {
+                            walk_expr(default, visitor);
+                        }
                     }
                     PactItem::Fn {
                         name,

@@ -4,10 +4,10 @@ use super::Query;
 use crate::{
     Result,
     components::{
-        Adt, AdtId, DecKind, Field, Fields, FnHeader, StructVariant, TupleVariant, Ty, TyExt,
-        Variant, Vis,
+        Adt, AdtId, ConstValue, DecKind, Field, Fields, FnHeader, StructVariant, TupleVariant, Ty,
+        TyExt, Variant, Vis,
     },
-    errors::{DuplicateImplDeclaration, DuplicatePactImpl, InvalidImplTarget},
+    errors::{DuplicateImplDeclaration, DuplicatePactImpl, InvalidImplTarget, NonConstDefault},
     *,
 };
 use parse::{
@@ -304,32 +304,57 @@ impl Hoist for Impl {
                 vis,
             );
             match item.kind() {
-                ItemKind::Const(con) => con.hoist(hoist_ctx)?,
+                ItemKind::Const(con) => {
+                    con.hoist(hoist_ctx)?;
+                    // The pact supplies the annotation an impl omitted. Seed it before any
+                    // initializer can be evaluated, including through another const's reference.
+                    if con.annotation.is_none()
+                        && let Some(ty) = pid.and_then(|pid| {
+                            ctx.solver.pacts[pid]
+                                .constants
+                                .get(&con.left.lexeme)
+                                .cloned()
+                        })
+                    {
+                        let ty = ctx.solver.instantiate_pact_ty(&ty, &Ty::Adt(adt));
+                        let dec = ctx.solver.node_decs[&item.id()];
+                        let vid = ctx.solver.decs[dec].vid;
+                        ctx.solver
+                            .register_sub(vid, ty)
+                            .map_err(|e| e.into_type_mismatch(ctx.solver, con.left.location))?;
+                    }
+                }
                 ItemKind::Function(function) => function.hoist(hoist_ctx)?,
                 // parser rejects everything else in impl-body position
                 _ => unreachable!("parser only allows fn/const in impl bodies"),
             };
         }
 
-        // graft methods the impl omitted but the pact defaults, so they become real callable
-        // methods on the adt (and collide like everything else if another pact already provides
-        // the name). freshen the header so each impl's `self` slot is independent.
+        // graft what the impl omitted but the pact defaults, so it becomes a real member of the
+        // adt (and collides like everything else if another pact already provides the name).
+        // each member's type is instantiated for this impl, including `Self` in constants.
         if let Some(pid) = pid {
-            let provided: HashSet<String> = self
+            let provided: HashSet<&str> = self
                 .items
                 .iter()
                 .filter_map(|i| match i.kind() {
-                    ItemKind::Function(f) => Some(f.name.lexeme.clone()),
+                    ItemKind::Function(f) => Some(f.name.lexeme.as_str()),
+                    ItemKind::Const(c) => Some(c.left.lexeme.as_str()),
                     _ => None,
                 })
                 .collect();
-            let omitted: Vec<String> = ctx.solver.pacts[pid]
+            let pact = &ctx.solver.pacts[pid];
+            let omitted: Vec<String> = pact
                 .functions
                 .iter()
-                .filter(|&(name, (_, default))| {
-                    default.is_some() && !provided.contains(name.as_str())
-                })
-                .map(|(name, _)| name.clone())
+                .filter(|(_, (_, default))| default.is_some())
+                .map(|(name, _)| name)
+                .chain(pact.constants.keys().filter(|&name| {
+                    let member = ctx.solver.pact_members[&(pid, name.clone())];
+                    ctx.solver.decs[member].kind.is_constant()
+                }))
+                .filter(|name| !provided.contains(name.as_str()))
+                .cloned()
                 .collect();
             for name in omitted {
                 if let Some(existing) = ctx.solver.adts[adt].impls.get(&name) {
@@ -341,8 +366,16 @@ impl Hoist for Impl {
                         name: name.clone(),
                     })?;
                 }
-                let header = ctx.solver.pacts[pid].functions[&name].0.clone();
-                let ty = ctx.solver.instantiate_pact_fn(&header, &Ty::Adt(adt));
+                let ty = match ctx.solver.pacts[pid].functions.get(&name) {
+                    Some((header, _)) => {
+                        let header = header.clone();
+                        ctx.solver.instantiate_pact_fn(&header, &Ty::Adt(adt))
+                    }
+                    None => {
+                        let ty = ctx.solver.pacts[pid].constants[&name].clone();
+                        ctx.solver.instantiate_pact_ty(&ty, &Ty::Adt(adt))
+                    }
+                };
                 let dec = ctx.solver.pact_members[&(pid, name.clone())];
                 ctx.solver.adts[adt]
                     .impls
@@ -379,11 +412,29 @@ impl Hoist for Pact {
         for item in self.items.iter() {
             match item {
                 PactItem::Const {
-                    name, annotation, ..
+                    name,
+                    annotation,
+                    default,
+                    ..
                 } => {
                     let ty = Ty::from_annotation(annotation.clone(), ctx.solver)?;
-                    // Local rather than Constant, which has to carry a value by the IR boundary
-                    let dec = ctx.solver.dec_id(name, ty.clone(), DecKind::Local, ctx.vis);
+                    // a default folds right here, the way a parameter's does. without one this
+                    // is a Local, since a Constant has to carry a value by the IR boundary
+                    let kind = match default {
+                        Some(value) => {
+                            value.fulfill_ty(ty.clone(), ctx.solver)?;
+                            let Some(literal) = ctx.solver.reduce_const_expr(value)? else {
+                                Err(NonConstDefault {
+                                    src: ctx.solver.src(value.location()),
+                                    at: value.location().into(),
+                                    what: "pact constant",
+                                })?
+                            };
+                            DecKind::Constant(Some(ConstValue::Literal(literal)))
+                        }
+                        None => DecKind::Local,
+                    };
+                    let dec = ctx.solver.dec_id(name, ty.clone(), kind, ctx.vis);
                     ctx.solver
                         .pact_members
                         .insert((pact_id, name.lexeme.clone()), dec);
@@ -463,9 +514,10 @@ impl Hoist for Function {
                     None => Ok(None),
                     Some(expr) => match ctx.solver.reduce_const_expr(expr)? {
                         Some(lit) => Ok(Some(lit)),
-                        None => Err(crate::errors::NonConstDefault {
+                        None => Err(NonConstDefault {
                             src: ctx.solver.src(expr.location()),
                             at: expr.location().into(),
+                            what: "parameter",
                         })?,
                     },
                 })

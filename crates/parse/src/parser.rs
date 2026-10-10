@@ -515,10 +515,12 @@ impl<'s> Parser<'s> {
                         });
                         Annotation::Poison(Poison)
                     };
+                    let default = self.eat(TokKind::Equal).then(|| self.expr());
                     self.end_stmt(self.location(start));
                     items.push(PactItem::Const {
                         name,
                         annotation,
+                        default,
                         location: self.location(start),
                     });
                 }

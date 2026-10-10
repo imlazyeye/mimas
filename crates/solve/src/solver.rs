@@ -420,8 +420,8 @@ impl Solver {
     fn solve_consts(&mut self, ast: &Ast) -> Result<()> {
         self.hoist_uses(ast)?;
         Self::for_each_item(ast, |item| {
-            if let ItemKind::Const(con) = item.kind() {
-                self.solve_const(con, item.id()).map(|_| ())
+            if let ItemKind::Const(_) = item.kind() {
+                self.solve_const(item.id()).map(|_| ())
             } else {
                 Ok(())
             }
@@ -479,9 +479,10 @@ impl Solver {
     }
 
     /// Solves a constant and the constants its value depends on.
-    pub(crate) fn solve_const(&mut self, con: &Const, id: NodeId) -> Result<Ty> {
-        self.resolve_const(self.node_decs[&id])?;
-        Ok(Ty::Vid(self.node_vid(con.right.id())).normalized(self))
+    pub(crate) fn solve_const(&mut self, id: NodeId) -> Result<Ty> {
+        let dec = self.node_decs[&id];
+        self.resolve_const(dec)?;
+        Ok(Ty::Vid(self.decs[dec].vid).normalized(self))
     }
 
     fn evaluate_const(&mut self, con: &Const, id: NodeId) -> Result<Ty> {
@@ -820,8 +821,12 @@ impl Solver {
     /// The header's `Self` becomes `self_ty` -- the impl target when checking or grafting an impl,
     /// the bound when calling through one, or `Self` itself inside a default body.
     pub(crate) fn instantiate_pact_fn(&mut self, header: &FnHeader, self_ty: &Ty) -> Ty {
+        self.instantiate_pact_ty(&Ty::Fn(header.clone()), self_ty)
+    }
+
+    pub(crate) fn instantiate_pact_ty(&mut self, ty: &Ty, self_ty: &Ty) -> Ty {
         let mut memo: HashMap<Vid, Vid> = HashMap::new();
-        self.fresh_vids(&Ty::Fn(header.clone()), self_ty, &mut memo)
+        self.fresh_vids(ty, self_ty, &mut memo)
     }
 
     /// Normalize `t`, then replace any still-unbound vid with a fresh memoized one and any `Self`
@@ -1732,7 +1737,7 @@ impl Solver {
             }
             StmtKind::Item(item) => match item.kind() {
                 // block-scoped consts get solved here
-                ItemKind::Const(con) => self.solve_const(con, item.id()).map(|_| ())?,
+                ItemKind::Const(_) => self.solve_const(item.id()).map(|_| ())?,
                 // re-runs `process_use` so the imports land in the body-solve phase's fresh
                 // import rib (earlier phases pushed them, but their ribs were popped at phase end).
                 ItemKind::Use(us) => self.process_use(us, item.location())?,
