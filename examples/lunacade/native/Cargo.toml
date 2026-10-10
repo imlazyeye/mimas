@@ -1,0 +1,13 @@
+[package]
+name = "lunacade-native"
+version = "0.3.0"
+edition = "2024"
+description = "lunacade, a fantasy console for mimas, in a window of its own."
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+lunacade-core = { path = "../core" }
+softbuffer = "0.4"
+winit = "0.30"

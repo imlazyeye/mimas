@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "app"]
+members = ["core", "app", "native"]
 
 # the mimas crates are path dependencies outside this workspace, so `package."*"` optimizes them
 # in tests and dev runs too
@@ -19,4 +19,9 @@ lto = "fat"
 
 # but the vm should still be fast
 [profile.release.package.mimas-vm]
+opt-level = 3
+
+# a game on its own has no download to keep small
+[profile.native]
+inherits = "release"
 opt-level = 3
