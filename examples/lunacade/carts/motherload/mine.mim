@@ -1,0 +1,194 @@
+module mine;
+
+use std::math::{IVec2, Vec2, ivec2, vec2};
+
+use minerals::{Copper, Mineral, Silver};
+use sprites::Sprite;
+use stations::Station;
+use strata::Stratum;
+use tiles::Tile;
+
+pub const TILE = 16;
+pub const COLS = 24;
+pub const ROWS = 162;
+/// The row the ground starts at.
+pub const SURFACE = 6;
+const FEET_PER_ROW = 20;
+const CORE_DEPTH = 3000;
+/// The height in the world a pod's roof can't rise past.
+const CEILING = 42.0;
+/// The square of how many cells the pod sees through the ground.
+const SIGHT = 58;
+
+/// Something the ground is seeded with in place of soil.
+struct Lode {
+    tile: Tile,
+    shallowest: int,
+    deepest: int?,
+    odds: int,
+}
+
+pub struct Mine {
+    cells: [Tile],
+    seen: [bool],
+}
+
+impl Mine {
+    pub fn new() -> Self {
+        let lodes = [
+            Lode { tile = Tile::Air, shallowest = 100, deepest = null, odds = 45 },
+            Lode { tile = Tile::Rock, shallowest = 200, deepest = null, odds = 55 },
+            Lode { tile = Tile::Gas, shallowest = 800, deepest = null, odds = 20 },
+            Lode { tile = Tile::Magma, shallowest = 1700, deepest = null, odds = 30 },
+        ];
+        lodes.extend(for mineral in Mineral::*::new() collect Lode {
+            tile = Tile::Ore(mineral),
+            shallowest = mineral.SHALLOWEST,
+            deepest = mineral.DEEPEST,
+            odds = mineral.ODDS,
+        });
+        let cells = for index in COLS * ROWS {
+            let cell = IVec2::from_index(index, COLS);
+            if cell.y < SURFACE collect Tile::Air;
+            if cell.x == 0 || cell.x == COLS - 1 || cell.y == ROWS - 1 collect Tile::Bedrock;
+            let depth = feet(cell.y);
+            let roll = int::random(1000);
+            let found = for lode in lodes {
+                if depth < lode.shallowest || depth >= (lode.deepest ?? depth + 1) continue;
+                roll -= lode.odds;
+                if roll < 0 break lode.tile;
+            };
+            collect found ?? Tile::Soil;
+        };
+
+        // the top row stays whole, with a pad under every station
+        for x in 1..COLS - 1 {
+            cells[SURFACE * COLS + x] = if Station::over(x) == null Tile::Soil else Tile::Pad;
+        }
+
+        // a first load, in reach of the gap between the refinery and the garage
+        let copper = Tile::Ore(Copper::new());
+        let silver = Tile::Ore(Silver::new());
+        for (x, down) in [(11, 1), (13, 1), (16, 1), (10, 3)] {
+            cells[(SURFACE + down) * COLS + x] = copper;
+        }
+        for (x, down) in [(12, 2), (16, 2), (14, 3), (17, 3), (12, 4)] {
+            cells[(SURFACE + down) * COLS + x] = silver;
+        }
+
+        // the motherlode, cased in rock
+        let seat = core();
+        for y in seat.y - 2..seat.y + 3 {
+            for x in seat.x - 3..seat.x + 4 {
+                cells[y * COLS + x] = Tile::Rock;
+            }
+        }
+        cells[seat.to_index(COLS)] = Tile::Core;
+
+        Self { cells, seen = array::new_filled(false, COLS * ROWS) }
+    }
+
+    /// What a cell holds. Outside the world that's bedrock, except for the air over the ground.
+    pub fn at(self, cell: IVec2) -> Tile {
+        if cell.x < 0 || cell.x >= COLS || cell.y >= ROWS {
+            return Tile::Bedrock;
+        }
+        if cell.y < SURFACE {
+            return Tile::Air;
+        }
+        self.cells[cell.to_index(COLS)]
+    }
+
+    /// Changes what a cell holds, unless the cell is part of the world's edge or the sky.
+    pub fn set(self, cell: IVec2, tile: Tile) {
+        if cell.x > 0 && cell.x < COLS - 1 && cell.y >= SURFACE && cell.y < ROWS - 1 {
+            self.cells[cell.to_index(COLS)] = tile;
+        }
+    }
+
+    /// Whether a box that reaches `half` out from `pos` every way is clear of the ground.
+    pub fn fits(self, pos: Vec2, half: float) -> bool {
+        let right = (COLS * TILE).to_float();
+        if pos.x - half < 0.0 || pos.x + half >= right || pos.y - half < CEILING {
+            return false;
+        }
+        for x in [-half, half] {
+            for y in [-half, half] {
+                if self.at(cell_of(pos.add(vec2(x, y)))) != Tile::Air {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Lights up the ground around a cell.
+    pub fn reveal(self, around: IVec2) {
+        for y in (around.y - 5).max(0)..(around.y + 6).min(ROWS) {
+            for x in (around.x - 7).max(0)..(around.x + 8).min(COLS) {
+                let (across, down) = (x - around.x, y - around.y);
+                if across * across + down * down < SIGHT {
+                    self.seen[y * COLS + x] = true;
+                }
+            }
+        }
+    }
+
+    /// Whether a cell is a stretch of tunnel the pod has seen.
+    pub fn charted(self, cell: IVec2) -> bool {
+        let index = cell.to_index(COLS);
+        self.seen[index] && self.cells[index] == Tile::Air
+    }
+
+    pub fn draw(self, view: IVec2) {
+        let beat = luna::frame() ~/ 15 % 2;
+        let left = (view.x ~/ TILE).max(0);
+        let right = ((view.x + luna::WIDTH) ~/ TILE + 1).min(COLS);
+        for y in (view.y ~/ TILE).max(SURFACE)..((view.y + luna::HEIGHT) ~/ TILE + 1).min(ROWS) {
+            let stratum = Stratum::at(feet(y));
+            for x in left..right {
+                let at = ivec2(x, y).scale(TILE);
+                let index = y * COLS + x;
+                let tile = self.cells[index];
+                if tile == Tile::Air {
+                    stratum.cavity.draw(at);
+                    continue;
+                }
+                if !self.seen[index] {
+                    Sprite::Fog.draw(at);
+                    continue;
+                }
+                stratum.soil.draw(at, (x * 7 + y * 13) % 2);
+                match tile {
+                    Tile::Ore(mineral) => mineral.ORE.draw(at),
+                    Tile::Rock => Sprite::Rock.draw(at),
+                    Tile::Gas => Sprite::Gas.draw(at),
+                    Tile::Magma => Sprite::Magma.draw(at, beat),
+                    Tile::Core => Sprite::Core.draw(at, beat),
+                    Tile::Pad => Sprite::Pad.draw(at),
+                    Tile::Bedrock => Sprite::Bedrock.draw(at),
+                    Tile::Air | Tile::Soil => {},
+                }
+            }
+        }
+    }
+}
+
+/// The cell the motherlode is buried in.
+pub fn core() -> IVec2 {
+    ivec2(COLS ~/ 2, SURFACE + CORE_DEPTH ~/ FEET_PER_ROW)
+}
+
+pub fn cell_of(pos: Vec2) -> IVec2 {
+    let at = pos.to_ivec2();
+    ivec2(at.x ~/ TILE, at.y ~/ TILE)
+}
+
+pub fn center(cell: IVec2) -> Vec2 {
+    cell.scale(TILE).add(ivec2(TILE ~/ 2, TILE ~/ 2)).to_vec2()
+}
+
+/// How deep a row is, in feet.
+pub fn feet(row: int) -> int {
+    (row - SURFACE) * FEET_PER_ROW
+}

@@ -1,0 +1,47 @@
+module tiles;
+
+use minerals::Mineral;
+
+/// What a cell of the mine holds.
+pub enum Tile {
+    Air,
+    Soil,
+    Ore(Mineral),
+    Rock,
+    Gas,
+    Magma,
+    Core,
+    Pad,
+    Bedrock,
+}
+
+impl Tile {
+    /// Why a drill of this tier can't cut it, or null when it can.
+    pub fn resists(self, drill: int) -> str? {
+        match self {
+            Tile::Rock => if drill < 3 "ROCK NEEDS A LEVEL 3 DRILL OR DYNAMITE" else null,
+            Tile::Core => if drill < 5 "THE MOTHERLODE'S CASING NEEDS A LEVEL 5 DRILL" else null,
+            Tile::Pad => "LANDING PAD. DRILL BETWEEN THE STATIONS.",
+            Tile::Bedrock => "BEDROCK. FIND ANOTHER WAY.",
+            Tile::Air | Tile::Soil | Tile::Ore(_) | Tile::Gas | Tile::Magma => null,
+        }
+    }
+
+    /// How much drilling it takes to get through at a depth in feet.
+    pub fn work(self, depth: int) -> int {
+        let soil = 24 + depth ~/ 60;
+        match self {
+            Tile::Rock => soil * 3,
+            Tile::Core => 300,
+            _ => soil,
+        }
+    }
+
+    /// Whether dynamite clears it.
+    pub fn blasts(self) -> bool {
+        match self {
+            Tile::Soil | Tile::Ore(_) | Tile::Rock | Tile::Gas | Tile::Magma => true,
+            Tile::Air | Tile::Core | Tile::Pad | Tile::Bedrock => false,
+        }
+    }
+}

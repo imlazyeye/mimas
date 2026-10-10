@@ -1,0 +1,146 @@
+module sprites;
+
+use std::math::{IVec2, ivec2};
+
+/// A picture on the sheet. One with frames has them side by side, in the order they play.
+pub enum Sprite {
+    Regolith,
+    Shale,
+    Basalt,
+    Mantle,
+    RegolithCavity,
+    ShaleCavity,
+    BasaltCavity,
+    MantleCavity,
+    Rock,
+    Bedrock,
+    Pad,
+    Fog,
+    Gas,
+    Magma,
+    Core,
+    Crack,
+    Copper,
+    Silver,
+    Gold,
+    Platinum,
+    Emerald,
+    Ruby,
+    Diamond,
+    Relic,
+    Pod,
+    Rotor,
+    DrillSide,
+    DrillDown,
+    Flame,
+    Chunk,
+    Spark,
+    Puff,
+    Sun,
+    Ridge,
+    Fuel,
+    Plating,
+    Crate,
+    Thermo,
+    Coin,
+    Depth,
+    Bit,
+    Engine,
+    Radiator,
+    Dynamite,
+    Can,
+    Teleporter,
+    PanelCorner,
+    PanelEdge,
+    PanelSide,
+    Cursor,
+    Stars,
+    Halo,
+    Letter,
+    Depot,
+    Refinery,
+    Garage,
+}
+
+impl Sprite {
+    /// The number `gfx::sprite` knows its first cell by.
+    pub fn id(self) -> int {
+        let (col, row, _, _) = self.cells();
+        row * 16 + col
+    }
+
+    /// How big it is in pixels.
+    pub fn size(self) -> IVec2 {
+        let (_, _, wide, tall) = self.cells();
+        ivec2(wide * 8, tall * 8)
+    }
+
+    /// Draws it with its top left corner at `at`.
+    pub fn draw(self, at: IVec2, frame = 0) {
+        let (col, row, wide, tall) = self.cells();
+        gfx::blit(ivec2((col + frame * wide) * 8, row * 8), ivec2(wide * 8, tall * 8), at);
+    }
+
+    /// Where it is on the sheet in 8 by 8 cells, as the column and row it starts at and then how
+    /// many it is wide and tall.
+    fn cells(self) -> (int, int, int, int) {
+        match self {
+            Sprite::Regolith => (0, 0, 2, 2),
+            Sprite::Shale => (4, 0, 2, 2),
+            Sprite::Basalt => (8, 0, 2, 2),
+            Sprite::Mantle => (12, 0, 2, 2),
+            Sprite::RegolithCavity => (0, 2, 2, 2),
+            Sprite::ShaleCavity => (2, 2, 2, 2),
+            Sprite::BasaltCavity => (4, 2, 2, 2),
+            Sprite::MantleCavity => (6, 2, 2, 2),
+            Sprite::Rock => (8, 2, 2, 2),
+            Sprite::Bedrock => (10, 2, 2, 2),
+            Sprite::Pad => (12, 2, 2, 2),
+            Sprite::Fog => (14, 2, 2, 2),
+            Sprite::Gas => (0, 4, 2, 2),
+            Sprite::Magma => (2, 4, 2, 2),
+            Sprite::Core => (6, 4, 2, 2),
+            Sprite::Crack => (10, 4, 2, 2),
+            Sprite::Copper => (0, 6, 2, 2),
+            Sprite::Silver => (2, 6, 2, 2),
+            Sprite::Gold => (4, 6, 2, 2),
+            Sprite::Platinum => (6, 6, 2, 2),
+            Sprite::Emerald => (8, 6, 2, 2),
+            Sprite::Ruby => (10, 6, 2, 2),
+            Sprite::Diamond => (12, 6, 2, 2),
+            Sprite::Relic => (14, 6, 2, 2),
+            Sprite::Pod => (0, 8, 2, 2),
+            Sprite::Rotor => (2, 8, 2, 1),
+            Sprite::DrillSide => (2, 9, 1, 1),
+            Sprite::DrillDown => (4, 9, 1, 1),
+            Sprite::Flame => (6, 8, 1, 1),
+            Sprite::Chunk => (6, 9, 1, 1),
+            Sprite::Spark => (8, 8, 1, 1),
+            Sprite::Puff => (8, 9, 1, 1),
+            Sprite::Sun => (10, 8, 2, 2),
+            Sprite::Ridge => (12, 8, 4, 2),
+            Sprite::Fuel => (0, 10, 1, 1),
+            Sprite::Plating => (1, 10, 1, 1),
+            Sprite::Crate => (2, 10, 1, 1),
+            Sprite::Thermo => (3, 10, 1, 1),
+            Sprite::Coin => (4, 10, 1, 1),
+            Sprite::Depth => (5, 10, 1, 1),
+            Sprite::Bit => (6, 10, 1, 1),
+            Sprite::Engine => (7, 10, 1, 1),
+            Sprite::Radiator => (8, 10, 1, 1),
+            Sprite::Dynamite => (9, 10, 1, 1),
+            Sprite::Can => (10, 10, 1, 1),
+            Sprite::Teleporter => (11, 10, 1, 1),
+            Sprite::PanelCorner => (12, 10, 1, 1),
+            Sprite::PanelEdge => (13, 10, 1, 1),
+            Sprite::Halo => (14, 10, 2, 2),
+            Sprite::Letter => (0, 11, 1, 1),
+            Sprite::PanelSide => (9, 11, 1, 1),
+            Sprite::Cursor => (10, 11, 1, 1),
+            Sprite::Stars => (11, 11, 1, 1),
+            Sprite::Depot => (0, 12, 5, 4),
+            Sprite::Refinery => (5, 12, 5, 4),
+            Sprite::Garage => (10, 12, 5, 4),
+        }
+    }
+}

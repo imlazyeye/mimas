@@ -1,0 +1,112 @@
+module gadgets;
+
+use std::math::ivec2;
+
+use mine::{cell_of, center};
+use run::Run;
+use sprites::Sprite;
+use tiles::Tile;
+
+const BLAST = 2;
+
+/// Something the pod carries a few of and sets off with a button of its own. Every gadget is its
+/// own type, and `Gadget::*::new()` is one of each, which is what a new pod is stocked from.
+pub pact Gadget {
+    /// What the hud and the depot call it.
+    const NAME: str;
+    /// An 8 by 8 picture of it.
+    const ICON: Sprite;
+    /// The button that sets one off.
+    const BUTTON: Button;
+    /// What the depot charges for one.
+    const PRICE: int;
+    /// What the depot says about it.
+    const PERK: str;
+    /// How many a new pod carries.
+    const STARTING: int = 1;
+
+    fn new() -> Self;
+
+    /// Sets one off, and says whether it did. One that didn't isn't used up.
+    fn fire(self, run: Run) -> bool;
+}
+
+/// How many of a gadget the pod has left.
+pub struct Supply {
+    pub gadget: Gadget,
+    pub count: int,
+}
+
+pub struct Dynamite;
+impl Gadget for Dynamite {
+    const NAME = "DYNAMITE";
+    const ICON = Sprite::Dynamite;
+    const BUTTON = Button::B;
+    const PRICE = 80;
+    const PERK = "CLEARS THE GROUND ALL AROUND. THE ORE IN IT IS LOST.";
+    const STARTING = 2;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn fire(self, run: Run) -> bool {
+        let middle = cell_of(run.pod.pos);
+        for y in -BLAST..BLAST + 1 {
+            for x in -BLAST..BLAST + 1 {
+                let cell = middle.add(ivec2(x, y));
+                if !run.mine.at(cell).blasts() continue;
+                run.mine.set(cell, Tile::Air);
+                run.fx.burst(center(cell), Sprite::Chunk, 3);
+            }
+        }
+        run.pod.dig = null;
+        run.fx.shake(20);
+        run.radio.say("BLAST CLEAR. THE ORE IN IT IS GONE.");
+        true
+    }
+}
+
+pub struct Can;
+impl Gadget for Can {
+    const NAME = "RESERVE CAN";
+    const ICON = Sprite::Can;
+    const BUTTON = Button::X;
+    const PRICE = 60;
+    const PERK = "HALF A TANK OF FUEL, WHEREVER YOU ARE.";
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn fire(self, run: Run) -> bool {
+        let pod = run.pod;
+        if pod.fuel == pod.specs.tank {
+            run.radio.say("TANK ALREADY FULL");
+            return false;
+        }
+        pod.fuel = (pod.fuel + pod.specs.tank ~/ 2).min(pod.specs.tank);
+        run.fx.popup(pod.pos, "RESERVE FUEL", Color::Lime);
+        run.radio.say("RESERVE CAN EMPTIED INTO THE TANK");
+        true
+    }
+}
+
+pub struct Teleporter;
+impl Gadget for Teleporter {
+    const NAME = "TELEPORTER";
+    const ICON = Sprite::Teleporter;
+    const BUTTON = Button::Y;
+    const PRICE = 180;
+    const PERK = "PUTS THE POD BACK ON THE REFINERY'S PAD.";
+
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn fire(self, run: Run) -> bool {
+        run.land();
+        run.radio.say("EMERGENCY TELEPORT. SURFACE REACHED.");
+        true
+    }
+}

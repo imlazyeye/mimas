@@ -1,0 +1,124 @@
+module minerals;
+
+use sprites::Sprite;
+
+/// Something in the ground the refinery pays for. Every mineral is its own type, and
+/// `Mineral::*::new()` is one of each, which is where the mine finds what to bury.
+pub pact Mineral {
+    /// What a find of it is announced as.
+    const NAME: str;
+    /// What the refinery pays for one.
+    const VALUE: int;
+    /// How it looks in the ground, drawn over the soil it's in.
+    const ORE: Sprite;
+    /// The depth in feet it starts turning up at.
+    const SHALLOWEST: int;
+    /// The depth in feet it runs out at, when it does.
+    const DEEPEST: int? = null;
+    /// How many cells in a thousand hold it between those depths.
+    const ODDS: int = 125;
+
+    fn new() -> Self;
+}
+
+pub struct Copper;
+impl Mineral for Copper {
+    const NAME = "COPPER";
+    const VALUE = 25;
+    const ORE = Sprite::Copper;
+    const SHALLOWEST = 0;
+    const DEEPEST = 480;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Silver;
+impl Mineral for Silver {
+    const NAME = "SILVER";
+    const VALUE = 60;
+    const ORE = Sprite::Silver;
+    const SHALLOWEST = 0;
+    const DEEPEST = 960;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Gold;
+impl Mineral for Gold {
+    const NAME = "GOLD";
+    const VALUE = 140;
+    const ORE = Sprite::Gold;
+    const SHALLOWEST = 480;
+    const DEEPEST = 1440;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Platinum;
+impl Mineral for Platinum {
+    const NAME = "PLATINUM";
+    const VALUE = 300;
+    const ORE = Sprite::Platinum;
+    const SHALLOWEST = 960;
+    const DEEPEST = 1920;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Emerald;
+impl Mineral for Emerald {
+    const NAME = "EMERALD";
+    const VALUE = 600;
+    const ORE = Sprite::Emerald;
+    const SHALLOWEST = 1440;
+    const DEEPEST = 2400;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Ruby;
+impl Mineral for Ruby {
+    const NAME = "RUBY";
+    const VALUE = 1100;
+    const ORE = Sprite::Ruby;
+    const SHALLOWEST = 1920;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Diamond;
+impl Mineral for Diamond {
+    const NAME = "DIAMOND";
+    const VALUE = 2000;
+    const ORE = Sprite::Diamond;
+    const SHALLOWEST = 2400;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct Relic;
+impl Mineral for Relic {
+    const NAME = "RELIC";
+    const VALUE = 1500;
+    const ORE = Sprite::Relic;
+    const SHALLOWEST = 700;
+    const ODDS = 5;
+
+    pub fn new() -> Self {
+        Self {}
+    }
+}

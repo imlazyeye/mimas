@@ -77,7 +77,7 @@ const machine = mountConsole(document.getElementById('frame'), {
     stats: () => {},
     crash: (error) => say(String(error)),
 });
-for (const diagnostic of machine.load(Console, cart.files, Date.now()) ?? []) problem(diagnostic);
+for (const diagnostic of machine.load(() => new Console(JSON.stringify(cart), Date.now())) ?? []) problem(diagnostic);
 machine.focus();
 </script>
 </body>

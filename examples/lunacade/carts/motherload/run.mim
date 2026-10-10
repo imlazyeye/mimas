@@ -1,0 +1,306 @@
+module run;
+
+use std::math::{IVec2, Vec2, ivec2, vec2};
+
+use fx::Fx;
+use mine::{COLS, Mine, ROWS, SURFACE, TILE, cell_of, center, core, feet};
+use pod::{Bore, HALF, Pod};
+use radio::Radio;
+use sprites::Sprite;
+use stations::{PAD, Station, Ware};
+use strata::Stratum;
+use surface;
+use tiles::Tile;
+
+/// The rows of the screen the hud leaves to the world.
+pub const VIEW_TOP = 18;
+pub const VIEW_BOTTOM = 128;
+/// Where on the screen the camera keeps the pod.
+const FOCUS_X = 128.0;
+const FOCUS_Y = 68.0;
+/// How far down the world the top of the screen stops.
+const SKYLINE = 20.0;
+const HARD_LANDING = 3.2;
+const HURT_FRAMES = 20;
+/// What the refinery pays for the motherlode.
+const BOUNTY = 25000;
+
+/// What a frame of the run came to, for the scenes to react to.
+pub enum Event {
+    Nothing,
+    Wrecked,
+    Won,
+}
+
+/// One mine and the pod sent down it. Starting over is making a new one.
+pub struct Run {
+    pub t: int,
+    pub mine: Mine,
+    pub pod: Pod,
+    pub fx: Fx,
+    pub radio: Radio,
+    pub camera: Vec2,
+    pub cash: int,
+    pub earned: int,
+    pub deepest: int,
+    pub wreck: str?,
+}
+
+impl Run {
+    pub fn new() -> Self {
+        let pod = Pod::new(home());
+        let run = Self {
+            t = 0,
+            mine = Mine::new(),
+            pod,
+            fx = Fx::new(),
+            radio = Radio::new(),
+            camera = framing(pod.pos),
+            cash = 50,
+            earned = 0,
+            deepest = 0,
+            wreck = null,
+        };
+        run.mine.reveal(cell_of(pod.pos));
+        run
+    }
+
+    pub fn update(self) -> Event {
+        let pod = self.pod;
+        self.t += 1;
+        self.fx.update();
+        self.radio.update();
+        if pod.flash > 0 {
+            pod.flash -= 1;
+        }
+
+        for supply in pod.supplies {
+            if !input::pressed(supply.gadget.BUTTON) continue;
+            if supply.count == 0 {
+                self.radio.say(f"NO {supply.gadget.NAME} LEFT");
+            } else if supply.gadget.fire(self) {
+                supply.count -= 1;
+            }
+        }
+
+        // the drill never runs while up is held (up is always thrust)
+        let thrust = input::held(Button::Up);
+        let steer = 0;
+        if input::held(Button::Left) {
+            steer -= 1;
+        }
+        if input::held(Button::Right) {
+            steer += 1;
+        }
+        let toward = if input::held(Button::Down) ivec2(0, 1) else ivec2(steer, 0);
+        let aimed = toward.x != 0 || toward.y != 0;
+        pod.thrusting = thrust;
+        if steer != 0 {
+            pod.left = steer < 0;
+        }
+
+        let bore = if thrust || !aimed Bore::Idle else pod.bore(self.mine, toward);
+        let drilling = match bore {
+            Bore::Idle => false,
+            Bore::Refused(why) => {
+                self.radio.say(why);
+                false
+            },
+            Bore::Cutting => {
+                if self.t % 5 == 0 {
+                    self.fx.burst(pod.pos.add(toward.to_vec2().scale(8.0)), Sprite::Spark, 2);
+                }
+                true
+            },
+            Bore::Through(cell, tile) => {
+                let cooling = pod.specs.cooling;
+                self.fx.burst(center(cell), Sprite::Chunk, 8);
+                match tile {
+                    Tile::Ore(mineral) => {
+                        if pod.hold.len() < pod.specs.bay {
+                            pod.hold.push(mineral);
+                            let found = f"{mineral.NAME} ${mineral.VALUE}";
+                            self.fx.popup(pod.pos, found, Color::Yellow);
+                        } else {
+                            self.radio.say("CARGO FULL. THE ORE WAS LEFT BEHIND.");
+                        }
+                    },
+                    Tile::Gas => {
+                        self.hurt((34 - 6 * cooling).max(8), "A GAS POCKET RUPTURED THE HULL");
+                        self.fx.burst(pod.pos, Sprite::Puff, 20);
+                        self.radio.say("GAS! A RADIATOR TAKES THE EDGE OFF.");
+                    },
+                    Tile::Magma => {
+                        pod.heat = (pod.heat + 60 - 10 * cooling).min(100);
+                        self.hurt((45 - 8 * cooling).max(5), "THE HULL MELTED IN MAGMA");
+                        self.radio.say("MAGMA! WATCH YOUR HEAT AND YOUR HULL.");
+                    },
+                    Tile::Core => {
+                        pod.core = true;
+                        self.fx.popup(pod.pos, "THE MOTHERLODE", Color::Cyan);
+                        self.radio.say("MOTHERLODE ON BOARD! GET IT TO THE REFINERY.");
+                    },
+                    Tile::Air | Tile::Soil | Tile::Rock | Tile::Pad | Tile::Bedrock => {},
+                }
+                true
+            },
+        };
+        if !drilling {
+            let impact = pod.fly(self.mine, steer, thrust);
+            if impact > HARD_LANDING {
+                let damage = ((impact - HARD_LANDING) * 10.0).to_int();
+                self.hurt(damage, "A HARD LANDING CRUSHED THE HULL");
+            }
+        }
+
+        let depth = self.depth();
+        let buried = pod.pos.y > (SURFACE * TILE).to_float();
+        if buried || thrust || steer != 0 || drilling {
+            pod.burn(if thrust 2 else 1);
+        }
+        if self.t % 30 == 0 {
+            let heat = Stratum::at(depth).heat;
+            pod.heat = (pod.heat + (if heat > 0 heat - pod.specs.cooling else -5)).clamp(0, 100);
+            if pod.heat >= 90 {
+                self.hurt(5, "THE POD OVERHEATED. FIT A BETTER RADIATOR.");
+            }
+        }
+        if depth > self.deepest {
+            self.radio.descend(self.deepest, depth);
+            self.deepest = depth;
+        }
+        if pod.fuel == 0 {
+            self.wreck ??= "OUT OF FUEL. THE POD IS STRANDED.";
+        }
+        if self.wreck != null {
+            return Event::Wrecked;
+        }
+
+        // the refinery buys the hold the moment the pod is over its pad
+        self.mine.reveal(cell_of(pod.pos));
+        if self.docked() == Station::Refinery {
+            let value = (for mineral in pod.hold collect mineral.VALUE).sum();
+            if value > 0 {
+                pod.hold = [];
+                self.cash += value;
+                self.earned += value;
+                self.fx.popup(pod.pos, f"+${value}", Color::Lime);
+                self.radio.say(f"LOAD SOLD FOR ${value}. FUEL IS LEFT OF HERE, PARTS RIGHT.");
+            }
+            if pod.core {
+                pod.core = false;
+                self.cash += BOUNTY;
+                self.earned += BOUNTY;
+                return Event::Won;
+            }
+        }
+
+        self.camera = self.camera.lerp(framing(pod.pos), 0.15);
+        if self.radio.ttl == 0 {
+            if pod.fuel < pod.specs.tank ~/ 4 {
+                self.radio.say("LOW FUEL! FLY UP, OR USE A CAN OR A TELEPORTER.");
+            } else if pod.hold.len() >= pod.specs.bay {
+                self.radio.say("CARGO FULL. FLY BACK TO THE REFINERY.");
+            }
+        }
+        Event::Nothing
+    }
+
+    pub fn draw(self) {
+        let view = self.camera.to_ivec2().add(self.fx.offset());
+        gfx::clear(Color::Black);
+        gfx::camera(view);
+        surface::draw(view);
+        self.mine.draw(view);
+        self.pod.draw(self.t);
+        self.fx.draw();
+        gfx::camera(IVec2::zero());
+    }
+
+    /// How deep the pod's tracks are, in feet.
+    pub fn depth(self) -> int {
+        feet(cell_of(self.pod.pos.add(vec2(0.0, HALF - 0.5))).y).max(0)
+    }
+
+    /// The station whose pad the pod is sitting over.
+    pub fn docked(self) -> Station? {
+        let cell = cell_of(self.pod.pos);
+        if cell.y == SURFACE - 1 Station::over(cell.x) else null
+    }
+
+    /// Buys a ware for the pod, if the pod has a use for it and the cash covers it.
+    pub fn buy(self, ware: Ware) {
+        let price? = ware.price(self.pod) else {
+            self.radio.say("THAT'S AS GOOD AS IT GETS ALREADY");
+            return;
+        };
+        if price > self.cash {
+            self.radio.say("NOT ENOUGH CASH. THE REFINERY PAYS FOR ORE.");
+            return;
+        }
+        self.cash -= price;
+        ware.buy(self.pod);
+        self.radio.say(f"{ware.label(self.pod)} - PAID ${price}");
+    }
+
+    /// Sets the pod down on the refinery's pad, where every trip starts.
+    pub fn land(self) {
+        let pod = self.pod;
+        pod.pos = home();
+        pod.park();
+        pod.heat = 0;
+        self.camera = framing(pod.pos);
+    }
+
+    /// What it costs to have a wreck hauled back up.
+    pub fn salvage(self) -> int {
+        self.cash ~/ 4
+    }
+
+    /// Hauls a wreck back to the surface for the cargo and a cut of the cash. The parts stay on.
+    pub fn recover(self) {
+        let pod = self.pod;
+        let fee = self.salvage();
+        self.cash -= fee;
+        pod.hold = [];
+        if pod.core {
+            pod.core = false;
+            self.mine.set(core(), Tile::Core);
+        }
+        pod.fuel = pod.specs.tank;
+        pod.hull = pod.specs.hull;
+        pod.flash = 0;
+        self.land();
+        self.wreck = null;
+        self.fx = Fx::new();
+        self.radio.say(f"RECOVERED, FOR THE CARGO AND ${fee}. THE PARTS STAYED ON.");
+    }
+
+    /// Dents the hull, and wrecks the pod when that was the last of it.
+    fn hurt(self, damage: int, how: str) {
+        if damage <= 0 {
+            return;
+        }
+        let pod = self.pod;
+        pod.hull = (pod.hull - damage).max(0);
+        pod.flash = HURT_FRAMES;
+        if pod.hull == 0 {
+            self.wreck = how;
+        }
+        self.fx.shake(12);
+        self.fx.burst(pod.pos, Sprite::Spark, 12);
+    }
+}
+
+/// The middle of the refinery's pad.
+fn home() -> Vec2 {
+    center(ivec2(Station::Refinery.column() + PAD ~/ 2, SURFACE - 1))
+}
+
+/// The camera that puts a spot where the pod is kept on the screen, without leaving the world.
+fn framing(pos: Vec2) -> Vec2 {
+    vec2(
+        (pos.x - FOCUS_X).clamp(0.0, (COLS * TILE - luna::WIDTH).to_float()),
+        (pos.y - FOCUS_Y).clamp(SKYLINE, (ROWS * TILE - VIEW_BOTTOM).to_float()),
+    )
+}

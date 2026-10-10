@@ -1,0 +1,36 @@
+module strata;
+
+use sprites::Sprite;
+
+const STRATA = [
+    Stratum { top = 0, soil = Sprite::Regolith, cavity = Sprite::RegolithCavity, heat = 0 },
+    Stratum { top = 640, soil = Sprite::Shale, cavity = Sprite::ShaleCavity, heat = 0 },
+    Stratum { top = 1520, soil = Sprite::Basalt, cavity = Sprite::BasaltCavity, heat = 0 },
+    Stratum { top = 2300, soil = Sprite::Mantle, cavity = Sprite::MantleCavity, heat = 4 },
+];
+
+/// A band of the ground with a look of its own.
+pub struct Stratum {
+    /// The depth in feet it starts at.
+    pub top: int,
+    /// Two frames, to keep a wall of it from repeating.
+    pub soil: Sprite,
+    /// How a cell of it looks once it's dug out.
+    pub cavity: Sprite,
+    /// How much hotter a pod gets for each half second it spends here.
+    pub heat: int,
+}
+
+impl Stratum {
+    /// The stratum a depth in feet is in.
+    pub fn at(depth: int) -> Self {
+        let strata = STRATA;
+        let found = strata[0];
+        for stratum in strata {
+            if stratum.top <= depth {
+                found = stratum;
+            }
+        }
+        found
+    }
+}

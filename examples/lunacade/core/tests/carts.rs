@@ -80,13 +80,14 @@ fn snake_fills_the_board() {
     cart.files.get_mut("snake.mim").unwrap().push_str(
         "\ngame.scene = Scene::Playing;
          game.body = (for cell in 1..COLS * ROWS collect cell);
+         for cell in game.body { game.occupied[cell] = true; }
          game.dir = ivec2(-1, 0);
          game.turn = game.dir;
          game.food = 0;
          game.timer = game.delay - 1;
          game.update();
          print(game.body.len());
-         print(game.scene == Scene::Over);
+         print(game.scene == Scene::Over(true));
          print(game.score);
          print(game.timer);",
     );

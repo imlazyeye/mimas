@@ -1,0 +1,41 @@
+module radio;
+
+const AIRTIME = 180;
+const MILESTONES = [
+    (600, "CONTROL: RICHER VEINS AHEAD. WATCH YOUR FUEL."),
+    (1400, "CONTROL: GAS READINGS RISING. UPGRADE THE HULL."),
+    (2300, "CONTROL: EXTREME HEAT. FIT A RADIATOR."),
+    (2900, "UNKNOWN SIGNAL AT 3000 FT. CENTER OF THE MINE."),
+];
+
+/// The one line of text that control and the pod's own alarms share.
+pub struct Radio {
+    pub line: str,
+    pub ttl: int,
+}
+
+impl Radio {
+    pub fn new() -> Self {
+        Self { line = "DRILL BETWEEN THE PADS. THE REFINERY BUYS WHAT YOU DIG.", ttl = 300 }
+    }
+
+    pub fn say(self, line: str) {
+        self.line = line;
+        self.ttl = AIRTIME;
+    }
+
+    pub fn update(self) {
+        if self.ttl > 0 {
+            self.ttl -= 1;
+        }
+    }
+
+    /// Calls out what lies between the pod's old record depth and its new one, both in feet.
+    pub fn descend(self, from: int, to: int) {
+        for (depth, line) in MILESTONES {
+            if from < depth && to >= depth {
+                self.say(line);
+            }
+        }
+    }
+}

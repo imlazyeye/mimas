@@ -1,0 +1,164 @@
+module stations;
+
+use gadgets::Supply;
+use parts::{PARTS, Part, TIERS};
+use pod::Pod;
+use sprites::Sprite;
+
+/// How many columns a station's landing pad covers.
+pub const PAD = 5;
+pub const STATIONS = [Station::Depot, Station::Refinery, Station::Garage];
+
+/// A building on the surface.
+pub enum Station {
+    Depot,
+    Refinery,
+    Garage,
+}
+
+impl Station {
+    /// The station whose pad a column is part of.
+    pub fn over(column: int) -> Station? {
+        for station in STATIONS {
+            if column >= station.column() && column < station.column() + PAD break station;
+        }
+    }
+
+    pub fn name(self) -> str {
+        match self {
+            Station::Depot => "FUEL",
+            Station::Refinery => "REFINERY",
+            Station::Garage => "GARAGE",
+        }
+    }
+
+    /// The leftmost column of its pad.
+    pub fn column(self) -> int {
+        match self {
+            Station::Depot => 1,
+            Station::Refinery => 10,
+            Station::Garage => 18,
+        }
+    }
+
+    pub fn art(self) -> Sprite {
+        match self {
+            Station::Depot => Sprite::Depot,
+            Station::Refinery => Sprite::Refinery,
+            Station::Garage => Sprite::Garage,
+        }
+    }
+
+    pub fn tint(self) -> Color {
+        match self {
+            Station::Depot => Color::Lime,
+            Station::Refinery => Color::Yellow,
+            Station::Garage => Color::Cyan,
+        }
+    }
+
+    /// What the hud tells a pod parked on its pad to do, for a station with a counter.
+    pub fn prompt(self) -> str? {
+        match self {
+            Station::Depot => "A: FUEL, REPAIRS AND SUPPLIES",
+            Station::Refinery => null,
+            Station::Garage => "A: BETTER PARTS FOR DEEPER TRIPS",
+        }
+    }
+
+    /// What it has for a pod, in the order its menu lists them.
+    pub fn wares(self, pod: Pod) -> [Ware] {
+        match self {
+            Station::Depot => {
+                let wares = [Ware::Refuel, Ware::Repair];
+                wares.extend(for supply in pod.supplies collect Ware::Stock(supply));
+                wares
+            },
+            Station::Refinery => [],
+            Station::Garage => for part in PARTS collect Ware::Upgrade(part),
+        }
+    }
+}
+
+/// One thing a station sells. Each kind carries what it needs, and a match over a ware has to
+/// deal with every kind.
+pub enum Ware {
+    /// A full tank.
+    Refuel,
+    /// A whole hull.
+    Repair,
+    /// One more of a gadget the pod carries.
+    Stock(Supply),
+    /// The next tier of a part.
+    Upgrade(Part),
+}
+
+impl Ware {
+    /// The line it gets on a menu.
+    pub fn label(self, pod: Pod) -> str {
+        match self {
+            Ware::Refuel => "FILL THE TANK",
+            Ware::Repair => "REPAIR THE HULL",
+            Ware::Stock(supply) => f"{supply.gadget.NAME}  x{supply.count}",
+            Ware::Upgrade(part) => f"{part.name()}  LV {pod.tiers[part.slot()] + 1}/{TIERS}",
+        }
+    }
+
+    pub fn perk(self) -> str {
+        match self {
+            Ware::Refuel => "A FULL TANK FOR THE TRIP DOWN.",
+            Ware::Repair => "PATCHES THE HULL AND COOLS IT OFF.",
+            Ware::Stock(supply) => supply.gadget.PERK,
+            Ware::Upgrade(part) => part.perk(),
+        }
+    }
+
+    pub fn icon(self) -> Sprite {
+        match self {
+            Ware::Refuel => Sprite::Fuel,
+            Ware::Repair => Sprite::Plating,
+            Ware::Stock(supply) => supply.gadget.ICON,
+            Ware::Upgrade(part) => part.icon(),
+        }
+    }
+
+    /// What it costs a pod right now, or null when the pod has no use for it.
+    pub fn price(self, pod: Pod) -> int? {
+        match self {
+            Ware::Refuel => {
+                let missing = pod.specs.tank - pod.fuel;
+                if missing == 0 null else (missing + 199) ~/ 200
+            },
+            Ware::Repair => {
+                let dents = pod.specs.hull - pod.hull;
+                if dents == 0 null else (dents + 3) ~/ 4
+            },
+            Ware::Stock(supply) => supply.gadget.PRICE,
+            Ware::Upgrade(part) => Part::price(pod.tiers[part.slot()]),
+        }
+    }
+
+    /// Gives it to a pod. The caller settles the price.
+    pub fn buy(self, pod: Pod) {
+        match self {
+            Ware::Refuel => {
+                pod.fuel = pod.specs.tank;
+            },
+            Ware::Repair => {
+                pod.hull = pod.specs.hull;
+                pod.heat = 0;
+            },
+            Ware::Stock(supply) => {
+                supply.count += 1;
+            },
+            Ware::Upgrade(part) => pod.fit(part),
+        }
+    }
+}
+
+/// A stop at a station's counter.
+pub struct Visit {
+    pub station: Station,
+    pub wares: [Ware],
+    pub cursor: int,
+}

@@ -1,0 +1,222 @@
+module ui;
+
+use std::math::{IVec2, ivec2};
+
+use mine::{COLS, ROWS, SURFACE, cell_of};
+use run::{Run, VIEW_BOTTOM, VIEW_TOP};
+use sprites::Sprite;
+use stations::Visit;
+
+/// MOTHERLOAD, as frames of `Sprite::Letter`.
+const LOGO = [0, 1, 2, 3, 4, 5, 6, 1, 7, 8];
+
+const MENU_LEFT = 24;
+const MENU_TOP = 40;
+const MENU_WIDTH = 208;
+const MENU_ROW = 10;
+const MENU_EXIT = 112;
+
+const MAP_LEFT = 196;
+const MAP_TOP = 44;
+const MAP_HEIGHT = 64;
+
+/// The gauges over the world and the lines under it. `prompting` is whether a pod parked at a
+/// station gets told what A does there, in place of what the radio last said.
+pub fn hud(run: Run, prompting = true) {
+    let pod = run.pod;
+    let below = ivec2(luna::WIDTH, luna::HEIGHT - VIEW_BOTTOM);
+    gfx::fill_rect(IVec2::zero(), ivec2(luna::WIDTH, VIEW_TOP), Color::Black);
+    gfx::fill_rect(ivec2(0, VIEW_BOTTOM), below, Color::Black);
+    gfx::line(ivec2(0, VIEW_TOP - 1), ivec2(luna::WIDTH - 1, VIEW_TOP - 1), Color::Slate);
+    gfx::line(ivec2(0, VIEW_BOTTOM), ivec2(luna::WIDTH - 1, VIEW_BOTTOM), Color::Slate);
+
+    let low = pod.fuel < pod.specs.tank ~/ 4;
+    Sprite::Fuel.draw(ivec2(2, 0));
+    bar(ivec2(12, 2), 56, pod.fuel, pod.specs.tank, if low Color::Red else Color::Lime);
+    Sprite::Plating.draw(ivec2(74, 0));
+    bar(ivec2(84, 2), 44, pod.hull, pod.specs.hull, Color::Sky);
+    let hot = pod.heat >= 75;
+    stat(Sprite::Thermo, f"{pod.heat}%", ivec2(136, 0), if hot Color::Red else Color::Slate);
+    stat(Sprite::Coin, f"${run.cash}", ivec2(184, 0), Color::Yellow);
+
+    let full = pod.hold.len() >= pod.specs.bay;
+    let load = f"{pod.hold.len()}/{pod.specs.bay}";
+    stat(Sprite::Crate, load, ivec2(2, 8), if full Color::Orange else Color::Silver);
+    stat(Sprite::Depth, f"{run.depth()} FT", ivec2(74, 8), Color::White);
+    if pod.core {
+        gfx::text("CORE ON BOARD", ivec2(184, 10), Color::Cyan);
+    } else {
+        gfx::text(f"BEST {run.deepest} FT", ivec2(184, 10), Color::Slate);
+    }
+
+    let line = ivec2(4, VIEW_BOTTOM + 3);
+    let prompt = if prompting run.docked()?.prompt() else null;
+    if let prompt? = prompt {
+        gfx::text(prompt, line, Color::Lime);
+    } else if run.radio.ttl > 0 {
+        gfx::text(run.radio.line, line, Color::Yellow);
+    } else {
+        gfx::text("D-PAD DRILLS AND DRIVES   UP FLIES   START PAUSES", line, Color::Slate);
+    }
+    for (slot, supply) in pod.supplies.enumerate() {
+        let label = f"{name(supply.gadget.BUTTON)}:{supply.count}";
+        let color = if supply.count > 0 Color::Silver else Color::Charcoal;
+        stat(supply.gadget.ICON, label, ivec2(2 + slot * 40, VIEW_BOTTOM + 8), color);
+    }
+}
+
+pub fn title(tick: int) {
+    for (i, letter) in LOGO.enumerate() {
+        let at = ivec2(48 + i * 16, 22);
+        gfx::remap(Color::Yellow, Color::Plum);
+        gfx::remap(Color::Orange, Color::Plum);
+        gfx::remap(Color::Red, Color::Plum);
+        gfx::sprite(Sprite::Letter.id() + letter, at.add(ivec2(2, 2)), false, false, 2.0);
+        gfx::reset_remap();
+        gfx::sprite(Sprite::Letter.id() + letter, at, false, false, 2.0);
+    }
+    panel(ivec2(24, 84), ivec2(208, 56));
+    gfx::text_centered("THE MINE IS DEEP. YOUR TANK IS NOT.", 91, Color::White);
+    gfx::text_centered("DRILL ORE. SELL IT. UPGRADE. GO DEEPER.", 100, Color::Silver);
+    gfx::text_centered("D-PAD DRILLS AND DRIVES   UP FLIES   A SHOPS", 109, Color::Slate);
+    if tick ~/ 30 % 2 == 0 {
+        gfx::text_centered("PRESS START", 119, Color::Yellow);
+    }
+    gfx::text_centered("AFTER XGEN'S FLASH CLASSIC", 129, Color::Charcoal);
+}
+
+pub fn shop(run: Run, visit: Visit) {
+    let pod = run.pod;
+    panel(ivec2(16, 22), ivec2(224, 104));
+    gfx::text(visit.station.name(), ivec2(MENU_LEFT, 29), visit.station.tint());
+    let cash = f"CASH ${run.cash}";
+    gfx::text(cash, ivec2(MENU_LEFT + MENU_WIDTH - gfx::text_width(cash), 29), Color::Yellow);
+    for (row, ware) in visit.wares.enumerate() {
+        let at = ivec2(MENU_LEFT, MENU_TOP + row * MENU_ROW);
+        let lit = row == visit.cursor;
+        if lit {
+            gfx::fill_rect(at.sub(ivec2(2, 1)), ivec2(MENU_WIDTH + 4, MENU_ROW), Color::Navy);
+        }
+        stat(ware.icon(), ware.label(pod), at, if lit Color::White else Color::Silver);
+        let tag = "--";
+        let color = Color::Slate;
+        if let price? = ware.price(pod) {
+            tag = f"${price}";
+            color = if price > run.cash Color::Red else Color::Lime;
+        }
+        gfx::text(tag, at.add(ivec2(MENU_WIDTH - gfx::text_width(tag), 2)), color);
+    }
+    gfx::text(visit.wares[visit.cursor].perk(), ivec2(MENU_LEFT, 103), Color::Slate);
+    gfx::text("UP DOWN CHOOSE   A BUYS   B LEAVES", ivec2(MENU_LEFT, MENU_EXIT + 2), Color::Yellow);
+}
+
+/// The row of a shop's menu a spot on the screen is on.
+pub fn shop_row(spot: IVec2, rows: int) -> int? {
+    if spot.x < MENU_LEFT || spot.x >= MENU_LEFT + MENU_WIDTH || spot.y < MENU_TOP {
+        return null;
+    }
+    let row = (spot.y - MENU_TOP) ~/ MENU_ROW;
+    if row < rows row else null
+}
+
+/// Whether a spot on the screen is on the line of a shop's menu that leaves it.
+pub fn shop_exit(spot: IVec2) -> bool {
+    spot.x >= MENU_LEFT && spot.x < MENU_LEFT + MENU_WIDTH && spot.y >= MENU_EXIT
+        && spot.y < MENU_EXIT + MENU_ROW
+}
+
+pub fn paused(run: Run) {
+    panel(ivec2(8, 22), ivec2(240, 104));
+    gfx::text("PAUSED", ivec2(18, 29), Color::Yellow);
+    gfx::text("LEFT AND RIGHT DRIVE, AND DRILL A WALL", ivec2(18, 41), Color::White);
+    gfx::text("DOWN DRILLS THE FLOOR. UP FLIES.", ivec2(18, 50), Color::Silver);
+    gfx::text("NOTHING DRILLS UPWARD.", ivec2(18, 59), Color::Orange);
+    for (slot, supply) in run.pod.supplies.enumerate() {
+        let label = f"{name(supply.gadget.BUTTON)}  {supply.gadget.NAME} x{supply.count}";
+        stat(supply.gadget.ICON, label, ivec2(18, 68 + slot * 9), Color::White);
+    }
+    gfx::text("THE CORE IS 3000 FT DOWN. BRING IT HOME.", ivec2(18, 99), Color::Cyan);
+    gfx::text("START RESUMES", ivec2(18, 112), Color::Yellow);
+
+    // every cell is two pixels wide here, and the rows are squeezed to fit
+    let size = ivec2(COLS * 2, MAP_HEIGHT);
+    gfx::text("SHAFTS", ivec2(MAP_LEFT, 34), Color::Slate);
+    gfx::fill_rect(ivec2(MAP_LEFT, MAP_TOP), size, Color::Charcoal);
+    for y in SURFACE..ROWS {
+        let row = MAP_TOP + (y - SURFACE) * MAP_HEIGHT ~/ (ROWS - SURFACE);
+        for x in COLS {
+            if run.mine.charted(ivec2(x, y)) {
+                gfx::fill_rect(ivec2(MAP_LEFT + x * 2, row), ivec2(2, 1), Color::Teal);
+            }
+        }
+    }
+    let pod = cell_of(run.pod.pos);
+    let row = MAP_TOP + (pod.y - SURFACE).max(0) * MAP_HEIGHT ~/ (ROWS - SURFACE);
+    gfx::fill_rect(ivec2(MAP_LEFT + pod.x * 2, row), ivec2(2, 2), Color::Yellow);
+}
+
+pub fn wrecked(run: Run, ready: bool) {
+    panel(ivec2(16, 30), ivec2(224, 88));
+    gfx::text_centered("POD LOST", 40, Color::Orange);
+    if let cause? = run.wreck {
+        gfx::text_centered(cause, 54, Color::White);
+    }
+    gfx::text_centered(f"EARNED ${run.earned}   DEEPEST {run.deepest} FT", 68, Color::Silver);
+    gfx::text_centered(f"A RECOVERY TAKES THE CARGO AND ${run.salvage()}", 82, Color::Orange);
+    if ready {
+        gfx::text_centered("A RECOVERS THE POD   START DIGS A NEW MINE", 100, Color::Yellow);
+    }
+}
+
+pub fn won(run: Run, ready: bool) {
+    panel(ivec2(16, 30), ivec2(224, 88));
+    gfx::text_centered("YOU BROUGHT THE MOTHERLODE HOME", 40, Color::Cyan);
+    gfx::text_centered("3000 FEET DOWN, AND BACK IN ONE PIECE.", 54, Color::White);
+    gfx::text_centered(f"EARNED ${run.earned}   DEEPEST {run.deepest} FT", 68, Color::Silver);
+    if ready {
+        gfx::text_centered("START DIGS A NEW MINE", 100, Color::Yellow);
+    }
+}
+
+/// An icon with a line of text beside it.
+fn stat(icon: Sprite, text: str, at: IVec2, color: Color) {
+    icon.draw(at);
+    gfx::text(text, at.add(ivec2(10, 2)), color);
+}
+
+fn bar(pos: IVec2, width: int, have: int, most: int, color: Color) {
+    gfx::fill_rect(pos, ivec2(width, 4), Color::Charcoal);
+    gfx::fill_rect(pos, ivec2(width * have.clamp(0, most) ~/ most, 4), color);
+}
+
+/// A framed box, in whole 8 pixel cells.
+fn panel(pos: IVec2, size: IVec2) {
+    let (right, bottom) = (pos.x + size.x - 8, pos.y + size.y - 8);
+    gfx::fill_rect(pos.add(ivec2(2, 2)), size.sub(ivec2(4, 4)), Color::Black);
+    for x in 1..size.x ~/ 8 - 1 {
+        gfx::sprite(Sprite::PanelEdge.id(), ivec2(pos.x + x * 8, pos.y));
+        gfx::sprite(Sprite::PanelEdge.id(), ivec2(pos.x + x * 8, bottom), false, true);
+    }
+    for y in 1..size.y ~/ 8 - 1 {
+        gfx::sprite(Sprite::PanelSide.id(), ivec2(pos.x, pos.y + y * 8));
+        gfx::sprite(Sprite::PanelSide.id(), ivec2(right, pos.y + y * 8), true);
+    }
+    gfx::sprite(Sprite::PanelCorner.id(), pos);
+    gfx::sprite(Sprite::PanelCorner.id(), ivec2(right, pos.y), true);
+    gfx::sprite(Sprite::PanelCorner.id(), ivec2(pos.x, bottom), false, true);
+    gfx::sprite(Sprite::PanelCorner.id(), ivec2(right, bottom), true, true);
+}
+
+fn name(button: Button) -> str {
+    match button {
+        Button::Up => "UP",
+        Button::Down => "DOWN",
+        Button::Left => "LEFT",
+        Button::Right => "RIGHT",
+        Button::A => "A",
+        Button::B => "B",
+        Button::X => "X",
+        Button::Y => "Y",
+        Button::Start => "START",
+    }
+}

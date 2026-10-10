@@ -1,0 +1,46 @@
+module surface;
+
+use std::math::{IVec2, ivec2};
+
+use mine::{SURFACE, TILE};
+use sprites::Sprite;
+use stations::{PAD, STATIONS};
+
+const GROUND = SURFACE * TILE;
+
+/// Draws the sky and the stations for a view of the world, when it reaches above the ground.
+pub fn draw(view: IVec2) {
+    if view.y >= GROUND {
+        return;
+    }
+    gfx::fill_rect(view, ivec2(luna::WIDTH, GROUND - view.y), Color::Navy);
+    for i in 14 {
+        Sprite::Stars.draw(ivec2(view.x + i * 67 % 250, 36 + i * 23 % 34));
+    }
+    Sprite::Sun.draw(ivec2(view.x + 226 - view.x ~/ 8, 40));
+
+    // the same ridge twice, and the far one is dimmer and slower to scroll
+    for (slowness, rise, far) in [(3, 30, true), (2, 20, false)] {
+        if far {
+            gfx::remap(Color::Red, Color::Plum);
+            gfx::remap(Color::Orange, Color::Red);
+        }
+        for i in luna::WIDTH ~/ 32 + 1 {
+            Sprite::Ridge.draw(ivec2(view.x + i * 32 - view.x ~/ slowness % 32, GROUND - rise));
+        }
+        let foot = ivec2(view.x, GROUND - rise + 16);
+        gfx::fill_rect(foot, ivec2(luna::WIDTH, rise - 16), Color::Red);
+        gfx::reset_remap();
+    }
+
+    // a station stands in the middle of its pad, and its art leaves a board blank for its name
+    for station in STATIONS {
+        let name = station.name();
+        let size = station.art().size();
+        let left = station.column() * TILE + (PAD * TILE - size.x) ~/ 2;
+        let corner = ivec2(left, GROUND - size.y);
+        let board = corner.add(ivec2((size.x - gfx::text_width(name)) ~/ 2, 5));
+        station.art().draw(corner);
+        gfx::text(name, board, station.tint());
+    }
+}

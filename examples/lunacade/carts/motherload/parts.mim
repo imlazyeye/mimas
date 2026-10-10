@@ -1,0 +1,70 @@
+module parts;
+
+use sprites::Sprite;
+
+/// How many tiers a part comes in, counting the one a new pod is built with.
+pub const TIERS = 5;
+pub const PARTS = [Part::Drill, Part::Tank, Part::Bay, Part::Hull, Part::Engine, Part::Radiator];
+const PRICES = [100, 400, 1400, 4200];
+
+/// A piece of the pod the garage can swap for a better one.
+pub enum Part {
+    Drill,
+    Tank,
+    Bay,
+    Hull,
+    Engine,
+    Radiator,
+}
+
+impl Part {
+    /// What fitting the tier after `tier` costs, or null when that was the last.
+    pub fn price(tier: int) -> int? {
+        if tier + 1 < TIERS PRICES[tier] else null
+    }
+
+    /// Where this part's tier lives in `Pod::tiers`.
+    pub fn slot(self) -> int {
+        match self {
+            Part::Drill => 0,
+            Part::Tank => 1,
+            Part::Bay => 2,
+            Part::Hull => 3,
+            Part::Engine => 4,
+            Part::Radiator => 5,
+        }
+    }
+
+    pub fn name(self) -> str {
+        match self {
+            Part::Drill => "DRILL",
+            Part::Tank => "FUEL TANK",
+            Part::Bay => "CARGO BAY",
+            Part::Hull => "HULL",
+            Part::Engine => "ENGINE",
+            Part::Radiator => "RADIATOR",
+        }
+    }
+
+    pub fn perk(self) -> str {
+        match self {
+            Part::Drill => "DIGS FASTER. LV3 CUTS ROCK, LV5 THE MOTHERLODE.",
+            Part::Tank => "ANOTHER TANK'S WORTH OF FUEL, AND IT COMES FULL.",
+            Part::Bay => "ROOM FOR EIGHT MORE LOADS OF ORE.",
+            Part::Hull => "50 MORE HULL, FOR FALLS AND BLASTS.",
+            Part::Engine => "FLIES FASTER, AND MINDS A FULL BAY LESS.",
+            Part::Radiator => "LESS HURT BY GAS AND MAGMA. LV5 SHRUGS OFF THE DEEP.",
+        }
+    }
+
+    pub fn icon(self) -> Sprite {
+        match self {
+            Part::Drill => Sprite::Bit,
+            Part::Tank => Sprite::Fuel,
+            Part::Bay => Sprite::Crate,
+            Part::Hull => Sprite::Plating,
+            Part::Engine => Sprite::Engine,
+            Part::Radiator => Sprite::Radiator,
+        }
+    }
+}

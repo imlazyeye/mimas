@@ -1,0 +1,239 @@
+module pod;
+
+use std::math::{IVec2, Vec2, ivec2, vec2};
+
+use gadgets::{Gadget, Supply};
+use mine::{Mine, TILE, cell_of, center, feet};
+use minerals::Mineral;
+use parts::{PARTS, Part};
+use sprites::Sprite;
+use tiles::Tile;
+
+/// How far the hull reaches from the pod's middle.
+pub const HALF = 5.5;
+const GRAVITY = 0.14;
+const LIFT = 0.3;
+const PUSH = 0.5;
+const DRAG = 0.72;
+const TERMINAL = 4.8;
+/// How much of its speed a full bay costs.
+const BURDEN = 0.25;
+/// The fuel a frame of drilling burns.
+const DRILL_FUEL = 5;
+
+/// What the fitted parts add up to.
+pub struct Specs {
+    /// How far the drill gets in a frame, which is also the hardest ground it cuts.
+    pub drill: int,
+    /// The fuel the tank holds.
+    pub tank: int,
+    /// The loads of ore the bay holds.
+    pub bay: int,
+    /// The hull when nothing has dented it.
+    pub hull: int,
+    /// The fastest it flies, in pixels a frame.
+    pub speed: float,
+    /// How much the radiator takes off each burn and each rise in heat.
+    pub cooling: int,
+}
+
+impl Specs {
+    pub fn of(tiers: [int]) -> Self {
+        Self {
+            drill = 1 + tiers[Part::Drill.slot()],
+            tank = 6000 * (1 + tiers[Part::Tank.slot()]),
+            bay = 8 * (1 + tiers[Part::Bay.slot()]),
+            hull = 100 + 50 * tiers[Part::Hull.slot()],
+            speed = 1.45 + 0.35 * tiers[Part::Engine.slot()].to_float(),
+            cooling = tiers[Part::Radiator.slot()],
+        }
+    }
+}
+
+/// A cell the drill is part of the way through.
+pub struct Dig {
+    pub cell: IVec2,
+    pub done: int,
+    pub work: int,
+}
+
+/// What a frame of drilling came to.
+pub enum Bore {
+    /// There was nothing there to drill.
+    Idle,
+    /// The ground wouldn't give, and this is why.
+    Refused(str),
+    /// The drill is part of the way through.
+    Cutting,
+    /// The drill broke through a cell that held this.
+    Through(IVec2, Tile),
+}
+
+pub struct Pod {
+    // replaced whole when it moves (sparks keep the vector they were thrown from)
+    pub pos: Vec2,
+    pub vel: Vec2,
+    pub left: bool,
+    pub thrusting: bool,
+    pub fuel: int,
+    pub hull: int,
+    pub heat: int,
+    pub tiers: [int],
+    pub specs: Specs,
+    pub hold: [Mineral],
+    pub supplies: [Supply],
+    pub core: bool,
+    pub dig: Dig?,
+    pub flash: int,
+}
+
+impl Pod {
+    pub fn new(pos: Vec2) -> Self {
+        let tiers = for _ in PARTS collect 0;
+        let specs = Specs::of(tiers);
+        // a pact doesn't promise the order of its implementers, and the hud needs one that holds
+        let supplies = for gadget in Gadget::*::new() {
+            collect Supply { gadget, count = gadget.STARTING };
+        };
+        supplies.sort_by_int(for supply in supplies collect supply.gadget.PRICE);
+        Self {
+            pos,
+            vel = Vec2::zero(),
+            left = false,
+            thrusting = false,
+            fuel = specs.tank,
+            hull = specs.hull,
+            heat = 0,
+            tiers,
+            specs,
+            hold = [],
+            supplies,
+            core = false,
+            dig = null,
+            flash = 0,
+        }
+    }
+
+    /// Drills for a frame at the ground next to it in a direction.
+    pub fn bore(self, mine: Mine, toward: IVec2) -> Bore {
+        let cell = cell_of(self.pos.add(toward.to_vec2().scale(HALF + 2.0)));
+        let tile = mine.at(cell);
+        if tile == Tile::Air {
+            return Bore::Idle;
+        }
+        if let why? = tile.resists(self.specs.drill) {
+            return Bore::Refused(why);
+        }
+
+        // line up with the cell first (a pod between two of them can wedge there)
+        let middle = center(cell);
+        let lined = if toward.y > 0 vec2(middle.x, self.pos.y) else vec2(self.pos.x, middle.y);
+        if !mine.fits(lined, HALF) {
+            return Bore::Idle;
+        }
+        self.pos = lined;
+        self.vel = Vec2::zero();
+
+        let dig = Dig { cell, done = 0, work = tile.work(feet(cell.y)) };
+        if let begun? = self.dig {
+            if begun.cell == cell {
+                dig = begun;
+            }
+        }
+        dig.done += self.specs.drill;
+        self.burn(DRILL_FUEL);
+        if dig.done < dig.work {
+            self.dig = dig;
+            return Bore::Cutting;
+        }
+        self.dig = null;
+        mine.set(cell, Tile::Air);
+        Bore::Through(cell, tile)
+    }
+
+    /// Flies for a frame, and returns how fast it was falling if it hit the ground.
+    pub fn fly(self, mine: Mine, steer: int, thrust: bool) -> float {
+        self.dig = null;
+        let load = self.hold.len().to_float() / self.specs.bay.to_float();
+        let top = self.specs.speed - BURDEN * load;
+        let across = (self.vel.x * DRAG + PUSH * steer.to_float()).clamp(-top, top);
+        let down = (self.vel.y + GRAVITY - (if thrust LIFT else 0.0)).clamp(-top, TERMINAL);
+        let impact = 0.0;
+
+        // one axis at a time (it slides along what it runs into)
+        let pos = self.pos;
+        let sideways = vec2(pos.x + across, pos.y);
+        if mine.fits(sideways, HALF) {
+            pos = sideways;
+        } else {
+            across = 0.0;
+        }
+        let below = vec2(pos.x, pos.y + down);
+        if mine.fits(below, HALF) {
+            pos = below;
+        } else {
+            impact = down;
+            down = 0.0;
+        }
+        self.pos = pos;
+        self.vel = vec2(across, down);
+        impact
+    }
+
+    pub fn burn(self, fuel: int) {
+        self.fuel = (self.fuel - fuel).max(0);
+    }
+
+    pub fn park(self) {
+        self.vel = Vec2::zero();
+        self.dig = null;
+        self.thrusting = false;
+    }
+
+    /// Fits the next tier of a part. What that adds to the tank and the hull comes filled.
+    pub fn fit(self, part: Part) {
+        let old = self.specs;
+        self.tiers[part.slot()] += 1;
+        self.specs = Specs::of(self.tiers);
+        self.fuel += self.specs.tank - old.tank;
+        self.hull += self.specs.hull - old.hull;
+    }
+
+    pub fn draw(self, t: int) {
+        let corner = self.pos.to_ivec2().sub(ivec2(8, 8));
+        let spin = t ~/ 2 % 2;
+        let turning = if self.dig == null 0 else spin;
+        let down = false;
+        if let dig? = self.dig {
+            down = dig.cell.y > cell_of(self.pos).y;
+            // the cracks are black on the sheet, with lime as the color to skip
+            gfx::transparent(Color::Lime);
+            Sprite::Crack.draw(dig.cell.scale(TILE), dig.done * 3 ~/ dig.work);
+            gfx::transparent(Color::Black);
+        }
+
+        if self.thrusting {
+            Sprite::Rotor.draw(corner.sub(ivec2(0, 6)), spin);
+            Sprite::Flame.draw(corner.add(ivec2(4, 14)), spin);
+        } else if down {
+            Sprite::DrillDown.draw(corner.add(ivec2(4, 14)), turning);
+        }
+        if !down {
+            let reach = if self.left { -6 } else { 14 };
+            gfx::sprite(Sprite::DrillSide.id() + turning, corner.add(ivec2(reach, 4)), self.left);
+        }
+
+        let blink = self.flash % 4 >= 2;
+        if blink {
+            gfx::remap(Color::Orange, Color::White);
+            gfx::remap(Color::Yellow, Color::White);
+        }
+        Sprite::Pod.draw(corner);
+        if blink {
+            gfx::reset_remap();
+        }
+        if self.core && t ~/ 8 % 2 == 0 {
+            Sprite::Halo.draw(corner);
+        }
+    }
+}

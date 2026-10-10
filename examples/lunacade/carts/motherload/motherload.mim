@@ -1,0 +1,147 @@
+use run::{Event, Run};
+use stations::Visit;
+use ui;
+
+// frames a wreck or a win has to sit before a button can take it away
+const WRECK_DELAY = 45;
+const WIN_DELAY = 60;
+
+enum Scene {
+    Title,
+    Mining,
+    Shopping(Visit),
+    Paused,
+    Wrecked,
+    Won,
+}
+
+struct Game {
+    scene: Scene,
+    run: Run,
+    tick: int,
+}
+
+impl Game {
+    fn new() -> Self {
+        Self { scene = Scene::Title, run = Run::new(), tick = 0 }
+    }
+
+    fn update(self) {
+        let run = self.run;
+        let start = input::pressed(Button::Start);
+        let confirm = input::pressed(Button::A);
+        let click = input::mouse_pressed(Mouse::Left);
+        self.tick += 1;
+        match self.scene {
+            Scene::Title => {
+                if start || confirm || click {
+                    self.enter(Scene::Mining);
+                }
+            },
+            Scene::Mining => {
+                if start {
+                    self.enter(Scene::Paused);
+                    return;
+                }
+                if confirm {
+                    if let station? = run.docked() {
+                        let wares = station.wares(run.pod);
+                        if !wares.is_empty() {
+                            run.pod.park();
+                            run.radio.say("WHAT WILL IT BE?");
+                            self.enter(Scene::Shopping(Visit { station, wares, cursor = 0 }));
+                            return;
+                        }
+                    } else {
+                        run.radio.say("THE STATIONS ARE UP TOP: FUEL, REFINERY, GARAGE.");
+                    }
+                }
+                match run.update() {
+                    Event::Nothing => {},
+                    Event::Wrecked => self.enter(Scene::Wrecked),
+                    Event::Won => self.enter(Scene::Won),
+                }
+            },
+            Scene::Shopping(visit) => {
+                let count = visit.wares.len();
+                let buying = confirm;
+                let leaving = start || input::pressed(Button::B);
+                if input::pressed(Button::Up) {
+                    visit.cursor = (visit.cursor + count - 1) % count;
+                }
+                if input::pressed(Button::Down) {
+                    visit.cursor = (visit.cursor + 1) % count;
+                }
+                if let spot? = input::mouse() {
+                    if let row? = ui::shop_row(spot, count) {
+                        if click || input::mouse_moved() {
+                            visit.cursor = row;
+                            buying = buying || click;
+                        }
+                    }
+                    leaving = leaving || (click && ui::shop_exit(spot));
+                }
+                if leaving {
+                    self.enter(Scene::Mining);
+                } else if buying {
+                    run.buy(visit.wares[visit.cursor]);
+                }
+            },
+            Scene::Paused => {
+                if start {
+                    self.enter(Scene::Mining);
+                }
+            },
+            Scene::Wrecked => {
+                if self.tick > WRECK_DELAY {
+                    if confirm || click {
+                        run.recover();
+                        self.enter(Scene::Mining);
+                    } else if start {
+                        self.run = Run::new();
+                        self.enter(Scene::Mining);
+                    }
+                }
+            },
+            Scene::Won => {
+                if self.tick > WIN_DELAY && start {
+                    self.run = Run::new();
+                    self.enter(Scene::Mining);
+                }
+            },
+        }
+    }
+
+    fn draw(self) {
+        self.run.draw();
+        match self.scene {
+            Scene::Title => ui::title(self.tick),
+            Scene::Mining => ui::hud(self.run),
+            Scene::Shopping(visit) => {
+                ui::hud(self.run, prompting = false);
+                ui::shop(self.run, visit);
+            },
+            Scene::Paused => {
+                ui::hud(self.run);
+                ui::paused(self.run);
+            },
+            Scene::Wrecked => {
+                ui::hud(self.run);
+                ui::wrecked(self.run, self.tick > WRECK_DELAY);
+            },
+            Scene::Won => {
+                ui::hud(self.run);
+                ui::won(self.run, self.tick > WIN_DELAY);
+            },
+        }
+    }
+
+    fn enter(self, scene: Scene) {
+        self.scene = scene;
+        self.tick = 0;
+    }
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());
