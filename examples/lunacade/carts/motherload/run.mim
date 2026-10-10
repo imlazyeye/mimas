@@ -1,0 +1,404 @@
+module run;
+
+use std::math::{IVec2, Vec2, ivec2, vec2};
+
+use controls::Controls;
+use flood::Flood;
+use fx::Fx;
+use mine::{COLS, Mine, ROWS, SURFACE, TILE, cell_of, center, core, feet};
+use pod::{Bore, HALF, Pod};
+use radio::Radio;
+use sprites::Sprite;
+use stations::{Refinery, STATIONS, Station, landing, station_at};
+use strata::Stratum;
+use surface::Surface;
+use tiles::Core;
+use wares::Ware;
+
+/// The rows of the screen the hud leaves to the world.
+pub const VIEW_TOP = 18;
+pub const VIEW_BOTTOM = 127;
+
+/// One mine and the pod sent down it. Starting over is making a new one.
+pub struct Run {
+    /// The frames the mine has been played for.
+    pub age: int,
+    pub mine: Mine,
+    pub pod: Pod,
+    pub fx: Fx,
+    pub radio: Radio,
+    pub cash: int,
+    pub tally: Tally,
+    /// The deepest the pod has been down this mine, in feet.
+    pub deepest: int,
+    /// The magma that chases a pod with the motherlode on board.
+    pub flood: Flood?,
+    surface: Surface,
+    /// The corner of the world the screen's corner is at.
+    camera: Vec2,
+    /// The frames everything holds still for after a hard knock.
+    stun: int,
+}
+
+impl Run {
+    pub fn new() -> Self {
+        let pod = Pod::new(landing(Refinery));
+        let run = Self {
+            age = 0,
+            mine = Mine::new(),
+            pod,
+            fx = Fx::new(),
+            radio = Radio::new(),
+            cash = 50,
+            tally = Tally::new(),
+            deepest = 0,
+            flood = null,
+            surface = Surface::new(),
+            camera = framing(pod.pos),
+            stun = 0,
+        };
+        run.mine.reveal(cell_of(pod.pos));
+        run
+    }
+
+    /// Runs a frame, with `controls` as what the pilot is asking for.
+    pub fn update(self, controls: Controls) -> Event {
+        // a hard knock holds everything still for a few frames
+        if self.stun > 0 {
+            self.stun -= 1;
+            return Event::Nothing;
+        }
+        self.gadgets(controls.pressed);
+        if self.wrecked() != null {
+            return Event::Wrecked;
+        }
+        let pod = self.pod;
+        self.age += 1;
+        self.fx.update();
+        self.radio.update();
+        pod.flash = (pod.flash - 1).max(0);
+
+        let working = self.pilot(controls);
+        self.hazards();
+        self.wear(working || controls.thrust);
+        self.descend();
+
+        self.mine.reveal(cell_of(pod.pos));
+        if let station? = self.docked() {
+            if station.dock(self) == Event::Won {
+                return Event::Won;
+            }
+        }
+
+        // the camera leads the pod, so a falling one can see what it's falling into
+        self.camera = self.camera.lerp(framing(pod.pos.add(pod.vel.scale(11.0))), 0.15);
+        self.effects();
+        self.alarms();
+        Event::Nothing
+    }
+
+    /// Sets off the gadgets whose buttons went down, and the ones that go off by themselves.
+    fn gadgets(self, pressed: [Button]) {
+        for supply in self.pod.supplies {
+            if let button? = supply.gadget.BUTTON {
+                if !(button in pressed) continue;
+                if supply.count == 0 {
+                    self.radio.say(f"NO {supply.gadget.NAME} LEFT");
+                }
+            }
+            if supply.count > 0 && supply.gadget.fire(self) {
+                supply.count -= 1;
+            }
+        }
+    }
+
+    /// Drills or flies as the controls ask, and returns whether the pod did any work.
+    fn pilot(self, controls: Controls) -> bool {
+        const HARD_LANDING = 3.2;
+        let pod = self.pod;
+        let (thrust, steer) = (controls.thrust, controls.steer);
+        pod.thrusting = thrust;
+        if steer != 0 {
+            pod.left = steer < 0;
+        }
+
+        // down drills the floor, and driving into a wall drills that. the rotor keeps the drill off
+        let toward = if controls.dig ivec2(0, 1) else ivec2(steer, 0);
+        let aimed = toward.x != 0 || toward.y != 0;
+        let bore = if thrust || !aimed Bore::Idle else pod.bore(self.mine, toward);
+        match bore {
+            Bore::Idle => {},
+            Bore::Refused(why) => self.radio.say(why),
+            Bore::Cutting => {
+                if self.age % 5 == 0 {
+                    self.fx.burst(pod.pos.add(toward.to_vec2().scale(8.0)), Sprite::Spark, 2);
+                }
+                return true;
+            },
+            Bore::Through(cell, tile) => {
+                self.fx.burst(center(cell), Sprite::Chunk, 8);
+                tile.mined(self, cell);
+                return true;
+            },
+        }
+
+        let impact = pod.fly(self.mine, steer, thrust);
+        if impact > HARD_LANDING {
+            let damage = ((impact - HARD_LANDING) * 10.0).to_int();
+            self.hurt(damage);
+        }
+        // landing kicks up dust, and so does driving
+        let driving = !thrust && pod.vel.y == 0.0 && pod.vel.x.abs() > 1.0;
+        if impact > 1.0 || (driving && self.age % 9 == 0) {
+            self.fx.burst(pod.pos.add(vec2(0.0, 6.0)), Sprite::Chunk, 1, lift = 0.4);
+        }
+        steer != 0
+    }
+
+    /// Moves what the mine throws at the pod: loose rocks, and the magma.
+    fn hazards(self) {
+        // a rock that lands can shake another loose, so the list is swapped out before the loop
+        let loose = self.mine.loose;
+        self.mine.loose = [];
+        for boulder in loose {
+            if boulder.update(self) {
+                self.mine.loose.push(boulder);
+            }
+        }
+        self.flood?.update(self);
+    }
+
+    /// Burns fuel and soaks up heat. A pod under the ground burns fuel whatever it's doing.
+    fn wear(self, working: bool) {
+        let pod = self.pod;
+        if working || self.buried() {
+            pod.burn(if pod.thrusting 2 else 1);
+        }
+
+        // heat moves twice a second: up in a hot stratum, less whatever the radiator sheds, and
+        // down everywhere else
+        if self.age % 30 == 0 {
+            let heat = Stratum::at(self.depth()).heat;
+            let change = if heat > 0 heat - pod.specs.cooling else -5;
+            pod.heat = (pod.heat + change).clamp(0, 100);
+            if pod.heat >= 90 {
+                self.hurt(5);
+            }
+        }
+    }
+
+    /// Notices a new record depth, and everything that comes with one.
+    fn descend(self) {
+        let (pod, depth) = (self.pod, self.depth());
+        if depth <= self.deepest {
+            return;
+        }
+        let stratum = Stratum::at(depth);
+        if stratum.top > self.deepest {
+            self.fx.popup(pod.pos, f"- {stratum.name} -", Color::Cyan);
+        }
+        self.deepest = depth;
+    }
+
+    /// The small things that are only there to be looked at.
+    fn effects(self) {
+        let pod = self.pod;
+        if pod.thrusting && self.age % 4 == 0 {
+            self.fx.burst(pod.pos.add(vec2(0.0, 10.0)), Sprite::Spark, 1, lift = -0.6);
+        }
+        if pod.weak() && self.age % 10 == 0 {
+            self.fx.burst(pod.pos.sub(vec2(0.0, 6.0)), Sprite::Puff, 1, lift = 0.5);
+        }
+        // every so often, a cell somewhere on screen glints if it's ore the pod can see
+        if self.age % 12 == 0 {
+            let near = cell_of(pod.pos).add(ivec2(int::random(15) - 7, int::random(7) - 3));
+            if self.mine.at(near).GLINTS && self.mine.chart(near) != null {
+                let off = vec2(float::random(8.0) - 4.0, float::random(8.0) - 4.0);
+                self.fx.glint(center(near).add(off));
+            }
+        }
+    }
+
+    /// Puts the pod's own alarms on the radio when nobody else is using it, worst first.
+    fn alarms(self) {
+        let pod = self.pod;
+        if self.radio.timer > 0 {
+            return;
+        }
+        if pod.low() {
+            self.radio.say("LOW FUEL!", urgent = true);
+        } else if pod.weak() {
+            self.radio.say("HULL CRITICAL!", urgent = true);
+        } else if pod.hot() {
+            self.radio.say("OVERHEATING!", urgent = true);
+        } else if pod.full() {
+            self.radio.say("CARGO FULL!", urgent = true);
+        }
+    }
+
+    pub fn draw(self) {
+        let view = self.camera.to_ivec2().add(self.fx.offset());
+        gfx::clear(Color::Black);
+        gfx::camera(view);
+        self.surface.draw(view, self.radio.timer > 0);
+        self.mine.draw(view);
+        let docked = self.docked();
+        for station in STATIONS {
+            station.draw(docked == station);
+        }
+        for boulder in self.mine.loose {
+            boulder.draw();
+        }
+        self.pod.draw(self.age);
+        self.flood?.draw(view);
+        self.fx.draw(view);
+        gfx::camera(IVec2::zero());
+    }
+
+    /// How deep the pod's tracks are, in feet.
+    pub fn depth(self) -> int {
+        feet(cell_of(self.pod.pos.add(vec2(0.0, HALF - 0.5))).y).max(0)
+    }
+
+    /// The station whose pad the pod is sitting over.
+    pub fn docked(self) -> Station? {
+        station_at(cell_of(self.pod.pos).add(ivec2(0, 1)))
+    }
+
+    /// Whether the pod is down in the ground.
+    pub fn buried(self) -> bool {
+        self.pod.pos.y > (SURFACE * TILE).to_float()
+    }
+
+    /// What has wrecked the pod, when something has.
+    pub fn wrecked(self) -> str? {
+        let pod = self.pod;
+        if pod.hull == 0 {
+            "THE POD EXPLODED."
+        // a pod that coasts onto a pad on its last drop has made it
+        } else if pod.fuel == 0 && self.docked() == null {
+            "THE POD IS STRANDED."
+        } else {
+            null
+        }
+    }
+
+    /// What it costs to have a wreck hauled back up.
+    pub fn salvage(self) -> int {
+        self.cash ~/ 4
+    }
+
+    /// Puts money in the bank and on the tally.
+    pub fn pay(self, cash: int) {
+        self.cash += cash;
+        self.tally.earned += cash;
+    }
+
+    /// Buys a ware for the pod, if the pod has a use for it and the cash covers it, and returns
+    /// whether it did.
+    pub fn buy(self, ware: Ware) -> bool {
+        let price? = ware.price(self.pod) else {
+            self.radio.say("ALREADY FULLY UPGRADED.");
+            return false;
+        };
+        if price > self.cash {
+            self.radio.say("NOT ENOUGH CASH.");
+            return false;
+        }
+        self.cash -= price;
+        ware.buy(self.pod);
+        self.radio.say(f"{ware.label()} - PAID ${price}");
+        true
+    }
+
+    /// Sets the pod down somewhere at a stop, and brings the camera with it.
+    pub fn put(self, spot: Vec2) {
+        self.fx.burst(self.pod.pos, Sprite::Spark, 12);
+        self.pod.move_to(spot);
+        self.pod.park();
+        self.camera = framing(spot);
+        self.fx.wipe();
+        self.fx.burst(spot, Sprite::Spark, 12);
+    }
+
+    /// Sets the pod down on the refinery's pad, where every trip starts.
+    pub fn land(self) {
+        self.put(landing(Refinery));
+        self.pod.heat = 0;
+    }
+
+    /// Hauls a wreck back to the surface for a cut of the cash. The parts stay on, and the cargo
+    /// is lost.
+    pub fn recover(self) {
+        let pod = self.pod;
+        let fee = self.salvage();
+        self.cash -= fee;
+        self.tally.lost += 1;
+        pod.hold = [];
+        if pod.core {
+            pod.core = false;
+            self.mine.set(core(), Core);
+            self.flood = null;
+        }
+        pod.refill();
+        self.land();
+        self.fx = Fx::new();
+        self.radio.say(f"RECOVERED FOR ${fee}. YOUR CARGO WAS LOST.");
+    }
+
+    /// Dents the hull, and wrecks the pod when that was the last of it.
+    pub fn hurt(self, damage: int) {
+        let pod = self.pod;
+        if damage <= 0 || pod.hull == 0 {
+            return;
+        }
+        pod.hull = (pod.hull - damage).max(0);
+        pod.flash = 20;
+        self.fx.shake(12);
+        self.fx.burst(pod.pos, Sprite::Spark, 12);
+        self.fx.popup(pod.pos, f"-{damage}", Color::Red);
+        if damage >= 15 {
+            self.stun = 3;
+        }
+        if pod.hull == 0 {
+            self.fx.shake(30);
+            self.fx.burst(pod.pos, Sprite::Chunk, 24);
+        }
+    }
+}
+
+/// What the pod has to show for itself, over the whole run.
+pub struct Tally {
+    /// Everything it has ever been paid.
+    pub earned: int,
+    /// How many loads of each mineral the refinery has bought, by the mineral's name.
+    pub ledger: ~{int},
+    /// How many times the pod has had to be hauled back up.
+    pub lost: int,
+}
+
+impl Tally {
+    fn new() -> Self {
+        Self { earned = 0, ledger = ~{}, lost = 0 }
+    }
+}
+
+/// What a frame of the run came to, for the scenes to react to.
+pub enum Event {
+    Nothing,
+    Wrecked,
+    Won,
+}
+
+/// The camera that puts a spot where the pod is kept on the screen, without leaving the world.
+fn framing(pos: Vec2) -> Vec2 {
+    // where on the screen the camera keeps the pod
+    const FOCUS_X = 128.0;
+    const FOCUS_Y = 68.0;
+    // how far down the world the top of the screen stops
+    const SKYLINE = 20.0;
+    vec2(
+        (pos.x - FOCUS_X).clamp(0.0, (COLS * TILE - luna::WIDTH).to_float()),
+        (pos.y - FOCUS_Y).clamp(SKYLINE, (ROWS * TILE - VIEW_BOTTOM).to_float()),
+    )
+}

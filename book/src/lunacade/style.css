@@ -4,23 +4,23 @@
 :root {
     color-scheme: dark;
 
-    /* Sweetie 16 by GrafxKid */
-    --black: #1a1c2c;
-    --plum: #5d275d;
-    --red: #b13e53;
-    --orange: #ef7d57;
-    --yellow: #ffcd75;
-    --lime: #a7f070;
-    --green: #38b764;
-    --teal: #257179;
-    --navy: #29366f;
-    --blue: #3b5dc9;
-    --sky: #41a6f6;
-    --cyan: #73eff7;
-    --white: #f4f4f4;
-    --silver: #94b0c2;
-    --slate: #566c86;
-    --charcoal: #333c57;
+    /* NA16 by Nauris */
+    --black: #1f0e1c;
+    --plum: #3e2137;
+    --red: #9d303b;
+    --orange: #d26471;
+    --yellow: #e4943a;
+    --lime: #c0c741;
+    --green: #647d34;
+    --teal: #34859d;
+    --navy: #584563;
+    --blue: #70377f;
+    --sky: #8c8fae;
+    --cyan: #7ec4c1;
+    --white: #f5edba;
+    --silver: #d79b7d;
+    --slate: #9a6348;
+    --charcoal: #17434b;
 
     --ground: var(--black);
     --surface: var(--charcoal);

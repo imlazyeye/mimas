@@ -1,0 +1,85 @@
+module widgets;
+
+use std::math::{IVec2, ivec2};
+
+use run::{VIEW_BOTTOM, VIEW_TOP};
+use sprites::Sprite;
+
+/// How many frames a panel takes to unfold.
+pub const UNFOLD = 7;
+
+/// A framed box, in whole 8 pixel cells. At `age` frames old it's still unfolding from its
+/// middle, and whatever is drawn after it is clipped to the part that's open. Counting `age` back
+/// down from `UNFOLD` folds it shut.
+pub fn panel(pos: IVec2, size: IVec2, age: int) {
+    let open = size.y * (age + 1).clamp(0, UNFOLD) ~/ UNFOLD;
+    let top = pos.y + (size.y - open) ~/ 2;
+    gfx::clip(ivec2(pos.x, top), ivec2(size.x, open));
+
+    let (right, bottom) = (pos.x + size.x - 8, pos.y + size.y - 8);
+    gfx::fill_rect(pos.add(ivec2(2, 2)), size.sub(ivec2(4, 4)), Color::Black);
+    for x in 1..size.x ~/ 8 - 1 {
+        gfx::sprite(Sprite::PanelEdge.id(), ivec2(pos.x + x * 8, pos.y));
+        gfx::sprite(Sprite::PanelEdge.id(), ivec2(pos.x + x * 8, bottom), false, true);
+    }
+    for y in 1..size.y ~/ 8 - 1 {
+        gfx::sprite(Sprite::PanelSide.id(), ivec2(pos.x, pos.y + y * 8));
+        gfx::sprite(Sprite::PanelSide.id(), ivec2(right, pos.y + y * 8), true);
+    }
+    gfx::sprite(Sprite::PanelCorner.id(), pos);
+    gfx::sprite(Sprite::PanelCorner.id(), ivec2(right, pos.y), true);
+    gfx::sprite(Sprite::PanelCorner.id(), ivec2(pos.x, bottom), false, true);
+    gfx::sprite(Sprite::PanelCorner.id(), ivec2(right, bottom), true, true);
+
+    // until it's all the way open, the gap gets an edge of its own
+    if open < size.y {
+        let (left, right, foot) = (pos.x, pos.x + size.x - 1, top + open - 1);
+        gfx::line(ivec2(left, top), ivec2(right, top), Color::Silver);
+        gfx::line(ivec2(left, foot), ivec2(right, foot), Color::Silver);
+    }
+}
+
+/// Dims the world behind a panel by blacking out every other row of it.
+pub fn dim() {
+    for row in (VIEW_BOTTOM - VIEW_TOP) ~/ 2 {
+        let y = VIEW_TOP + row * 2;
+        gfx::line(ivec2(0, y), ivec2(luna::WIDTH - 1, y), Color::Black);
+    }
+}
+
+/// An icon with a line of text beside it.
+pub fn stat(icon: Sprite, text: str, at: IVec2, color: Color) {
+    icon.draw(at);
+    gfx::text(text, at.add(ivec2(10, 2)), color);
+}
+
+/// A gauge that's `real` full, from 0 to 1. `shown` is where it was drawn last and is still
+/// catching up from, and the stretch between the two is white.
+pub fn bar(pos: IVec2, width: int, real: float, shown: float, color: Color) {
+    let real = (real * width.to_float()).to_int().clamp(0, width);
+    let shown = (shown * width.to_float()).to_int().clamp(0, width);
+    gfx::fill_rect(pos, ivec2(width, 4), Color::Charcoal);
+    gfx::fill_rect(pos, ivec2(real.max(shown), 4), Color::White);
+    gfx::fill_rect(pos, ivec2(real.min(shown), 4), color);
+}
+
+/// `color`, or white on every other beat while `on`. It's how anything on screen asks to be
+/// looked at.
+pub fn flash(on: bool, color: Color) -> Color {
+    if on && luna::frame() ~/ 8 % 2 == 0 Color::White else color
+}
+
+/// What a button is called on screen.
+pub fn name(button: Button) -> str {
+    match button {
+        Button::Up => "UP",
+        Button::Down => "DOWN",
+        Button::Left => "LEFT",
+        Button::Right => "RIGHT",
+        Button::A => "A",
+        Button::B => "B",
+        Button::X => "X",
+        Button::Y => "Y",
+        Button::Start => "START",
+    }
+}

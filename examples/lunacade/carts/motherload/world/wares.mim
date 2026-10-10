@@ -1,0 +1,109 @@
+module wares;
+
+use gadgets::Supply;
+use parts::{Mount, TIERS};
+use pod::Pod;
+use sprites::Sprite;
+use stations::Station;
+
+/// One thing a station sells. Each kind carries what it needs, and a match over a ware has to
+/// deal with every kind.
+pub enum Ware {
+    /// A full tank.
+    Refuel,
+    /// A whole hull.
+    Repair,
+    /// One more of a gadget the pod carries.
+    Stock(Supply),
+    /// The next tier of a part the pod has.
+    Upgrade(Mount),
+    /// Another color for the pod, which does nothing else for it.
+    Paint,
+}
+
+impl Ware {
+    /// The line it gets on a menu.
+    pub fn label(self) -> str {
+        match self {
+            Ware::Refuel => "FILL THE TANK",
+            Ware::Repair => "REPAIR THE HULL",
+            Ware::Stock(supply) => f"{supply.gadget.NAME}  x{supply.count}",
+            Ware::Upgrade(mount) => {
+                f"{mount.part.NAME} {mount.tier + 1}/{TIERS}  {mount.outlook()}"
+            },
+            Ware::Paint => "A COAT OF PAINT",
+        }
+    }
+
+    pub fn perk(self) -> str {
+        match self {
+            Ware::Refuel => "A FULL TANK FOR THE TRIP DOWN.",
+            Ware::Repair => "PATCHES THE HULL AND COOLS IT OFF.",
+            Ware::Stock(supply) => supply.gadget.PERK,
+            Ware::Upgrade(mount) => mount.part.PERK,
+            Ware::Paint => "NEW PAINT COLOR.",
+        }
+    }
+
+    pub fn icon(self) -> Sprite {
+        match self {
+            Ware::Refuel => Sprite::Fuel,
+            Ware::Repair => Sprite::Plating,
+            Ware::Stock(supply) => supply.gadget.ICON,
+            Ware::Upgrade(mount) => mount.part.ICON,
+            Ware::Paint => Sprite::Plating,
+        }
+    }
+
+    /// What it costs a pod right now, or null when the pod has no use for it.
+    pub fn price(self, pod: Pod) -> int? {
+        match self {
+            Ware::Refuel => {
+                let missing = pod.specs.tank - pod.fuel;
+                if missing == 0 null else (missing + 199) ~/ 200
+            },
+            Ware::Repair => {
+                let dents = pod.specs.hull - pod.hull;
+                if dents == 0 null else (dents + 3) ~/ 4
+            },
+            Ware::Stock(supply) => supply.gadget.PRICE,
+            Ware::Upgrade(mount) => mount.price(),
+            Ware::Paint => 40,
+        }
+    }
+
+    /// Gives it to a pod. The caller settles the price.
+    pub fn buy(self, pod: Pod) {
+        match self {
+            Ware::Refuel => {
+                pod.fuel = pod.specs.tank;
+            },
+            Ware::Repair => {
+                pod.hull = pod.specs.hull;
+                pod.heat = 0;
+            },
+            Ware::Stock(supply) => {
+                supply.count += 1;
+            },
+            Ware::Upgrade(mount) => pod.upgrade(mount),
+            Ware::Paint => pod.repaint(),
+        }
+    }
+}
+
+/// A stop at a station's counter.
+pub struct Visit {
+    pub station: Station,
+    pub wares: [Ware],
+    pub cursor: int,
+    /// The row the bar behind the cursor is drawn at, which slides after it.
+    pub glide: float,
+    /// The frames the bar has left of reacting to a sale, or less than none for a refusal.
+    pub react: int,
+}
+
+impl Visit {
+    pub fn new(station: Station, wares: [Ware]) -> Self {
+        Self { station, wares, cursor = 0, glide = 0.0, react = 0 }
+    }
+}

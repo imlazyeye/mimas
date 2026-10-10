@@ -1,0 +1,39 @@
+module controls;
+
+/// What whoever is flying the pod asks of it for a frame.
+pub struct Controls {
+    /// Whether the rotor is on, which also keeps the drill off.
+    pub thrust: bool,
+    /// Which way to drive, as -1 for left, 1 for right and 0 for neither.
+    pub steer: int,
+    /// Whether to drill the floor.
+    pub dig: bool,
+    /// The buttons that went down this frame, for the gadgets they set off.
+    pub pressed: [Button],
+}
+
+impl Controls {
+    /// What the player is holding.
+    pub fn read() -> Self {
+        let steer = 0;
+        if input::held(Button::Left) {
+            steer -= 1;
+        }
+        if input::held(Button::Right) {
+            steer += 1;
+        }
+        Self {
+            thrust = input::held(Button::Up),
+            steer,
+            dig = input::held(Button::Down),
+            pressed = for button in [Button::A, Button::B, Button::X, Button::Y] {
+                if input::pressed(button) collect button;
+            },
+        }
+    }
+
+    /// Hands off everything.
+    pub fn idle() -> Self {
+        Self { thrust = false, steer = 0, dig = false, pressed = [] }
+    }
+}

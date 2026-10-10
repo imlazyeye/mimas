@@ -1,0 +1,71 @@
+module flood;
+
+use std::math::{IVec2, Vec2, ivec2};
+
+use mine::{ROWS, SURFACE, TILE, feet};
+use pod::HALF;
+use run::Run;
+use sprites::Sprite;
+
+/// The magma that comes up the mine once the motherlode is pulled out of it.
+pub struct Flood {
+    /// How far down the world its surface is, in pixels.
+    level: float,
+}
+
+impl Flood {
+    pub fn new() -> Self {
+        Self { level = (ROWS * TILE).to_float() }
+    }
+
+    /// The row of the mine its surface is in.
+    pub fn row(self) -> int {
+        self.level.to_int() ~/ TILE
+    }
+
+    /// How far under a spot in the world its surface is, in feet.
+    pub fn below(self, pos: Vec2) -> int {
+        feet(SURFACE + (self.level - pos.y).to_int().max(0) ~/ TILE)
+    }
+
+    /// Rises for a frame, and burns a pod it has caught up with.
+    pub fn update(self, run: Run) {
+        // it climbs at a steady pace, but sprints to stay within a
+        // leash of the pod, and it stops just under the surface
+        const SPEED = 0.8;
+        const LEASH = 150.0;
+        const SPRINT = 3.0;
+        let pod = run.pod;
+        let gap = self.level - pod.pos.y;
+        let speed = if gap > LEASH SPRINT else SPEED;
+        self.level = (self.level - speed).max(((SURFACE + 1) * TILE).to_float());
+
+        if gap < HALF {
+            pod.heat = 100;
+            if run.age % 6 == 0 {
+                run.hurt(9 - pod.specs.cooling);
+            }
+        } else if run.age % 180 == 0 {
+            let below = self.below(pod.pos);
+            run.radio.say(f"THE MINE IS FLOODING! MAGMA {below} FT BELOW YOU.", urgent = true);
+            run.fx.shake(10);
+        }
+    }
+
+    pub fn draw(self, view: IVec2) {
+        let top = self.level.to_int();
+        let beat = luna::frame() ~/ 15 % 2;
+        // every column of its surface rides its own spot on a swell
+        for step in luna::WIDTH ~/ TILE + 1 {
+            let col = view.x ~/ TILE + step;
+            let x = col * TILE;
+            let swell = (luna::frame().to_float() / 9.0 + col.to_float() * 1.3).sin() * 2.0;
+            let crest = top + swell.round().to_int();
+            for row in (view.y + luna::HEIGHT - crest) ~/ TILE + 1 {
+                Sprite::Magma.draw(ivec2(x, crest + row * TILE), beat);
+            }
+            gfx::line(ivec2(x, crest), ivec2(x + TILE - 1, crest), Color::White);
+            gfx::line(ivec2(x, crest + 1), ivec2(x + TILE - 1, crest + 1), Color::Yellow);
+        }
+    }
+}

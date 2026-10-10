@@ -1,6 +1,6 @@
 # lunacade
 
-lunacade is a fantasy console for mimas, a small imaginary machine whose games are mimas programs. These programs are called carts. A cart draws on a 256 by 144 screen with 16 colors and reads a d-pad, four buttons, Start and a mouse. Six example carts ship with it, from Pong to a survivors-like called Swarm and a game of chess against the console.
+lunacade is a fantasy console for mimas, a small imaginary machine whose games are mimas programs. These programs are called carts. A cart draws on a 256 by 144 screen with 16 colors and reads a d-pad, four buttons, Start and a mouse. The example carts range from Pong to a survivors-like called Swarm, a game of chess against the console, and an open-world fantasy RPG called Elderwild.
 
 You can play them, edit them and make your own in the browser at [mim.as/lunacade](../lunacade/). Like the rest of mimas it's young, and it has rough edges.
 
@@ -86,18 +86,18 @@ Sprites skip color `0`, black, by default, which is what the empty corners above
 
 ### The palette
 
-Every cart draws with [Sweetie 16](https://lospec.com/palette-list/sweetie-16), which is fixed. In code the colors are the variants of `Color`, and `Color::to_int` and `Color::from_int` convert them to and from their digit.
+Every cart draws with [NA16](https://lospec.com/palette-list/na16), which is fixed. In code the colors are the variants of `Color`, and `Color::to_int` and `Color::from_int` convert them to and from their digit.
 
 | Digit | Color | Hex | Digit | Color | Hex |
 | :-- | :-- | :-- | :-- | :-- | :-- |
-| `0` | Black | `#1a1c2c` | `8` | Navy | `#29366f` |
-| `1` | Plum | `#5d275d` | `9` | Blue | `#3b5dc9` |
-| `2` | Red | `#b13e53` | `a` | Sky | `#41a6f6` |
-| `3` | Orange | `#ef7d57` | `b` | Cyan | `#73eff7` |
-| `4` | Yellow | `#ffcd75` | `c` | White | `#f4f4f4` |
-| `5` | Lime | `#a7f070` | `d` | Silver | `#94b0c2` |
-| `6` | Green | `#38b764` | `e` | Slate | `#566c86` |
-| `7` | Teal | `#257179` | `f` | Charcoal | `#333c57` |
+| `0` | Black | `#1f0e1c` | `8` | Navy | `#584563` |
+| `1` | Plum | `#3e2137` | `9` | Blue | `#70377f` |
+| `2` | Red | `#9d303b` | `a` | Sky | `#8c8fae` |
+| `3` | Orange | `#d26471` | `b` | Cyan | `#7ec4c1` |
+| `4` | Yellow | `#e4943a` | `c` | White | `#f5edba` |
+| `5` | Lime | `#c0c741` | `d` | Silver | `#d79b7d` |
+| `6` | Green | `#647d34` | `e` | Slate | `#9a6348` |
+| `7` | Teal | `#34859d` | `f` | Charcoal | `#17434b` |
 
 ## The API
 
@@ -141,6 +141,7 @@ Pong, Snake, Breakout and Asteroids are each one script. Swarm is a survivors-li
 
 They're in `examples/lunacade/carts`, and the page has them all. A new cart on the page starts as the one in `carts/new`.
 
+
 ## The host
 
 `lunacade-core` is the console without a page, and it has no dependency on the web. Its `Machine` loads a cart, and a front end calls `frame` 60 times a second with what the player is holding:
@@ -172,4 +173,4 @@ The plugin is for scripts that read and write a game's components and resources,
 
 ## Credits
 
-The palette is Sweetie 16 by GrafxKid, at [lospec.com/palette-list/sweetie-16](https://lospec.com/palette-list/sweetie-16). The font and the carts were made for lunacade.
+The palette is NA16 by Nauris, at [lospec.com/palette-list/na16](https://lospec.com/palette-list/na16). The font and the carts were made for lunacade.

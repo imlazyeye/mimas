@@ -7,8 +7,8 @@ use mimas::{
 
 use crate::{Screen, WIDTH};
 
-/// One of the 16 colors of the Sweetie 16 palette by GrafxKid, which every cart draws with (see
-/// <https://lospec.com/palette-list/sweetie-16>). The variants are in palette order, so
+/// One of the 16 colors of the NA16 palette by Nauris, which every cart draws with (see
+/// <https://lospec.com/palette-list/na16>). The variants are in palette order, so
 /// `Color::Black` is `0` and `Color::Charcoal` is `15`.
 ///
 /// ```mimas
@@ -17,37 +17,37 @@ use crate::{Screen, WIDTH};
 /// ```
 #[derive(MimasEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
-    /// Color 0, `#1a1c2c`.
+    /// Color 0, `#1f0e1c`.
     Black,
-    /// Color 1, `#5d275d`.
+    /// Color 1, `#3e2137`.
     Plum,
-    /// Color 2, `#b13e53`.
+    /// Color 2, `#9d303b`.
     Red,
-    /// Color 3, `#ef7d57`.
+    /// Color 3, `#d26471`.
     Orange,
-    /// Color 4, `#ffcd75`.
+    /// Color 4, `#e4943a`.
     Yellow,
-    /// Color 5, `#a7f070`.
+    /// Color 5, `#c0c741`.
     Lime,
-    /// Color 6, `#38b764`.
+    /// Color 6, `#647d34`.
     Green,
-    /// Color 7, `#257179`.
+    /// Color 7, `#34859d`.
     Teal,
-    /// Color 8, `#29366f`.
+    /// Color 8, `#584563`.
     Navy,
-    /// Color 9, `#3b5dc9`.
+    /// Color 9, `#70377f`.
     Blue,
-    /// Color 10, `#41a6f6`.
+    /// Color 10, `#8c8fae`.
     Sky,
-    /// Color 11, `#73eff7`.
+    /// Color 11, `#7ec4c1`.
     Cyan,
-    /// Color 12, `#f4f4f4`.
+    /// Color 12, `#f5edba`.
     White,
-    /// Color 13, `#94b0c2`.
+    /// Color 13, `#d79b7d`.
     Silver,
-    /// Color 14, `#566c86`.
+    /// Color 14, `#9a6348`.
     Slate,
-    /// Color 15, `#333c57`.
+    /// Color 15, `#17434b`.
     Charcoal,
 }
 

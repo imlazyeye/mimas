@@ -1,0 +1,86 @@
+module boulders;
+
+use std::math::{IVec2, ivec2, vec2};
+
+use mine::{TILE, cell_of, center};
+use pod::HALF;
+use run::Run;
+use sprites::Sprite;
+use tiles::{Air, Rock};
+
+/// A rock with nothing under it. It sits for a moment, and then it falls until something stops it.
+pub struct Boulder {
+    /// The cell it came loose in.
+    cell: IVec2,
+    /// How far it has fallen from there, in pixels.
+    drop: float,
+    /// How fast it's falling, in pixels a frame.
+    speed: float,
+    /// The frames it has left to sit.
+    wait: int,
+}
+
+impl Boulder {
+    pub fn new(cell: IVec2) -> Self {
+        // a second and a half to get out from under it
+        Self { cell, drop = 0.0, speed = 0.0, wait = 90 }
+    }
+
+    /// Moves it for a frame, and returns whether it's still loose.
+    pub fn update(self, run: Run) -> bool {
+        if self.wait > 0 self.sit(run) else self.fall(run)
+    }
+
+    /// Sits in its cell, dropping grit, until it's time to let go.
+    fn sit(self, run: Run) -> bool {
+        // something may have filled the hole or taken the rock while it sat
+        let below = self.cell.add(ivec2(0, 1));
+        if !run.mine.at(self.cell).FALLS || !run.mine.at(below).OPEN {
+            return false;
+        }
+        self.wait -= 1;
+        if self.wait % 8 == 0 {
+            run.fx.burst(center(below).sub(vec2(0.0, 6.0)), Sprite::Chunk, 1);
+        }
+        if self.wait == 0 {
+            run.mine.set(self.cell, Air);
+        }
+        true
+    }
+
+    /// Falls until it lands on something, or on the pod.
+    fn fall(self, run: Run) -> bool {
+        const GRAVITY = 0.12;
+        const TERMINAL = 4.0;
+        let half = (TILE ~/ 2).to_float();
+        self.speed = (self.speed + GRAVITY).min(TERMINAL);
+        self.drop += self.speed;
+        let top = (self.cell.y * TILE).to_float() + self.drop;
+        let middle = vec2(center(self.cell).x, top + half);
+
+        // it breaks up on the pod, and hurts more the faster it was going
+        let pod = run.pod.pos;
+        if (pod.x - middle.x).abs() < half + HALF && (pod.y - middle.y).abs() < half + HALF {
+            run.hurt(10 + (self.speed * 12.0).to_int());
+            run.fx.burst(middle, Sprite::Chunk, 10);
+            run.radio.say("ROCKS FALL WHEN YOU DIG UNDER THEM!", urgent = true);
+            return false;
+        }
+
+        // on anything else, it settles into the cell above what stopped it
+        let under = cell_of(vec2(middle.x, top + TILE.to_float()));
+        if !run.mine.at(under).OPEN {
+            run.mine.set(under.sub(ivec2(0, 1)), Rock);
+            run.fx.burst(middle, Sprite::Chunk, 4);
+            run.fx.shake(6);
+            return false;
+        }
+        true
+    }
+
+    pub fn draw(self) {
+        // one that's still sitting is drawn over its own tile, a pixel off on every other beat
+        let shiver = if self.wait > 0 luna::frame() ~/ 3 % 2 else 0;
+        Sprite::Rock.draw(self.cell.scale(TILE).add(ivec2(shiver, self.drop.to_int())));
+    }
+}

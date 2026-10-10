@@ -1,0 +1,167 @@
+module geology;
+
+use std::math::ivec2;
+
+use mine::{AROUND, COLS, ROWS, SURFACE, core, feet};
+use minerals::{Copper, Mineral, Relic, Silver};
+use stations::{PAD, STATIONS};
+use tiles::{Air, Bedrock, Cache, Core, Gas, Magma, Oil, Ore, Pad, Rock, Soil, Tile};
+
+/// Lays out a mine nobody has been down, as what every cell holds, row by row.
+pub fn dig() -> [Tile] {
+    let cells = ground(lodes());
+    vaults(cells);
+    stations(cells);
+    first_load(cells);
+    motherlode(cells);
+    cells
+}
+
+/// Something the ground is seeded with in place of soil.
+struct Lode {
+    tile: Tile,
+    /// The depths in feet it turns up between. One with no `deepest` goes all the way down.
+    shallowest: int,
+    deepest: int?,
+    /// How many cells in a thousand it's seeded in between those depths.
+    odds: int,
+    /// The most cells it spreads to from where it was seeded.
+    reach: int,
+}
+
+/// Everything a mine is seeded with.
+fn lodes() -> [Lode] {
+    let lodes = [
+        Lode { tile = Air, shallowest = 100, deepest = null, odds = 9, reach = 9 },
+        Lode { tile = Rock, shallowest = 200, deepest = null, odds = 16, reach = 5 },
+        Lode { tile = Gas, shallowest = 800, deepest = null, odds = 20, reach = 0 },
+        Lode { tile = Magma, shallowest = 1700, deepest = null, odds = 10, reach = 4 },
+        Lode { tile = Oil, shallowest = 300, deepest = null, odds = 5, reach = 0 },
+        Lode { tile = Cache, shallowest = 400, deepest = null, odds = 3, reach = 0 },
+    ];
+    lodes.extend(for mineral in Mineral::*::new() collect Lode {
+        tile = Ore { mineral },
+        shallowest = mineral.SHALLOWEST,
+        deepest = mineral.DEEPEST,
+        odds = mineral.ODDS,
+        reach = mineral.VEIN,
+    });
+    lodes
+}
+
+/// Sky, then soil inside walls of bedrock, seeded with the lodes and spread into veins and caves.
+fn ground(lodes: [Lode]) -> [Tile] {
+    let seeds = [];
+    let cells: [Tile] = [];
+    for y in ROWS {
+        // every cell of a row is at the same depth, so the lodes that reach it are picked once
+        let depth = feet(y);
+        let here = for lode in lodes {
+            if depth >= lode.shallowest && depth < (lode.deepest ?? depth + 1) collect lode;
+        };
+        for x in COLS {
+            if y < SURFACE {
+                cells.push(Air);
+            } else if x == 0 || x == COLS - 1 || y == ROWS - 1 {
+                cells.push(Bedrock);
+            } else {
+                let lode = strike(here);
+                if let struck? = lode {
+                    seeds.push((ivec2(x, y), struck));
+                }
+                cells.push(lode?.tile ?? Soil);
+            }
+        }
+    }
+
+    // a lode wanders from its seed a step at a time. it only goes through soil, which keeps it
+    // inside the walls and under the sky
+    for (seed, lode) in seeds {
+        let cell = seed;
+        for _ in int::random(lode.reach + 1) {
+            let next = cell.add(AROUND.choose()!);
+            if cells[next.to_index(COLS)] != Soil continue;
+            cell = next;
+            cells[cell.to_index(COLS)] = lode.tile;
+        }
+    }
+    cells
+}
+
+/// Rolls for which of some lodes a cell is seeded with, if any.
+fn strike(lodes: [Lode]) -> Lode? {
+    let roll = int::random(1000);
+    for lode in lodes {
+        roll -= lode.odds;
+        if roll < 0 break lode;
+    }
+}
+
+/// A few boxes of rock, each around a cache with a relic on either side.
+fn vaults(cells: [Tile]) {
+    const WIDE = 5;
+    const TALL = 3;
+    // how far under the surface the shallowest one can be, and how far off the bottom the deepest
+    const TOP = 30;
+    const BOTTOM = 20;
+    let relic = Ore { mineral = Relic::new() };
+    for _ in 3 {
+        let left = 2 + int::random(COLS - WIDE - 3);
+        let top = SURFACE + TOP + int::random(ROWS - SURFACE - TOP - BOTTOM);
+        for y in TALL {
+            for x in WIDE {
+                let wall = y != TALL ~/ 2 || x == 0 || x == WIDE - 1;
+                let held = if x == WIDE ~/ 2 Cache else relic;
+                cells[index(left + x, top + y)] = if wall Rock else held;
+            }
+        }
+    }
+}
+
+/// The top row of the ground, which is whole, and a pad for every station. A station that's down
+/// in the ground also gets a room over its pad, with a roof of its own.
+fn stations(cells: [Tile]) {
+    for x in 1..COLS - 1 {
+        cells[index(x, SURFACE)] = Soil;
+    }
+    for station in STATIONS {
+        let row = station.row();
+        for x in station.COLUMN..station.COLUMN + PAD {
+            cells[index(x, row)] = Pad;
+            if station.DEEP > 0 {
+                cells[index(x, row - 1)] = Air;
+                cells[index(x, row - 2)] = Air;
+                cells[index(x, row - 3)] = Bedrock;
+            }
+        }
+    }
+}
+
+/// Enough copper and silver for a first trip, in reach of the gap between the refinery and the
+/// garage. Each spot is a column and how many rows down it is.
+fn first_load(cells: [Tile]) {
+    let copper = Ore { mineral = Copper::new() };
+    for (x, down) in [(11, 1), (13, 1), (16, 1), (10, 3)] {
+        cells[index(x, SURFACE + down)] = copper;
+    }
+    let silver = Ore { mineral = Silver::new() };
+    for (x, down) in [(12, 2), (16, 2), (14, 3), (17, 3), (12, 4)] {
+        cells[index(x, SURFACE + down)] = silver;
+    }
+}
+
+/// The motherlode, cased in rock.
+fn motherlode(cells: [Tile]) {
+    let seat = core();
+    for y in seat.y - 2..seat.y + 3 {
+        for x in seat.x - 3..seat.x + 4 {
+            cells[index(x, y)] = Rock;
+        }
+    }
+    cells[index(seat.x, seat.y)] = Core;
+}
+
+/// Where a cell is in the row by row list of them.
+fn index(x: int, y: int) -> int {
+    y * COLS + x
+}

@@ -1,0 +1,140 @@
+module autopilot;
+
+use std::math::{IVec2, ivec2};
+
+use controls::Controls;
+use mine::{SURFACE, cell_of, center};
+use run::Run;
+use stations::{Refinery, landing};
+use tiles::{Gas, Magma};
+use wares::Ware;
+
+/// The columns between the pads that a shaft can be sunk in.
+const GAPS = [6, 8, 9, 15, 16, 17];
+
+/// Flies the pod behind the title screen. It digs down until the bay is full or the tank is half
+/// gone, comes back the way it went, sells, and goes again.
+pub struct Autopilot {
+    /// The cells the pod has come through since it left the surface, which is the way back.
+    trail: [IVec2],
+    homing: bool,
+    /// The column it sinks its shaft in, which is in a gap between two pads.
+    shaft: int,
+    /// Which way it goes around what it can't dig through.
+    side: int,
+    /// Where the pod was a frame ago, and how many frames it has been there.
+    last: IVec2,
+    still: int,
+}
+
+impl Autopilot {
+    pub fn new() -> Self {
+        let shaft = GAPS.choose()!;
+        Self { trail = [], homing = false, shaft, side = 1, last = IVec2::zero(), still = 0 }
+    }
+
+    /// Whether the pod has sat in one cell for long enough that the pilot is out of ideas.
+    pub fn stuck(self) -> bool {
+        self.still > 300
+    }
+
+    /// What it asks of the pod this frame.
+    pub fn fly(self, run: Run) -> Controls {
+        let cell = cell_of(run.pod.pos);
+        self.still = if cell == self.last self.still + 1 else 0;
+        self.last = cell;
+
+        // two seconds in one cell is a dead end. it's given up on for a shaft somewhere else, and
+        // if it's the way home that's blocked, that's what the teleporter is for
+        if self.still == 120 && run.buried() {
+            let controls = Controls::idle();
+            if self.homing {
+                controls.pressed.push(Button::Y);
+            }
+            self.homing = true;
+            self.shaft = GAPS.choose()!;
+            return controls;
+        }
+
+        if !run.buried() {
+            self.cross(run)
+        } else if self.homing {
+            self.climb(run)
+        } else {
+            self.dig(run, cell)
+        }
+    }
+
+    /// On the surface: over to the shaft and down it, or over to the refinery to sell.
+    fn cross(self, run: Run) -> Controls {
+        let controls = Controls::idle();
+        self.trail = [];
+        let wanted = if self.homing landing(Refinery) else center(ivec2(self.shaft, 0));
+        let off = wanted.x - run.pod.pos.x;
+        if off.abs() > 2.0 {
+            controls.steer = off.signum().to_int();
+        } else if !self.homing {
+            controls.dig = true;
+        } else if run.docked() == Refinery {
+            // the refinery has bought the load by now. the demo is fueled and patched up right
+            // here, where a player would have to cross to the depot
+            run.buy(Ware::Refuel);
+            run.buy(Ware::Repair);
+            self.homing = false;
+        }
+        controls
+    }
+
+    /// On the way home: back along the trail, a cell at a time.
+    fn climb(self, run: Run) -> Controls {
+        let controls = Controls::idle();
+        let pos = run.pod.pos;
+        // the cell before the trail's last is where to go, and getting there shortens the trail
+        let target = center(ivec2(self.shaft, SURFACE - 1));
+        if self.trail.len() > 1 {
+            target = center(self.trail[self.trail.len() - 2]);
+            if (target.x - pos.x).abs() < 2.0 && (target.y - pos.y).abs() < 3.0 {
+                self.trail.pop();
+            }
+        }
+        let off = target.x - pos.x;
+        if off.abs() > 1.0 {
+            controls.steer = off.signum().to_int();
+        }
+        controls.thrust = target.y < pos.y - 1.0;
+        controls
+    }
+
+    /// On the way down: straight down while the ground lets it, and sideways around what doesn't.
+    fn dig(self, run: Run, cell: IVec2) -> Controls {
+        let controls = Controls::idle();
+        let pod = run.pod;
+        if self.trail.is_empty() || self.trail[self.trail.len() - 1] != cell {
+            self.trail.push(cell);
+        }
+        if pod.full() || pod.fuel < pod.specs.tank ~/ 2 {
+            self.homing = true;
+            return controls;
+        }
+
+        let below = run.mine.at(cell.add(ivec2(0, 1)));
+        if below.OPEN {
+            // a long drop is braked short of what would dent the hull, and a pod perched on the
+            // lip of the hole is nudged over it
+            controls.thrust = pod.vel.y > 2.4;
+            let off = center(cell).x - pod.pos.x;
+            if pod.vel.y == 0.0 && off.abs() > 1.0 {
+                controls.steer = off.signum().to_int();
+            }
+        } else if below.resists(pod.specs.drill) == null && below != Gas && below != Magma {
+            controls.dig = true;
+        } else {
+            let beside = run.mine.at(cell.add(ivec2(self.side, 0)));
+            if !beside.OPEN && beside.resists(pod.specs.drill) != null {
+                self.side = -self.side;
+            }
+            controls.steer = self.side;
+        }
+        controls
+    }
+}

@@ -1,0 +1,234 @@
+use autopilot::Autopilot;
+use controls::Controls;
+use hud::Hud;
+use run::{Event, Run};
+use screens;
+use stations::Refinery;
+use wares::Visit;
+use widgets;
+
+struct Game {
+    scene: Scene,
+    /// The scene before this one, whose panel is still folding shut.
+    left: Scene,
+    /// The frame the scene began on.
+    entered: int,
+    /// The run being played, or the demo's while the title is up.
+    run: Run,
+    hud: Hud,
+    /// What flies the pod while the title is up.
+    demo: Autopilot,
+}
+
+impl Game {
+    fn new() -> Self {
+        Self {
+            scene = Scene::Title,
+            left = Scene::Mining,
+            entered = luna::frame(),
+            run = Run::new(),
+            hud = Hud::new(),
+            demo = Autopilot::new(),
+        }
+    }
+
+    fn update(self) {
+        let run = self.run;
+        match self.scene {
+            Scene::Title => self.title(),
+            Scene::Mining => self.mine(),
+            Scene::Shopping(visit) => self.shop(visit),
+            Scene::Prices => {
+                if chose() || start() || back() {
+                    self.enter(Scene::Mining);
+                }
+            },
+            Scene::Paused => {
+                if start() {
+                    self.enter(Scene::Mining);
+                }
+            },
+            Scene::Wrecked => {
+                // the wreck's sparks keep falling behind the panel
+                run.fx.update();
+                if self.settled() && chose() {
+                    run.recover();
+                    self.enter(Scene::Mining);
+                } else {
+                    self.start_over();
+                }
+            },
+            Scene::Won => self.start_over(),
+        }
+    }
+
+    /// The title, with the demo flying behind it.
+    fn title(self) {
+        // the demo gets a new mine when it wrecks, wins, runs out of ideas or has had two minutes
+        let event = self.run.update(self.demo.fly(self.run));
+        let over = event != Event::Nothing || self.demo.stuck() || self.run.age > 2 * 60 * 60;
+
+        let begin = chose() || start();
+        if over || begin {
+            self.run = Run::new();
+            self.demo = Autopilot::new();
+        }
+        if begin {
+            self.enter(Scene::Mining);
+        }
+    }
+
+    /// A frame of play, unless a button opens something first.
+    fn mine(self) {
+        let run = self.run;
+        if start() {
+            self.enter(Scene::Paused);
+            return;
+        }
+        // A on a station's pad opens its counter, or the refinery's board
+        if input::pressed(Button::A) {
+            if let station? = run.docked() {
+                let wares = station.wares(run.pod);
+                if !wares.is_empty() {
+                    run.pod.park();
+                    run.radio.say("WHAT WILL IT BE?");
+                    self.enter(Scene::Shopping(Visit::new(station, wares)));
+                    return;
+                }
+                if station == Refinery {
+                    self.enter(Scene::Prices);
+                    return;
+                }
+            }
+        }
+        match run.update(Controls::read()) {
+            Event::Nothing => {},
+            Event::Wrecked => self.enter(Scene::Wrecked),
+            Event::Won => self.enter(Scene::Won),
+        }
+    }
+
+    /// A station's menu, worked with the d-pad or the mouse.
+    fn shop(self, visit: Visit) {
+        let rows = visit.wares.len();
+        let buying = input::pressed(Button::A);
+        let leaving = start() || back();
+        if input::pressed(Button::Up) {
+            visit.cursor = (visit.cursor + rows - 1) % rows;
+        }
+        if input::pressed(Button::Down) {
+            visit.cursor = (visit.cursor + 1) % rows;
+        }
+        if let spot? = input::mouse() {
+            let click = input::mouse_pressed(Mouse::Left);
+            if let row? = screens::shop_row(spot, rows) {
+                if click || input::mouse_moved() {
+                    visit.cursor = row;
+                    buying = buying || click;
+                }
+            }
+            leaving = leaving || (click && screens::shop_exit(spot));
+        }
+
+        if leaving {
+            self.enter(Scene::Mining);
+        } else if buying {
+            // the menu reacts for a few frames, one way for a sale and the other for a refusal
+            visit.react = if self.run.buy(visit.wares[visit.cursor]) 8 else -8;
+        }
+    }
+
+    /// What Start and B do on the screens a run ends on, once one has settled. Start digs a new
+    /// mine, and B goes back to the title.
+    fn start_over(self) {
+        let quit = back();
+        if self.settled() && (start() || quit) {
+            self.run = Run::new();
+            self.demo = Autopilot::new();
+            self.enter(if quit Scene::Title else Scene::Mining);
+        }
+    }
+
+    fn enter(self, scene: Scene) {
+        // leaving the title or a screen a run ended on is covered by a wipe. anything else
+        // leaves its panel to fold shut
+        let old = self.scene;
+        let wiped = old == Scene::Title || old == Scene::Wrecked || old == Scene::Won;
+        self.left = if wiped Scene::Mining else old;
+        self.scene = scene;
+        self.entered = luna::frame();
+    }
+
+    /// Whether the scene has been up for long enough that a button can take it away.
+    fn settled(self) -> bool {
+        let delay = match self.scene {
+            Scene::Wrecked => 45,
+            Scene::Won => 60,
+            _ => 0,
+        };
+        luna::frame() - self.entered > delay
+    }
+
+    fn draw(self) {
+        let (run, scene) = (self.run, self.scene);
+        let age = luna::frame() - self.entered;
+        run.draw();
+        if scene != Scene::Title {
+            self.hud.draw(run, prompting = scene == Scene::Mining || scene == Scene::Paused);
+        }
+        if scene == Scene::Mining {
+            // the panel that was just left folds shut over the mine
+            self.panel(self.left, widgets::UNFOLD - 2 - age);
+        } else {
+            if scene != Scene::Title {
+                widgets::dim();
+            }
+            self.panel(scene, age);
+        }
+    }
+
+    /// Draws the panel a scene puts over the world, as it is `age` frames after it began to
+    /// unfold. Mining has none, and one that isn't open at all yet has nothing to draw.
+    fn panel(self, scene: Scene, age: int) {
+        let run = self.run;
+        if age < 0 {
+            return;
+        }
+        match scene {
+            Scene::Title => screens::title(age),
+            Scene::Mining => {},
+            Scene::Shopping(visit) => screens::shop(run, visit, age),
+            Scene::Prices => screens::prices(run, age),
+            Scene::Paused => screens::paused(run, age),
+            Scene::Wrecked => screens::wrecked(run, self.settled(), age),
+            Scene::Won => screens::won(run, self.settled(), age),
+        }
+    }
+}
+
+enum Scene {
+    Title,
+    Mining,
+    Shopping(Visit),
+    Prices,
+    Paused,
+    Wrecked,
+    Won,
+}
+
+/// Whether the player just said yes to something, with A or a click.
+fn chose() -> bool {
+    input::pressed(Button::A) || input::mouse_pressed(Mouse::Left)
+}
+
+fn start() -> bool {
+    input::pressed(Button::Start)
+}
+
+fn back() -> bool {
+    input::pressed(Button::B)
+}
+
+let game = Game::new();
+luna::update(|| game.update());
+luna::draw(|| game.draw());

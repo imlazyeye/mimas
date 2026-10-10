@@ -1,0 +1,54 @@
+module surface;
+
+use std::math::{IVec2, ivec2};
+
+use mine::{SURFACE, TILE};
+use sprites::Sprite;
+
+const GROUND = SURFACE * TILE;
+
+/// The sky over the mine.
+pub struct Surface {
+    stars: [IVec2],
+}
+
+impl Surface {
+    pub fn new() -> Self {
+        // scattered over the strip of sky between the hud and the far ridge
+        Self { stars = for _ in 14 collect ivec2(int::random(luna::WIDTH), 36 + int::random(30)) }
+    }
+
+    /// Draws it for a view of the world, when that reaches above the ground. `talking` is whether
+    /// control is on the radio, which its mast shows.
+    pub fn draw(self, view: IVec2, talking: bool) {
+        if view.y >= GROUND {
+            return;
+        }
+        gfx::fill_rect(view, ivec2(luna::WIDTH, GROUND - view.y), Color::Navy);
+        for star in self.stars {
+            Sprite::Stars.draw(ivec2(view.x + star.x, star.y));
+        }
+        Sprite::Sun.draw(ivec2(view.x + 226 - view.x ~/ 8, 40));
+
+        // the same ridge twice, and the far one is dimmer and slower to scroll
+        for (slowness, rise, far) in [(3, 30, true), (2, 20, false)] {
+            if far {
+                gfx::remap(Color::Red, Color::Plum);
+                gfx::remap(Color::Orange, Color::Red);
+            }
+            for i in luna::WIDTH ~/ 32 + 1 {
+                Sprite::Ridge.draw(ivec2(view.x + i * 32 - view.x ~/ slowness % 32, GROUND - rise));
+            }
+            let foot = ivec2(view.x, GROUND - rise + 16);
+            gfx::fill_rect(foot, ivec2(luna::WIDTH, rise - 16), Color::Red);
+            gfx::reset_remap();
+        }
+
+        // control's mast, at the end of the refinery's pad. its light blinks for the radio
+        if talking && luna::frame() ~/ 8 % 2 == 0 {
+            gfx::remap(Color::Red, Color::White);
+        }
+        Sprite::Mast.draw(ivec2(14 * TILE + 5, GROUND - Sprite::Mast.size().y));
+        gfx::reset_remap();
+    }
+}

@@ -1,0 +1,31 @@
+module radio;
+
+/// The one line of text that control and the pod's own alarms share.
+pub struct Radio {
+    pub line: str,
+    /// The frames the line has left on the hud.
+    pub timer: int,
+    /// Whether the hud flashes the line.
+    pub urgent: bool,
+}
+
+impl Radio {
+    pub fn new() -> Self {
+        let line = "";
+        Self { line, timer = 300, urgent = false }
+    }
+
+    /// Puts a line on the radio for the next three seconds, over whatever was there.
+    pub fn say(self, line: str, urgent = false) {
+        self.line = line;
+        self.timer = 180;
+        self.urgent = urgent;
+    }
+
+    /// Counts a frame off the line's time on the hud.
+    pub fn update(self) {
+        if self.timer > 0 {
+            self.timer -= 1;
+        }
+    }
+}

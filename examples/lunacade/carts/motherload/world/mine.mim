@@ -1,0 +1,171 @@
+module mine;
+
+use std::math::{IVec2, Vec2, ivec2};
+
+use boulders::Boulder;
+use geology;
+use sprites::Sprite;
+use strata::Stratum;
+use tiles::{Air, Bedrock, Tile};
+
+/// How big a cell is in pixels, and how many of them the world is across and down.
+pub const TILE = 16;
+pub const COLS = 24;
+pub const ROWS = 162;
+/// The row the ground starts at.
+pub const SURFACE = 6;
+const FEET_PER_ROW = 20;
+/// The four cells next to one, as steps from it.
+pub const AROUND = [
+    IVec2 { x = 1, y = 0 },
+    IVec2 { x = -1, y = 0 },
+    IVec2 { x = 0, y = 1 },
+    IVec2 { x = 0, y = -1 },
+];
+
+/// The ground as it is right now: what every cell holds, and what the pod has seen of it.
+pub struct Mine {
+    /// What every cell holds, row by row.
+    cells: [Tile],
+    /// The rocks with nothing under them, sitting or falling.
+    pub loose: [Boulder],
+    /// The cells the fog is off of.
+    lit: [bool],
+    /// The cells the map knows about.
+    seen: [bool],
+    /// The cell the fog was last lifted around.
+    eye: IVec2,
+    /// How many rows late each column changes strata, so the seams between them aren't straight.
+    drift: [int],
+}
+
+impl Mine {
+    pub fn new() -> Self {
+        // a column's seams sit within a row of its neighbor's
+        let drift = [0];
+        for x in 1..COLS {
+            drift.push((drift[x - 1] + int::random(3) - 1).clamp(0, 2));
+        }
+        Self {
+            cells = geology::dig(),
+            loose = [],
+            lit = array::new_filled(false, COLS * ROWS),
+            seen = array::new_filled(false, COLS * ROWS),
+            eye = IVec2::zero(),
+            drift,
+        }
+    }
+
+    /// What a cell holds. Outside the world that's bedrock, except for the air over the ground.
+    pub fn at(self, cell: IVec2) -> Tile {
+        if cell.x < 0 || cell.x >= COLS || cell.y >= ROWS {
+            Bedrock
+        } else if cell.y < SURFACE {
+            Air
+        } else {
+            self.cells[cell.to_index(COLS)]
+        }
+    }
+
+    /// Changes what a cell of the world holds, and shakes loose a rock that was resting on it. A
+    /// cell off the world's sides isn't caught here.
+    pub fn set(self, cell: IVec2, tile: Tile) {
+        let index = cell.to_index(COLS);
+        if index >= 0 && index < self.cells.len() {
+            self.cells[index] = tile;
+            let above = cell.sub(ivec2(0, 1));
+            if tile.OPEN && self.at(above).FALLS {
+                self.loose.push(Boulder::new(above));
+            }
+        }
+    }
+
+    /// Lifts the fog around a cell, and puts the ground nearest to it on the map. Asking again
+    /// for the same cell does nothing.
+    pub fn reveal(self, around: IVec2) {
+        // the map sees this far through the ground, as a circle with its top and bottom cut off
+        const MAP_REACH = 58;
+        const MAP_ROWS = 5;
+        // how many cells the fog lifts for, which is more than the screen shows
+        const SIGHT = 20;
+        if around == self.eye {
+            return;
+        }
+        self.eye = around;
+        let reach = SIGHT;
+        for y in (around.y - reach).max(0)..(around.y + reach + 1).min(ROWS) {
+            for x in (around.x - reach).max(0)..(around.x + reach + 1).min(COLS) {
+                let (across, down) = (x - around.x, y - around.y);
+                let far = across * across + down * down;
+                if far <= SIGHT * SIGHT {
+                    self.lit[y * COLS + x] = true;
+                }
+                if far < MAP_REACH && down.abs() <= MAP_ROWS {
+                    self.seen[y * COLS + x] = true;
+                }
+            }
+        }
+    }
+
+    /// The color a cell has on the map, if the pod has been close enough to it with the fog off.
+    /// Tunnels are teal, and plain ground has no color.
+    pub fn chart(self, cell: IVec2) -> Color? {
+        let index = cell.to_index(COLS);
+        if !self.seen[index] || !self.lit[index] {
+            null
+        } else if self.cells[index].OPEN {
+            Color::Teal
+        } else {
+            self.cells[index].CHART
+        }
+    }
+
+    pub fn draw(self, view: IVec2) {
+        let beat = luna::frame() ~/ 15 % 2;
+        let left = (view.x ~/ TILE).max(0);
+        let right = ((view.x + luna::WIDTH) ~/ TILE + 1).min(COLS);
+        for y in (view.y ~/ TILE).max(SURFACE)..((view.y + luna::HEIGHT) ~/ TILE + 1).min(ROWS) {
+            for x in left..right {
+                let stratum = Stratum::at(feet(y - self.drift[x]));
+                let at = ivec2(x, y).scale(TILE);
+                let index = y * COLS + x;
+                let tile = self.cells[index];
+                if !self.lit[index] {
+                    Sprite::Fog.draw(at);
+                } else if tile.OPEN {
+                    stratum.cavity.draw(at);
+                } else {
+                    // soil has two looks, mixed up enough that a wall of it doesn't repeat
+                    stratum.soil.draw(at, (x * 7 + y * 13) % 2);
+                    tile.draw(at, beat);
+                }
+            }
+        }
+    }
+}
+
+/// The cell the motherlode is buried in.
+pub fn core() -> IVec2 {
+    ivec2(COLS ~/ 2, row_at(3000))
+}
+
+/// The cell a spot in the world is in.
+pub fn cell_of(pos: Vec2) -> IVec2 {
+    let at = pos.to_ivec2();
+    ivec2(at.x ~/ TILE, at.y ~/ TILE)
+}
+
+/// The middle of a cell, as a spot in the world.
+pub fn center(cell: IVec2) -> Vec2 {
+    cell.scale(TILE).add(ivec2(TILE ~/ 2, TILE ~/ 2)).to_vec2()
+}
+
+/// The row a depth in feet is in.
+pub fn row_at(depth: int) -> int {
+    SURFACE + depth ~/ FEET_PER_ROW
+}
+
+/// How deep a row is, in feet.
+pub fn feet(row: int) -> int {
+    (row - SURFACE) * FEET_PER_ROW
+}

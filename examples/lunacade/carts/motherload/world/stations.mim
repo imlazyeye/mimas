@@ -1,0 +1,160 @@
+module stations;
+
+use std::math::{IVec2, Vec2, ivec2};
+
+use mine::{SURFACE, TILE, center};
+use pod::Pod;
+use run::{Event, Run};
+use sprites::Sprite;
+use wares::Ware;
+
+/// How many columns a station's landing pad covers.
+pub const PAD = 5;
+/// Every station there is.
+pub const STATIONS: [Station] = [Depot, Refinery, Garage, Outpost];
+
+/// A building with a pad to land on. Every station is its own type.
+pub pact Station {
+    /// What the board on it says.
+    const NAME: str;
+    /// A picture of it that leaves the board blank.
+    const ART: Sprite;
+    /// The color of its name.
+    const TINT: Color;
+    /// The leftmost column of its pad.
+    const COLUMN: int;
+    /// How many rows under the top of the ground its pad is.
+    const DEEP: int = 0;
+    /// What the hud tells a pod parked on its pad to do, for a station with a counter.
+    const PROMPT: str? = null;
+
+    /// What it has for a pod, in the order its menu lists them.
+    fn wares(self, pod: Pod) -> [Ware] {
+        []
+    }
+
+    /// What it does on its own for a pod that's on its pad, and what that makes of the run.
+    fn dock(self, run: Run) -> Event {
+        Event::Nothing
+    }
+
+    /// The row its pad is in.
+    fn row(self) -> int {
+        SURFACE + self.DEEP
+    }
+
+    /// Draws it in the middle of its pad, with its name on its board. The name blinks while a pod
+    /// is `docked` with it.
+    fn draw(self, docked: bool) {
+        let size = self.ART.size();
+        let left = self.COLUMN * TILE + (PAD * TILE - size.x) ~/ 2;
+        let corner = ivec2(left, self.row() * TILE - size.y);
+        self.ART.draw(corner);
+        let board = corner.add(ivec2((size.x - gfx::text_width(self.NAME)) ~/ 2, 5));
+        let lit = docked && luna::frame() ~/ 10 % 2 == 0;
+        gfx::text(self.NAME, board, if lit Color::White else self.TINT);
+    }
+}
+
+pub struct Depot;
+impl Station for Depot {
+    const NAME = "FUEL";
+    const ART = Sprite::Depot;
+    const TINT = Color::Lime;
+    const COLUMN = 1;
+    const PROMPT = "A: FUEL, REPAIRS AND SUPPLIES.";
+
+    fn wares(self, pod: Pod) -> [Ware] {
+        let wares = [Ware::Refuel, Ware::Repair];
+        wares.extend(for supply in pod.supplies collect Ware::Stock(supply));
+        wares.push(Ware::Paint);
+        wares
+    }
+}
+
+pub struct Refinery;
+impl Station for Refinery {
+    const NAME = "REFINERY";
+    const ART = Sprite::Refinery;
+    const TINT = Color::Yellow;
+    const COLUMN = 10;
+    const PROMPT = "A: VIEW PRICES.";
+
+    /// Buys the hold the moment the pod is over the pad, and ends the run for the motherlode.
+    fn dock(self, run: Run) -> Event {
+        // what the refinery pays for the motherlode
+        const BOUNTY = 25000;
+        let pod = run.pod;
+        if !pod.hold.is_empty() {
+            sell(run);
+        }
+        if !pod.core {
+            return Event::Nothing;
+        }
+        pod.core = false;
+        run.pay(BOUNTY);
+        Event::Won
+    }
+}
+
+pub struct Garage;
+impl Station for Garage {
+    const NAME = "GARAGE";
+    const ART = Sprite::Garage;
+    const TINT = Color::Cyan;
+    const COLUMN = 18;
+    const PROMPT = "A: BETTER PARTS FOR DEEPER TRIPS";
+
+    fn wares(self, pod: Pod) -> [Ware] {
+        for mount in pod.mounts collect Ware::Upgrade(mount)
+    }
+}
+
+/// A fuel stop somebody left running halfway down the mine.
+pub struct Outpost;
+impl Station for Outpost {
+    const NAME = "OUTPOST";
+    const ART = Sprite::Depot;
+    const TINT = Color::Orange;
+    const COLUMN = 9;
+    const DEEP = 75;
+    const PROMPT = "A: FUEL AND REPAIRS";
+
+    fn wares(self, pod: Pod) -> [Ware] {
+        [Ware::Refuel, Ware::Repair]
+    }
+}
+
+/// The middle of a station's pad, which is where a pod sits on it.
+pub fn landing(station: Station) -> Vec2 {
+    center(ivec2(station.COLUMN + PAD ~/ 2, station.row() - 1))
+}
+
+/// The station whose pad a cell is part of.
+pub fn station_at(cell: IVec2) -> Station? {
+    for station in STATIONS {
+        let along = cell.x - station.COLUMN;
+        if cell.y == station.row() && along >= 0 && along < PAD break station;
+    }
+}
+
+/// Empties the hold into the refinery, with a receipt floating up from the pod.
+fn sell(run: Run) {
+    let pod = run.pod;
+    let ledger = run.tally.ledger;
+    let total = 0;
+    let lines = ~{};
+    for mineral in pod.hold {
+        total += mineral.VALUE;
+        lines[mineral.NAME] = (lines[mineral.NAME] ?? 0) + mineral.VALUE;
+        ledger[mineral.NAME] = (ledger[mineral.NAME] ?? 0) + 1;
+    }
+    // popups stack with the first on top, which is where the total goes
+    run.fx.popup(pod.pos, f"+${total}", Color::Lime);
+    for (name, worth) in lines {
+        run.fx.popup(pod.pos, f"{name} ${worth}", Color::Yellow);
+    }
+    run.pay(total);
+    run.radio.say(f"LOAD SOLD FOR ${total}.");
+    pod.hold = [];
+}

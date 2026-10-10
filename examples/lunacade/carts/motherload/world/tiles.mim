@@ -1,0 +1,208 @@
+module tiles;
+
+use std::math::IVec2;
+
+use flood::Flood;
+use mine::{AROUND, center};
+use minerals::Mineral;
+use run::Run;
+use sprites::Sprite;
+
+/// A drill tier no garage sells.
+const NEVER = 99;
+
+/// What a cell of the mine holds. Every kind of ground is its own type.
+pub pact Tile {
+    /// The drill tier it takes to cut it.
+    const DRILL: int = 0;
+    /// What the radio says to a drill that's short of that.
+    const REFUSAL: str? = null;
+    /// Whether a pod flies through it.
+    const OPEN: bool = false;
+    /// What it looks like in the ground, and whether that has two frames it moves between.
+    const ART: Sprite? = null;
+    const MOVES: bool = false;
+    /// The color it has on the map, for what the map bothers with.
+    const CHART: Color? = null;
+    /// Whether it catches the light now and then.
+    const GLINTS: bool = false;
+    /// Whether it falls when there's nothing under it.
+    const FALLS: bool = false;
+    /// How many times the work of soil it takes to get through.
+    const TOUGH: int = 1;
+
+    /// Why a drill of this tier can't cut it, or null when it can.
+    fn resists(self, drill: int) -> str? {
+        if drill < self.DRILL self.REFUSAL else null
+    }
+
+    /// How much drilling it takes to get through at a depth in feet.
+    fn work(self, depth: int) -> int {
+        (24 + depth ~/ 60) * self.TOUGH
+    }
+
+    /// Draws what it adds to the soil it's in, which for most is their art or nothing. `beat` is
+    /// the frame to draw of the ones that move.
+    fn draw(self, at: IVec2, beat: int) {
+        if let art? = self.ART {
+            art.draw(at, if self.MOVES beat else 0);
+        }
+    }
+
+    /// What breaking through it in the cell at `at` does to the run.
+    fn mined(self, run: Run, at: IVec2) {}
+}
+
+pub struct Air;
+impl Tile for Air {
+    const OPEN = true;
+}
+
+pub struct Soil;
+impl Tile for Soil {}
+
+pub struct Ore {
+    pub mineral: Mineral,
+}
+
+impl Tile for Ore {
+    const GLINTS = true;
+    const CHART = Color::Orange;
+
+    fn draw(self, at: IVec2, beat: int) {
+        self.mineral.ORE.draw(at);
+    }
+
+    fn mined(self, run: Run, at: IVec2) {
+        self.stow(run);
+        // a magnet takes as many of the same out of the cells around as it's rated for
+        let pulled = 0;
+        for step in AROUND {
+            let near = at.add(step);
+            if pulled < run.pod.specs.pull && run.mine.at(near) == self {
+                run.mine.set(near, Air);
+                run.fx.burst(center(near), Sprite::Chunk, 4);
+                self.stow(run);
+                pulled += 1;
+            }
+        }
+    }
+}
+
+impl Ore {
+    /// Puts a load of it in the bay. A full bay still has room for a better load than its worst.
+    pub fn stow(self, run: Run) {
+        let (pod, mineral) = (run.pod, self.mineral);
+        if !pod.full() {
+            pod.hold.push(mineral);
+            run.fx.popup(pod.pos, f"{mineral.NAME} ${mineral.VALUE}", Color::Yellow);
+            return;
+        }
+        run.fx.popup(pod.pos, "CARGO FULL!", Color::Yellow);
+    }
+}
+
+pub struct Rock;
+impl Tile for Rock {
+    const ART = Sprite::Rock;
+    const CHART = Color::Slate;
+    const DRILL = 3;
+    const REFUSAL = "REQUIRES LEVEL 3 DRILL.";
+    const TOUGH = 3;
+    const FALLS = true;
+}
+
+pub struct Gas;
+impl Tile for Gas {
+    const ART = Sprite::Gas;
+    const CHART = Color::Lime;
+
+    fn mined(self, run: Run, at: IVec2) {
+        // every tier of radiator takes some of the sting out, down to a floor
+        run.hurt((34 - 6 * run.pod.specs.cooling).max(8));
+        run.fx.burst(run.pod.pos, Sprite::Puff, 20);
+    }
+}
+
+pub struct Magma;
+impl Tile for Magma {
+    const ART = Sprite::Magma;
+    const MOVES = true;
+    const CHART = Color::Red;
+
+    fn mined(self, run: Run, at: IVec2) {
+        // it heats the pod and burns the hull, and a radiator takes some off both
+        let pod = run.pod;
+        let cooling = pod.specs.cooling;
+        pod.heat = (pod.heat + 60 - 10 * cooling).min(100);
+        run.hurt((45 - 8 * cooling).max(5));
+    }
+}
+
+/// The motherlode.
+pub struct Core;
+impl Tile for Core {
+    const ART = Sprite::Core;
+    const MOVES = true;
+    const DRILL = 5;
+    const REFUSAL = "REQUIRES LEVEL 5 DRILL.";
+
+    fn work(self, depth: int) -> int {
+        300
+    }
+
+    fn mined(self, run: Run, at: IVec2) {
+        run.pod.core = true;
+        run.fx.popup(run.pod.pos, "THE CORE", Color::Cyan);
+        run.radio.say("THE MINE IS UNSTABLE! ESCAPE!", urgent = true);
+        run.flood = Flood::new();
+        run.fx.shake(60);
+    }
+}
+
+pub struct Pad;
+impl Tile for Pad {
+    const ART = Sprite::Pad;
+    const DRILL = NEVER;
+    const REFUSAL = "CANNOT DRILL HERE.";
+}
+
+pub struct Bedrock;
+impl Tile for Bedrock {
+    const ART = Sprite::Bedrock;
+    const DRILL = NEVER;
+    const REFUSAL = "YOU CAN GO NO FURTHER.";
+}
+
+/// Supplies somebody buried and never came back for.
+pub struct Cache;
+impl Tile for Cache {
+    const CHART = Color::Cyan;
+
+    fn draw(self, at: IVec2, beat: int) {
+        gfx::sprite(Sprite::Crate.id(), at, false, false, 2.0);
+    }
+
+    fn mined(self, run: Run, at: IVec2) {
+        let supply = run.pod.supplies.choose()!;
+        supply.count += 1;
+        run.fx.popup(run.pod.pos, f"+1 {supply.gadget.NAME}", Color::Cyan);
+        run.radio.say(f"AN OLD SUPPLY CACHE! IT HELD A {supply.gadget.NAME}.");
+    }
+}
+
+/// A pocket of fuel, which the pod drinks on the spot.
+pub struct Oil;
+impl Tile for Oil {
+    const CHART = Color::Cyan;
+
+    fn draw(self, at: IVec2, beat: int) {
+        gfx::sprite(Sprite::Fuel.id(), at, false, false, 1.0);
+    }
+
+    fn mined(self, run: Run, at: IVec2) {
+        let pod = run.pod;
+        pod.fuel = (pod.fuel + 1500).min(pod.specs.tank);
+        run.fx.popup(pod.pos, "FUEL POCKET", Color::Lime);
+    }
+}

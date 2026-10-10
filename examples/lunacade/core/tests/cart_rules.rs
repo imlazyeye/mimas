@@ -5,8 +5,9 @@ use lunacade_core::{Cart, Input, Machine, WIDTH};
 fn check(name: &str, script: &str, module: Option<(&str, &str)>) {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../carts"));
     let mut cart = Cart::from_dir(&root.join(name)).unwrap();
+    let path = cart.script().unwrap().0.to_owned();
     cart.files
-        .get_mut(&format!("{name}.mim"))
+        .get_mut(&path)
         .unwrap()
         .push_str(&format!("\n{script}"));
     if let Some((file, extra)) = module {
@@ -350,4 +351,320 @@ fn swarm_ground_scrolls_continuously_across_negative_tile_boundaries() {
     for (before, after) in before.chunks(WIDTH).zip(after.chunks(WIDTH)) {
         assert_eq!(&before[1..], &after[..WIDTH - 1], "scenery jumped a tile");
     }
+}
+
+#[test]
+fn motherload_parts_add_up() {
+    check(
+        "motherload",
+        "let pod = game.run.pod;
+         let specs = pod.specs;
+         if specs.drill != 1 || specs.tank != 6000 || specs.bay != 8 || specs.hull != 100 {
+             panic(\"a new pod's specs are off\");
+         }
+         pod.fuel = 100;
+         for mount in pod.mounts {
+             for _ in parts::TIERS - 1 {
+                 pod.upgrade(mount);
+             }
+             if mount.price() != null {
+                 panic(\"a part went past its last tier\");
+             }
+         }
+         let specs = pod.specs;
+         if specs.drill != 5 || specs.tank != 30000 || specs.bay != 40 || specs.hull != 300 {
+             panic(\"a full set of parts adds up wrong\");
+         }
+         if pod.fuel != 24100 || pod.hull != 300 || specs.cooling != 4 {
+             panic(\"a bigger tank or hull didn't come filled\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_rocks_fall_when_undermined() {
+    check(
+        "motherload",
+        "use std::math::ivec2;
+         use tiles::{Air, Rock, Soil};
+         let run = game.run;
+         for y in 47..54 {
+             for x in 12..15 {
+                 run.mine.set(ivec2(x, y), Soil);
+             }
+         }
+         run.mine.set(ivec2(13, 48), Rock);
+         run.mine.set(ivec2(13, 49), Rock);
+         run.mine.set(ivec2(13, 51), Air);
+         run.mine.set(ivec2(13, 50), Air);
+         for _ in 600 {
+             run.update(controls::Controls::idle());
+         }
+         if run.mine.at(ivec2(13, 51)) != Rock || run.mine.at(ivec2(13, 50)) != Rock {
+             panic(\"the rocks didn't come down in a stack\");
+         }
+         if !run.mine.at(ivec2(13, 48)).OPEN || !run.mine.loose.is_empty() {
+             panic(\"a rock was left hanging\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_magma_chases_the_motherlode() {
+    check(
+        "motherload",
+        "use std::math::ivec2;
+         use gadgets::Gadget;
+         use mine::{center, core};
+         use tiles::Air;
+         let run = game.run;
+         let seat = core();
+         for x in seat.x - 3..seat.x {
+             run.mine.set(ivec2(x, seat.y), Air);
+         }
+         run.pod.move_to(center(ivec2(seat.x - 1, seat.y)));
+         run.mine.at(seat).mined(run, seat);
+         if !run.pod.core || run.flood == null {
+             panic(\"taking the motherlode didn't start the flood\");
+         }
+         for supply in run.pod.supplies {
+             if supply.gadget.NAME == \"TELEPORTER\" && supply.gadget.fire(run) {
+                 panic(\"the teleporter worked with the motherlode on board\");
+             }
+         }
+         for _ in 1200 {
+             if run.wreck == null {
+                 run.update(controls::Controls::idle());
+             }
+         }
+         if run.wreck == null {
+             panic(\"a pod that sat still outlived the magma\");
+         }
+         run.recover();
+         if run.flood != null || run.pod.core || run.mine.at(seat).OPEN {
+             panic(\"a recovery left the mine flooding\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_teleporter_goes_both_ways() {
+    check(
+        "motherload",
+        "use std::math::ivec2;
+         use mine::{center, SURFACE};
+         use tiles::{Air, Soil};
+         let run = game.run;
+         let dig = ivec2(4, SURFACE + 20);
+         run.mine.set(dig, Air);
+         let teleporter = for supply in run.pod.supplies {
+             if supply.gadget.NAME == \"TELEPORTER\" break supply.gadget;
+         }!;
+         if teleporter.fire(run) {
+             panic(\"the teleporter went somewhere from the surface\");
+         }
+         run.pod.move_to(center(dig));
+         if !teleporter.fire(run) || run.buried() {
+             panic(\"the teleporter didn't reach the surface\");
+         }
+         if !teleporter.fire(run) || run.pod.pos != center(dig) {
+             panic(\"the teleporter didn't go back to the dig\");
+         }
+         run.land();
+         run.pod.move_to(center(dig));
+         teleporter.fire(run);
+         run.mine.set(dig, Soil);
+         if teleporter.fire(run) || run.buried() {
+             panic(\"the teleporter put the pod in the ground\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_outpost_is_a_room_with_a_counter() {
+    check(
+        "motherload",
+        "use std::math::ivec2;
+         use mine::center;
+         use stations::{Outpost, Station};
+         let run = game.run;
+         let outpost: Station = Outpost;
+         let floor = ivec2(outpost.COLUMN + 2, outpost.row() - 1);
+         if !run.mine.at(floor).OPEN || run.mine.at(floor.add(ivec2(0, -2))).BLASTS {
+             panic(\"the outpost has no room or no roof\");
+         }
+         run.pod.move_to(center(floor));
+         if run.docked() != outpost {
+             panic(\"the outpost has no pad\");
+         }
+         if run.docked()!.wares(run.pod).len() != 2 {
+             panic(\"the outpost sells the wrong things\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_full_bay_trades_up() {
+    check(
+        "motherload",
+        "use minerals::{Copper, Gold, Mineral, Silver};
+         use tiles::{Ore, Tile};
+         let run = game.run;
+         let hold: [Mineral] = [Silver::new(), Copper::new()];
+         run.pod.hold = hold;
+         for _ in run.pod.specs.bay - 2 {
+             run.pod.hold.push(Silver::new());
+         }
+         let gold: Tile = Ore { mineral = Gold::new() };
+         gold.mined(run, std::math::ivec2(0, 0));
+         let copper: Tile = Ore { mineral = Copper::new() };
+         copper.mined(run, std::math::ivec2(0, 0));
+         let worth = (for mineral in run.pod.hold collect mineral.VALUE).sum();
+         if run.pod.hold.len() != run.pod.specs.bay || worth != 140 + 7 * 60 {
+             panic(\"a full bay didn't swap its worst load for a better one\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_controls_fly_the_pod() {
+    check(
+        "motherload",
+        "use controls::Controls;
+         let run = game.run;
+         let right = Controls::idle();
+         right.steer = 1;
+         for _ in 60 {
+             run.update(right);
+         }
+         let dig = Controls::idle();
+         dig.dig = true;
+         for _ in 240 {
+             run.update(dig);
+         }
+         if run.depth() < 100 || run.pod.fuel > run.pod.specs.tank - 1000 {
+             panic(\"holding down didn't sink a shaft\");
+         }
+         let depth = run.depth();
+         let up = Controls::idle();
+         up.thrust = true;
+         for _ in 240 {
+             run.update(up);
+         }
+         if run.buried() || run.depth() >= depth {
+             panic(\"the rotor didn't lift the pod back out\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_autopilot_brings_a_load_home() {
+    check(
+        "motherload",
+        "let run = game.run;
+         let pilot = autopilot::Autopilot::new();
+         for _ in 1500 {
+             run.update(pilot.fly(run));
+         }
+         if run.wreck != null || run.tally.earned == 0 || run.deepest < 200 {
+             panic(\"the demo didn't dig a load and sell it\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_magnet_pulls_a_vein() {
+    check(
+        "motherload",
+        "use std::math::ivec2;
+         use minerals::Gold;
+         use tiles::{Ore, Soil, Tile};
+         let run = game.run;
+         let gold: Tile = Ore { mineral = Gold::new() };
+         for x in 3..8 {
+             for y in 20..23 {
+                 run.mine.set(ivec2(x, y), Soil);
+             }
+         }
+         for cell in [ivec2(4, 21), ivec2(5, 21), ivec2(6, 21), ivec2(5, 22), ivec2(5, 20)] {
+             run.mine.set(cell, gold);
+         }
+         gold.mined(run, ivec2(5, 21));
+         if run.pod.hold.len() != 1 || run.mine.at(ivec2(4, 21)).OPEN {
+             panic(\"a pod with no magnet pulled ore\");
+         }
+         let magnet = run.pod.mounts[6];
+         run.pod.upgrade(magnet);
+         run.pod.upgrade(magnet);
+         gold.mined(run, ivec2(5, 21));
+         let left = for cell in [ivec2(4, 21), ivec2(6, 21), ivec2(5, 22), ivec2(5, 20)] {
+             if !run.mine.at(cell).OPEN collect cell;
+         };
+         if run.pod.hold.len() != 4 || left.len() != 2 {
+             panic(\"a magnet rated for two didn't pull two\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_refinery_ends_the_run_for_the_motherlode() {
+    check(
+        "motherload",
+        "use controls::Controls;
+         use run::Event;
+         let run = game.run;
+         if run.update(Controls::idle()) != Event::Nothing {
+             panic(\"a pod with nothing on board ended the run\");
+         }
+         run.pod.core = true;
+         let cash = run.cash;
+         if run.update(Controls::idle()) != Event::Won || run.cash != cash + 25000 {
+             panic(\"the refinery didn't pay out for the motherlode\");
+         }
+         if run.pod.core {
+             panic(\"the refinery left the motherlode on board\");
+         }",
+        None,
+    );
+}
+
+#[test]
+fn motherload_falling_rock_dents_the_pod() {
+    check(
+        "motherload",
+        "use std::math::ivec2;
+         use controls::Controls;
+         use mine::center;
+         use tiles::{Air, Rock, Soil};
+         let run = game.run;
+         for y in 28..34 {
+             for x in 3..6 {
+                 run.mine.set(ivec2(x, y), Soil);
+             }
+         }
+         run.mine.set(ivec2(4, 29), Rock);
+         run.mine.set(ivec2(4, 32), Air);
+         run.pod.move_to(center(ivec2(4, 32)));
+         run.mine.set(ivec2(4, 31), Air);
+         run.mine.set(ivec2(4, 30), Air);
+         for _ in 200 {
+             run.update(Controls::idle());
+         }
+         if run.pod.hull >= run.pod.specs.hull || !run.mine.loose.is_empty() {
+             panic(\"a rock fell on the pod without a scratch\");
+         }
+         if !run.mine.at(ivec2(4, 31)).OPEN || !run.mine.at(ivec2(4, 29)).OPEN {
+             panic(\"a rock that hit the pod is still around\");
+         }",
+        None,
+    );
 }

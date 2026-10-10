@@ -1,0 +1,218 @@
+module screens;
+
+use std::math::{IVec2, ivec2};
+
+use mine::{COLS, ROWS, SURFACE, cell_of, core};
+use minerals::Mineral;
+use run::Run;
+use sprites::Sprite;
+use stations::{PAD, STATIONS};
+use wares::Visit;
+use widgets::{flash, name, panel, stat};
+
+/// Where a shop's menu sits, how tall a row of it is, and the row of the line that leaves it.
+const MENU_LEFT = 24;
+const MENU_TOP = 40;
+const MENU_WIDTH = 208;
+const MENU_ROW = 9;
+const MENU_EXIT = 112;
+/// How many frames apart the lines come up on the screens a run ends on.
+const BEAT = 12;
+
+// every screen here is a panel over the world, drawn as it is `age` frames after it opened
+
+pub fn title(age: int) {
+    // MOTHERLOAD, as frames of `Sprite::Letter`
+    const LOGO = [0, 1, 2, 3, 4, 5, 6, 1, 7, 8];
+    panel(ivec2(40, 14), ivec2(176, 32), age);
+    for (i, letter) in LOGO.enumerate() {
+        // the letters ride a slow wave, each over its own shadow
+        let wave = (luna::frame().to_float() / 14.0 + i.to_float() * 0.7).sin() * 2.0;
+        let at = ivec2(48 + i * 16, 22 + wave.round().to_int());
+        for lit in [Color::Yellow, Color::Orange, Color::Red] {
+            gfx::remap(lit, Color::Plum);
+        }
+        gfx::sprite(Sprite::Letter.id() + letter, at.add(ivec2(2, 2)), false, false, 2.0);
+        gfx::reset_remap();
+        gfx::sprite(Sprite::Letter.id() + letter, at, false, false, 2.0);
+    }
+
+    panel(ivec2(8, 84), ivec2(240, 56), age);
+    gfx::text_centered("DRILL. SELL. UPGRADE. FIND THE CORE.", 98, Color::Silver);
+    if luna::frame() ~/ 30 % 2 == 0 {
+        gfx::text_centered("PRESS START", 115, Color::Yellow);
+    }
+    gfx::text_centered("BASED ON XGEN'S FLASH CLASSIC", 131, Color::Charcoal);
+}
+
+pub fn shop(run: Run, visit: Visit, age: int) {
+    panel(ivec2(16, 22), ivec2(224, 104), age);
+    gfx::text(visit.station.NAME, ivec2(MENU_LEFT, 29), visit.station.TINT);
+    let cash = f"CASH ${run.cash}";
+    gfx::text(cash, ivec2(MENU_LEFT + MENU_WIDTH - gfx::text_width(cash), 29), Color::Yellow);
+
+    // the bar behind the chosen row slides to it. it lights up for a sale, and shakes its head
+    // at a refusal
+    visit.glide += (visit.cursor.to_float() - visit.glide) * 0.4;
+    let slid = (visit.glide * MENU_ROW.to_float()).round().to_int();
+    let bar = ivec2(MENU_LEFT - 2, MENU_TOP - 1 + slid);
+    let color = Color::Navy;
+    if visit.react > 0 {
+        visit.react -= 1;
+        color = Color::Teal;
+    } else if visit.react < 0 {
+        visit.react += 1;
+        bar.x += if visit.react % 2 == 0 2 else -2;
+    }
+    gfx::fill_rect(bar, ivec2(MENU_WIDTH + 4, MENU_ROW), color);
+
+    for (row, ware) in visit.wares.enumerate() {
+        let at = ivec2(MENU_LEFT, MENU_TOP + row * MENU_ROW);
+        let chosen = row == visit.cursor;
+        stat(ware.icon(), ware.label(), at, if chosen Color::White else Color::Silver);
+        let tag = "--";
+        let color = Color::Slate;
+        if let price? = ware.price(run.pod) {
+            tag = f"${price}";
+            color = if price > run.cash Color::Orange else Color::Lime;
+        }
+        gfx::text(tag, at.add(ivec2(MENU_WIDTH - gfx::text_width(tag), 2)), color);
+    }
+    gfx::text(visit.wares[visit.cursor].perk(), ivec2(MENU_LEFT, 105), Color::Slate);
+    gfx::text("A BUY   B LEAVE", ivec2(MENU_LEFT, MENU_EXIT + 2), Color::Yellow);
+}
+
+/// The row of a shop's menu a spot on the screen is on.
+pub fn shop_row(spot: IVec2, rows: int) -> int? {
+    if spot.x < MENU_LEFT || spot.x >= MENU_LEFT + MENU_WIDTH || spot.y < MENU_TOP {
+        return null;
+    }
+    let row = (spot.y - MENU_TOP) ~/ MENU_ROW;
+    if row < rows row else null
+}
+
+/// Whether a spot on the screen is on the line of a shop's menu that leaves it.
+pub fn shop_exit(spot: IVec2) -> bool {
+    spot.x >= MENU_LEFT && spot.x < MENU_LEFT + MENU_WIDTH && spot.y >= MENU_EXIT
+        && spot.y < MENU_EXIT + MENU_ROW
+}
+
+/// The refinery's board: every mineral with what a load pays, how many loads it has bought, and
+/// where the mineral turns up.
+pub fn prices(run: Run, age: int) {
+    panel(ivec2(16, 22), ivec2(224, 104), age);
+    gfx::text("REFINERY", ivec2(MENU_LEFT, 29), Color::Yellow);
+    // gfx::text("WHAT A LOAD PAYS, AND WHERE IT'S FOUND", ivec2(MENU_LEFT + 40, 29), Color::Slate);
+
+    // cheapest first, in two columns
+    let minerals = for mineral in Mineral::*::new() collect mineral;
+    minerals.sort_by_int(for mineral in minerals collect mineral.VALUE);
+    for (slot, mineral) in minerals.enumerate() {
+        let at = ivec2(MENU_LEFT + slot % 2 * 104, 38 + slot ~/ 2 * 16);
+        let sold = if let loads? = run.tally.ledger[mineral.NAME] f"  x{loads}" else "";
+        let found = if let deepest? = mineral.DEEPEST {
+            f"{mineral.SHALLOWEST}-{deepest} FT"
+        } else {
+            f"PAST {mineral.SHALLOWEST} FT"
+        };
+        mineral.ORE.draw(at);
+        gfx::text(f"{mineral.NAME} ${mineral.VALUE}{sold}", at.add(ivec2(20, 2)), Color::White);
+        gfx::text(found, at.add(ivec2(20, 9)), Color::Silver);
+    }
+
+    gfx::text("A LEAVES", ivec2(MENU_LEFT, MENU_EXIT + 2), Color::Yellow);
+}
+
+pub fn paused(run: Run, age: int) {
+    panel(ivec2(8, 22), ivec2(240, 104), age);
+    gfx::text(f"DEEPEST RUN: {run.deepest} FT.", ivec2(18, 29), Color::Cyan);
+    gfx::text("LEFT / RIGHT / DOWN: MOVE AND DRILL", ivec2(18, 41), Color::White);
+    gfx::text("UP: FLY", ivec2(18, 50), Color::Silver);
+    for (slot, supply) in run.pod.supplies.enumerate() {
+        let key = if let button? = supply.gadget.BUTTON {
+            name(button)
+        } else {
+            "AUTO"
+        };
+        let label = f"{key}  {supply.gadget.NAME} x{supply.count}";
+        stat(supply.gadget.ICON, label, ivec2(18, 68 + slot * 9), Color::White);
+    }
+    gfx::text("PRESS START TO RESUME", ivec2(18, 115), flash(true, Color::Yellow));
+
+    gfx::text("MAP", ivec2(196, 34), Color::Slate);
+    map(run, ivec2(196, 44), 64);
+}
+
+/// The whole mine with its corner at `at`, two pixels to a column and squeezed to `tall` pixels.
+/// It shows what the pod has been close enough to know about.
+fn map(run: Run, at: IVec2, tall: int) {
+    let spot = |cell: IVec2| {
+        let down = (cell.y - SURFACE).max(0) * tall ~/ (ROWS - SURFACE);
+        at.add(ivec2(cell.x * 2, down))
+    };
+    let mark = |cell: IVec2, color: Color| gfx::fill_rect(spot(cell), ivec2(2, 2), color);
+
+    gfx::fill_rect(at, ivec2(COLS * 2, tall), Color::Charcoal);
+    if let flood? = run.flood {
+        let top = spot(ivec2(0, flood.row()));
+        gfx::fill_rect(top, ivec2(COLS * 2, at.y + tall - top.y), Color::Red);
+    }
+    for y in SURFACE..ROWS {
+        for x in COLS {
+            if let color? = run.mine.chart(ivec2(x, y)) {
+                gfx::fill_rect(spot(ivec2(x, y)), ivec2(2, 1), color);
+            }
+        }
+    }
+    for station in STATIONS {
+        let pad = ivec2(station.COLUMN, station.row());
+        gfx::fill_rect(spot(pad), ivec2(PAD * 2, 1), station.TINT);
+    }
+    // control can only place the core once the pod is deep enough to pick up its signal
+    if run.deepest >= 2900 {
+        mark(core(), Color::Cyan);
+    }
+    mark(cell_of(run.pod.pos), flash(true, Color::Yellow));
+}
+
+pub fn wrecked(run: Run, ready: bool, age: int) {
+    panel(ivec2(16, 30), ivec2(224, 88), age);
+    gfx::text_centered("POD LOST.", 40, Color::Orange);
+    if age > BEAT {
+        gfx::text_centered(run.wrecked() ?? "", 54, Color::White);
+    }
+    if age > BEAT * 2 {
+        gfx::text_centered(earnings(run), 68, Color::Silver);
+    }
+    if age > BEAT * 3 {
+        let fee = f"RESPAWN FOR ${run.salvage()}.";
+        gfx::text_centered(fee, 82, Color::Orange);
+    }
+    if ready {
+        let choices = flash(true, Color::Yellow);
+        gfx::text_centered("A: RESPAWN   START: RESTART    B: TITLE SCREEN", 96, choices);
+    }
+}
+
+pub fn won(run: Run, ready: bool, age: int) {
+    panel(ivec2(16, 30), ivec2(224, 88), age);
+    gfx::text_centered("YOU BROUGHT THE CORE HOME.", 40, Color::Cyan);
+    if age > BEAT {
+        gfx::text_centered("3000 FEET DOWN AND BACK.", 54, Color::White);
+    }
+    if age > BEAT * 2 {
+        gfx::text_centered(earnings(run), 66, Color::Silver);
+    }
+    if age > BEAT * 3 {
+        gfx::text_centered(f"{run.tally.lost} PODS LOST.", 78, Color::Silver);
+    }
+    if ready {
+        let choices = flash(true, Color::Yellow);
+        gfx::text_centered("START: RESTART", 90, choices);
+        gfx::text_centered("B: TITLE SCREEN", 98, Color::Slate);
+    }
+}
+
+fn earnings(run: Run) -> str {
+    f"EARNED ${run.tally.earned}   DEEPEST {run.deepest} FT"
+}

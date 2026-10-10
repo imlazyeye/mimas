@@ -8,10 +8,10 @@ const SCALE = 12;
 const PALETTE = IVec2 { x = 148, y = 108 };
 const HEX = "0123456789abcdef";
 const COLORS = [
-    "Black #1a1c2c", "Plum #5d275d", "Red #b13e53", "Orange #ef7d57",
-    "Yellow #ffcd75", "Lime #a7f070", "Green #38b764", "Teal #257179",
-    "Navy #29366f", "Blue #3b5dc9", "Sky #41a6f6", "Cyan #73eff7",
-    "White #f4f4f4", "Silver #94b0c2", "Slate #566c86", "Charcoal #333c57",
+    "Black #1f0e1c", "Plum #3e2137", "Red #9d303b", "Orange #d26471",
+    "Yellow #e4943a", "Lime #c0c741", "Green #647d34", "Teal #34859d",
+    "Navy #584563", "Blue #70377f", "Sky #8c8fae", "Cyan #7ec4c1",
+    "White #f5edba", "Silver #d79b7d", "Slate #9a6348", "Charcoal #17434b",
 ];
 const DIRECTIONS = [
     (Button::Left, -1, 0), (Button::Right, 1, 0),

@@ -1,0 +1,188 @@
+module parts;
+
+use sprites::Sprite;
+
+/// How many tiers a part comes in, counting the one a new pod is built with.
+pub const TIERS = 5;
+
+/// What a pod's parts add up to.
+pub struct Specs {
+    /// How far the drill gets in a frame, which is also the hardest ground it cuts.
+    pub drill: int,
+    /// The fuel the tank holds.
+    pub tank: int,
+    /// The loads of ore the bay holds.
+    pub bay: int,
+    /// The hull when nothing has dented it.
+    pub hull: int,
+    /// The fastest it flies, in pixels a frame.
+    pub speed: float,
+    /// How much the radiator takes off each burn and each rise in heat.
+    pub cooling: int,
+    /// How many loads the magnet pulls out of the cells around one the drill breaks into.
+    pub pull: int,
+}
+
+impl Specs {
+    /// A pod with the first tier of everything, and then what each of its parts does to that.
+    pub fn of(mounts: [Mount]) -> Self {
+        let specs = Self {
+            drill = 1,
+            tank = 6000,
+            bay = 8,
+            hull = 100,
+            speed = 1.45,
+            cooling = 0,
+            pull = 0,
+        };
+        for mount in mounts {
+            mount.part.improve(specs, mount.tier);
+        }
+        specs
+    }
+}
+
+/// A part on the pod, and how many tiers past the first it is.
+pub struct Mount {
+    pub part: Part,
+    pub tier: int,
+}
+
+impl Mount {
+    /// What the next tier costs, or null when this is the last.
+    pub fn price(self) -> int? {
+        const PRICES = [750, 2000, 5000, 20000];
+        if self.tier + 1 < TIERS PRICES[self.tier] else null
+    }
+
+    /// What the part is rated at, and what its next tier would be when there is one.
+    pub fn outlook(self) -> str {
+        let part = self.part;
+        let now = part.rating(Specs::of([self]));
+        if self.price() == null {
+            return now;
+        }
+        f"{now} > {part.rating(Specs::of([Mount { part, tier = self.tier + 1 }]))}"
+    }
+}
+
+/// A piece of the pod the garage can swap for a better one. Every part is its own type.
+pub pact Part {
+    /// What the garage calls it.
+    const NAME: str;
+    /// What the garage says about it.
+    const PERK: str;
+    /// An 8 by 8 picture of it.
+    const ICON: Sprite;
+
+    /// Adds what a tier of this part is worth to a pod's specs.
+    fn improve(self, specs: Specs, tier: int);
+
+    /// How its share of a pod's specs reads on the garage's menu.
+    fn rating(self, specs: Specs) -> str;
+}
+
+pub struct Drill;
+impl Part for Drill {
+    const NAME = "DRILL";
+    const PERK = "STRENGTHENS THE DRILL.";
+    const ICON = Sprite::Bit;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.drill += tier;
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"POWER {specs.drill}"
+    }
+}
+
+pub struct Tank;
+impl Part for Tank {
+    const NAME = "FUEL TANK";
+    const PERK = "EXPANDS FUEL TANK SIZE.";
+    const ICON = Sprite::Fuel;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.tank += 6000 * tier;
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"{specs.tank} FUEL"
+    }
+}
+
+pub struct Bay;
+impl Part for Bay {
+    const NAME = "CARGO BAY";
+    const PERK = "ADDS ROOM FOR EIGHT MORE ORE.";
+    const ICON = Sprite::Crate;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.bay += 8 * tier;
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"{specs.bay} LOADS"
+    }
+}
+
+pub struct Hull;
+impl Part for Hull {
+    const NAME = "HULL";
+    const PERK = "INCREASES THE DEFENSE OF THE HULL.";
+    const ICON = Sprite::Plating;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.hull += 50 * tier;
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"{specs.hull} HULL"
+    }
+}
+
+pub struct Engine;
+impl Part for Engine {
+    const NAME = "ENGINE";
+    const PERK = "IMPROVES FLIGHT SPEED.";
+    const ICON = Sprite::Engine;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.speed += 0.35 * tier.to_float();
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"SPEED {(specs.speed * 100.0).round().to_int()}"
+    }
+}
+
+pub struct Radiator;
+impl Part for Radiator {
+    const NAME = "RADIATOR";
+    const PERK = "REDUCES DAMAGE FROM GAS, MAGMA, AND THE DEEP.";
+    const ICON = Sprite::Radiator;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.cooling += tier;
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"COOLING {specs.cooling}"
+    }
+}
+
+pub struct Magnet;
+impl Part for Magnet {
+    const NAME = "MAGNET";
+    const PERK = "EXTRACTS NEIGHBORING ORE FROM WHERE YOU DRILL.";
+    const ICON = Sprite::Magnet;
+
+    fn improve(self, specs: Specs, tier: int) {
+        specs.pull += tier;
+    }
+
+    fn rating(self, specs: Specs) -> str {
+        f"PULLS {specs.pull}"
+    }
+}
