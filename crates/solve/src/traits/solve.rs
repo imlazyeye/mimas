@@ -318,6 +318,7 @@ impl Solve for Access {
                             // every impl declares its own value, and the receiver picks one at
                             // runtime the way it picks a method
                             let member = solver.pact_members.get(&(pid, name.clone())).copied();
+                            let ty = solver.instantiate_pact_ty(&ty, &lhs);
                             solver.note(right.as_ident().unwrap(), ty.clone(), member);
                             ty
                         } else if let Some((pid, header)) = fun {
@@ -531,7 +532,8 @@ impl Solve for Access {
                 };
                 let pact = &solver.pacts[pid];
                 let ty = if let Some(ty) = pact.constants.get(&right.lexeme) {
-                    array!(ty.clone())
+                    let ty = ty.clone();
+                    array!(solver.instantiate_pact_ty(&ty, &head))
                 } else if let Some((header, _)) = pact.functions.get(&right.lexeme) {
                     let mut header = header.clone();
                     let why = if header.is_method {
@@ -1407,21 +1409,22 @@ impl Solve for Impl {
                 None
             }
         }) {
-            let mut ty = solver.solve_const(con, id)?;
+            let mut ty = solver.solve_const(id)?;
 
             if let Some((pact, _)) = &mut pact {
-                let mut pact_ty =
-                    pact.constants
-                        .swap_remove(&con.left.lexeme)
-                        .ok_or_else(|| {
-                            miette::Error::from(PactConstNotFound {
-                                src: solver.src(con.left.location),
-                                at: con.left.location.into(),
-                                name: con.left.lexeme.clone(),
-                                pact: pact.name.clone(),
-                            })
-                        })?;
+                let pact_ty = pact
+                    .constants
+                    .swap_remove(&con.left.lexeme)
+                    .ok_or_else(|| {
+                        miette::Error::from(PactConstNotFound {
+                            src: solver.src(con.left.location),
+                            at: con.left.location.into(),
+                            name: con.left.lexeme.clone(),
+                            pact: pact.name.clone(),
+                        })
+                    })?;
 
+                let mut pact_ty = solver.instantiate_pact_ty(&pact_ty, &Ty::Adt(aid));
                 ty.fulfill_ty(&mut pact_ty, solver)
                     .map_err(|e| e.into_type_mismatch(solver, con.left.location))?;
             }
@@ -1482,16 +1485,19 @@ impl Solve for Impl {
         result?;
         solver.ribs.pop();
 
-        if let Some((pact, _)) = pact {
-            // anything left in the cloned pact is unimplemented, except functions carrying a
-            // default body, which the impl may legally omit (the dispatch table was filled at
-            // hoist).
+        if let Some((pact, pid)) = pact {
+            // anything left in the cloned pact is unimplemented, except what carries a default,
+            // which the impl may legally omit (hoist grafted it onto the adt).
             let missing: Vec<String> = pact
                 .functions
                 .iter()
                 .filter(|(_, (_, default))| default.is_none())
-                .map(|(name, _)| name.clone())
-                .chain(pact.constants.keys().cloned())
+                .map(|(name, _)| name)
+                .chain(pact.constants.keys().filter(|&name| {
+                    let member = solver.pact_members[&(pid, name.clone())];
+                    !solver.decs[member].kind.is_constant()
+                }))
+                .cloned()
                 .collect();
             if !missing.is_empty() {
                 Err(PactImplIncomplete {

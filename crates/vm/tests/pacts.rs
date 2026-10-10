@@ -26,6 +26,37 @@ test_vm!(
 );
 
 test_vm!(
+    pact_const_initializer_uses_requirement,
+    "pact Kind { fn tag(self) -> int; }
+     struct A;
+     impl Kind for A { fn tag(self) -> int { 7 } }
+     pact Items {
+         const XS: [Kind];
+         const PAIR: (int, Kind);
+         const MAP: ~{Kind};
+         const NONE: int?;
+         const OWN: Self;
+     }
+     const EARLY = Bag::XS;
+     struct Bag;
+     impl Items for Bag {
+         const XS = [A];
+         const PAIR = (2, A);
+         const MAP = ~{ item = A };
+         const NONE = null;
+         const OWN = Bag;
+     }
+     fn own(items: Items) -> Items { items.OWN }",
+    "Bag::XS[0].tag()" => Int(7),
+    "Bag::PAIR.1.tag()" => Int(7),
+    "Bag::MAP[\"item\"]!.tag()" => Int(7),
+    "Bag::NONE == null" => Bool(true),
+    "EARLY[0].tag()" => Int(7),
+    "own(Bag).XS[0].tag()" => Int(7),
+    "Items::*::OWN[0].PAIR.0" => Int(2),
+);
+
+test_vm!(
     pact_const_dispatch,
     r#"pact Named {
          const KIND: str;
@@ -628,4 +659,97 @@ test_vm!(
         main => "let hit = wand::held().hit(things::Thing { hp = 10 });
                  let TEST_VALUE = hit!.hp;",
     } => Int(7),
+);
+
+test_vm!(
+    pact_const_default,
+    "pact Weapon {
+         const NAME: str;
+         const LEVELS: int = 8;
+         const EVOLVED: bool = false;
+     }
+     struct Wand;
+     impl Weapon for Wand {
+         const NAME = \"wand\";
+     }
+     struct Axe;
+     impl Weapon for Axe {
+         const NAME = \"axe\";
+         const LEVELS = 3;
+         const EVOLVED = true;
+     }
+     const NEXT = Wand::LEVELS + 1;
+     fn levels(weapon: Weapon) -> int { weapon.LEVELS }
+     fn evolved(weapon: Weapon) -> bool { weapon.EVOLVED }
+     let all = Weapon::*::LEVELS;",
+    "Wand::LEVELS" => Int(8),
+    "Axe::LEVELS" => Int(3),
+    "Wand::EVOLVED" => Bool(false),
+    "Wand.LEVELS" => Int(8),
+    "NEXT" => Int(9),
+    "levels(Wand)" => Int(8),
+    "levels(Axe)" => Int(3),
+    "evolved(Wand)" => Bool(false),
+    "evolved(Axe)" => Bool(true),
+    "all[0] + all[1]" => Int(11),
+);
+
+test_vm!(
+    pact_const_default_collection,
+    "pact Weapon {
+         const TAGS: [str] = [\"plain\"];
+         const REACH: (int, int) = (1, 2);
+     }
+     struct Wand;
+     impl Weapon for Wand { }
+     struct Axe;
+     impl Weapon for Axe {
+         const TAGS = [\"sharp\", \"heavy\"];
+     }
+     fn tags(weapon: Weapon) -> [str] { weapon.TAGS }",
+    "tags(Wand)[0]" => str!("plain"),
+    "tags(Axe)[1]" => str!("heavy"),
+    "Axe::REACH.1" => Int(2),
+);
+
+test_vm!(
+    pact_const_default_self_is_instantiated,
+    "pact P {
+         const NONE: Self? = null;
+         const EMPTY: [Self] = [];
+         const NESTED: (Self?, [Self]) = (null, []);
+         const VALUES: [Self?] = [null];
+         fn none(self) -> Self? { self.NONE }
+         fn empty(self) -> [Self] { self.EMPTY }
+     }
+     struct A;
+     impl P for A {}
+     struct B;
+     impl P for B {
+         const NONE = B;
+         const EMPTY = [B];
+         const NESTED = (B, [B]);
+         const VALUES = [B];
+     }
+     struct C;
+     impl P for C {}
+     impl A { fn inherited(self) -> [Self] { Self::EMPTY } }
+     fn nested(p: P) -> (P?, [P]) { p.NESTED }
+     let a: [A?] = A::VALUES;
+     a[0] = A;",
+    "A::NONE == null" => Bool(true),
+    "A.none() == null" => Bool(true),
+    "A.empty() == []" => Bool(true),
+    "A.inherited() == []" => Bool(true),
+    "B::NONE == B" => Bool(true),
+    "B::EMPTY[0] == B" => Bool(true),
+    "C::NONE == null" => Bool(true),
+    "C::EMPTY == []" => Bool(true),
+    "nested(B).0 == B" => Bool(true),
+    "nested(B).1[0] == B" => Bool(true),
+    "P::*::NONE[0] == null" => Bool(true),
+    "P::*::EMPTY[1][0] == B" => Bool(true),
+    "a[0] == A" => Bool(true),
+    "A::VALUES[0] == null" => Bool(true),
+    "C::VALUES[0] == null" => Bool(true),
 );

@@ -16,6 +16,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - `int::random`, `float::random`, `bool::random`, `array.shuffle` and `array.choose` draw from a `library::Random` fixture, which a host can seed with `vm.fixture::<Random>().seed(n)` so a script gets the same numbers on every run.
 - `name @ pattern` binds the whole matched value alongside the pattern's own bindings. Over a variant pattern the binding has the variant's type (`s @ Shape::Circle(_)` makes `s.0` reachable), which is how a match arm changes a variant's fields in place. See [Patterns](https://mim.as/reference/control-flow/match.html#patterns).
 - The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
+- Pact constants can provide compile-time defaults (`const LEVELS: int = 8;`). Impls inherit a default unless they override it, with `Self` specialized for each implementer. See [Constants](https://mim.as/reference/pacts.html#constants).
 
 ### Changed
 
@@ -58,6 +59,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 - A braced `use` that mixed a type or pact with a function or constant of the same module (`use module::{Pact, foo};`) could leave the type out of scope for the file's signatures and impls. A signature naming it reported an undefined variable, and an `impl Pact for ..` was dropped without an error, so the type didn't count as implementing the pact.
 - Imported types or pacts, and pacts declared later in a module, could fail to resolve in pact signatures. Pact signatures now resolve imported names and forward pact references.
 - Nested struct, enum, pact, and impl declarations now produce compile errors instead of being accepted or silently dropped.
+- An impl's pact constant could have the wrong type (`const NAME = 4;` for a pact's `const NAME: str;`). Impl constants are now checked against the pact declaration, and an unannotated initializer takes its expected type from the pact, including collection literals and `null`.
 
 ## [0.3.0] - 2026-09-26
 

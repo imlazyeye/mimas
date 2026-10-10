@@ -387,6 +387,102 @@ test_fail!(
 );
 
 test_fail!(
+    pact_impl_const_wrong_type,
+    "pact Named { const NAME: str; }
+     struct Dog { legs: int }
+     impl Named for Dog { const NAME = 4; }" => "mismatched types",
+    "pact Named { const NAME: str; }
+     struct Dog { legs: int }
+     impl Named for Dog { const NAME: int = 4; }" => "mismatched types",
+);
+
+test_ty!(
+    pact_const_initializer_uses_requirement,
+    "pact Kind { fn tag(self) -> int; }
+     struct A;
+     impl Kind for A { fn tag(self) -> int { 1 } }
+     pact Items {
+         const XS: [Kind];
+         const PAIR: (int, Kind);
+         const MAP: ~{Kind};
+         const NONE: int?;
+         const OWN: Self;
+         const OWNS: [Self];
+     }
+     const EARLY = Bag::XS;
+     struct Bag;
+     impl Items for Bag {
+         const XS = [A];
+         const PAIR = (1, A);
+         const MAP = ~{ item = A };
+         const NONE = null;
+         const OWN = Bag;
+         const OWNS = [Bag];
+     }
+     struct Other;
+     impl Items for Other {
+         const XS = [A];
+         const PAIR = (2, A);
+         const MAP = ~{ item = A };
+         const NONE = 3;
+         const OWN = Other;
+         const OWNS = [Other];
+     }
+     fn own(items: Items) -> Items { items.OWN }
+     fn owns(items: Items) -> [Items] { items.OWNS }",
+    "Bag::XS" => array!(query!(Kind)),
+    "Bag::PAIR" => tuple!(Int, query!(Kind)),
+    "Bag::MAP" => dictionary!(query!(Kind)),
+    "Bag::NONE" => option!(Int),
+    "Bag::OWN" => query!(Bag),
+    "Bag::OWNS" => array!(query!(Bag)),
+    "Other::OWN" => query!(Other),
+    "Other::OWNS" => array!(query!(Other)),
+    "own(Bag)" => query!(Items),
+    "owns(Bag)" => array!(query!(Items)),
+    "Items::*::OWN" => array!(query!(Items)),
+    "Items::*::OWNS" => array!(array!(query!(Items))),
+    "EARLY" => array!(query!(Kind)),
+);
+
+test_multi_file!(
+    pact_const_requirement_precedes_cross_module_evaluation,
+    kind => "module @;
+             pub pact Kind { fn tag(self) -> int; }
+             pub struct A;
+             impl Kind for A { pub fn tag(self) -> int { 1 } }",
+    copy => "module @; pub const XS = items::Bag::XS;",
+    items => "module @;
+              pub pact Items { const XS: [kind::Kind]; }
+              pub struct Bag;
+              impl Items for Bag { pub const XS = [kind::A]; }";
+    "copy::XS[0].tag()" => Int,
+);
+
+test_fail!(
+    pact_const_requirement_preserves_collection_invariance,
+    "pact Kind {} struct A; impl Kind for A {}
+     const NARROW = [A];
+     pact Items { const XS: [Kind]; }
+     struct Bag; impl Items for Bag { const XS = NARROW; }" => "mismatched types",
+    "pact Kind {} struct Rock;
+     pact Items { const XS: [Kind]; }
+     struct Bag; impl Items for Bag { const XS = [Rock]; }" => "mismatched types",
+    "pact Items { const OWN: Self; }
+     struct Bag; struct Other;
+     impl Items for Bag { const OWN = Other; }
+     impl Items for Other { const OWN = Other; }" => "mismatched types",
+);
+
+test_success!(
+    pact_const_explicit_annotation_can_stay_concrete,
+    "pact Kind {} struct A; impl Kind for A {}
+     pact Items { const ITEM: Kind; }
+     struct Bag; impl Items for Bag { const ITEM: A = A; }
+     let item: A = Bag::ITEM;"
+);
+
+test_fail!(
     pact_impl_const_missing,
     "pact Named { const NAME: str; }
      struct Dog { legs: int }
@@ -1121,4 +1217,127 @@ test_multi_file_fail!(
                pub struct Thing {
                    pub x: int,
                }";
+);
+
+test_ty!(
+    pact_const_default_inherited,
+    "pact Weapon {
+         const NAME: str;
+         const LEVELS: int = 8;
+         const EVOLVED: bool = false;
+     }
+     struct Wand;
+     impl Weapon for Wand {
+         const NAME = \"wand\";
+     }
+     const NEXT = Wand::LEVELS + 1;
+     fn levels(weapon: Weapon) -> int { weapon.LEVELS }",
+    "Wand::EVOLVED" => Bool,
+    "Wand::LEVELS" => Int,
+    "Wand.LEVELS" => Int,
+    "NEXT" => Int,
+    "levels(Wand)" => Int,
+    "Weapon::*::LEVELS" => array!(Int),
+);
+
+test_ty!(
+    pact_const_default_overridden,
+    "pact Weapon {
+         const LEVELS: int = 8;
+         const TAGS: [str] = [];
+     }
+     struct Wand;
+     impl Weapon for Wand {
+         const LEVELS = 3;
+         const TAGS = [\"magic\"];
+     }
+     const NEXT = Wand::LEVELS + 1;",
+    "Wand::LEVELS" => Int,
+    "Wand::TAGS" => array!(Str),
+    "NEXT" => Int,
+);
+
+test_ty!(
+    pact_const_default_self_is_instantiated,
+    "pact P {
+         const NONE: Self? = null;
+         const EMPTY: [Self] = [];
+         const NESTED: (Self?, [Self]) = (null, []);
+         const VALUES: [Self?] = [null];
+         fn none(self) -> Self? { self.NONE }
+         fn empty(self) -> [Self] { self.EMPTY }
+     }
+     struct A;
+     impl P for A {}
+     struct B;
+     impl P for B {
+         const NONE = B;
+         const EMPTY = [B];
+         const NESTED = (B, [B]);
+         const VALUES = [B];
+     }
+     struct C;
+     impl P for C {}
+     impl A {
+         fn inherited(self) -> [Self] { Self::EMPTY }
+     }
+     fn empty(p: P) -> [P] { p.EMPTY }
+     fn nested(p: P) -> (P?, [P]) { p.NESTED }",
+    "A::NONE" => option!(query!(A)),
+    "A.NONE" => option!(query!(A)),
+    "A::EMPTY" => array!(query!(A)),
+    "A::NESTED" => tuple!(option!(query!(A)), array!(query!(A))),
+    "A::VALUES" => array!(option!(query!(A))),
+    "A.none()" => option!(query!(A)),
+    "A.empty()" => array!(query!(A)),
+    "A.inherited()" => array!(query!(A)),
+    "B::NONE" => option!(query!(B)),
+    "B::EMPTY" => array!(query!(B)),
+    "C::NONE" => option!(query!(C)),
+    "C::EMPTY" => array!(query!(C)),
+    "empty(A)" => array!(query!(P)),
+    "nested(B)" => tuple!(option!(query!(P)), array!(query!(P))),
+    "P::*::NONE" => array!(option!(query!(P))),
+    "P::*::EMPTY" => array!(array!(query!(P))),
+);
+
+test_fail!(
+    pact_const_default_self_override_needs_its_own_type,
+    "pact P { const NONE: Self? = null; }
+     struct A; impl P for A {}
+     struct B; impl P for B { const NONE = A; }" => "mismatched types",
+);
+
+test_fail!(
+    pact_const_default_wrong_type,
+    "pact Weapon { const LEVELS: int = \"eight\"; }" => "mismatched types",
+    "pact Weapon { const LEVELS: int = 8; }
+     struct Wand;
+     impl Weapon for Wand { const LEVELS = \"three\"; }" => "mismatched types",
+);
+
+test_fail!(
+    pact_const_default_not_constant,
+    "enum Tier { Low, High }
+     pact Weapon { const TIER: Tier = Tier::Low; }" => "non-constant default value",
+    "struct Point { x: int }
+     pact Weapon { const AT: Point = Point { x = 0 }; }" => "non-constant default value",
+);
+
+test_fail!(
+    pact_const_without_default_still_required,
+    "pact Weapon {
+         const NAME: str;
+         const LEVELS: int = 8;
+     }
+     struct Wand;
+     impl Weapon for Wand { }" => "`Wand` does not fully fulfill its pact `Weapon`",
+);
+
+test_fail!(
+    pact_const_default_collides_with_a_member,
+    "pact Weapon { const LEVELS: int = 8; }
+     struct Wand;
+     impl Wand { const LEVELS = 3; }
+     impl Weapon for Wand { }"
 );

@@ -795,8 +795,9 @@ pub struct InvalidIterTarget {
 pub struct NonConstDefault {
     #[source_code]
     pub src: NamedSource<Arc<str>>,
-    #[label("parameter defaults must be knowable at compile time")]
+    #[label("{what} defaults must be knowable at compile time")]
     pub at: SourceSpan,
+    pub what: &'static str,
 }
 
 #[derive(Error, Debug, Diagnostic)]

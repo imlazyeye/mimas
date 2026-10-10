@@ -77,6 +77,8 @@ test_ok!(
     valid_pact_items,
     "pact Foo { fn bar() -> (); }",
     "pact Foo { const BAR: int; }",
+    "pact Foo { const BAR: int = 0; }",
+    "pact Foo { const BAR: [int] = [1, 2]; const BAZ: str; }",
     "pact Foo { fn bar() { 0 } }"
 );
 test_fail!(
@@ -84,10 +86,15 @@ test_fail!(
     "pact Foo { let x = 1; }",
     "pact Foo { struct S; }"
 );
-test_fail!(pact_const_annotation_required, "pact Foo { const BAR; }");
 test_fail!(
-    pact_const_with_default_rejected,
-    "pact Foo { const BAR: int = 0; }"
+    pact_const_annotation_required,
+    "pact Foo { const BAR; }",
+    "pact Foo { const BAR = 0; }"
+);
+test_fail!(
+    pact_const_default_needs_a_value,
+    "pact Foo { const BAR: int = ; }",
+    "pact Foo { const BAR: int = 0 }"
 );
 test_fail!(
     pact_sig_default_param_rejected,

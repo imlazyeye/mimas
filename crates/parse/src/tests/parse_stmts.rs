@@ -693,6 +693,22 @@ stmt_test!(
         vec![PactItem::Const {
             name: ident!("FOO"),
             annotation: Annotation::Kw(TyKw::Int),
+            default: None,
+            location: shared::Location::default(),
+        }]
+    )
+    .into_item()
+);
+
+stmt_test!(
+    pact_const_default,
+    "pact Foo { const FOO: int = 1; }",
+    Pact::new(
+        ident!("Foo"),
+        vec![PactItem::Const {
+            name: ident!("FOO"),
+            annotation: Annotation::Kw(TyKw::Int),
+            default: Some(int!(1)),
             location: shared::Location::default(),
         }]
     )
@@ -708,6 +724,7 @@ stmt_test!(
             PactItem::Const {
                 name: ident!("ID"),
                 annotation: Annotation::Kw(TyKw::Int),
+                default: None,
                 location: shared::Location::default(),
             },
             PactItem::Fn {

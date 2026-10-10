@@ -43,11 +43,11 @@ impl std::fmt::Display for Pact {
 
 #[derive(Debug, Clone)]
 pub enum PactItem {
-    /// A constant signature: `const NAME: T;`. Pacts cannot declare default values for constants
-    /// (an `impl` block must always supply one).
+    /// A constant signature: `const NAME: T;` or, with a default value, `const NAME: T = value;`.
     Const {
         name: Ident,
         annotation: Annotation,
+        default: Option<Expr>,
         location: Location,
     },
     /// A method signature: `fn name(params) -> ret;` or, with a default body, `fn name(params) ->
@@ -76,14 +76,18 @@ impl PartialEq for PactItem {
         match (self, other) {
             (
                 PactItem::Const {
-                    name, annotation, ..
+                    name,
+                    annotation,
+                    default,
+                    ..
                 },
                 PactItem::Const {
                     name: other_name,
                     annotation: other_annotation,
+                    default: other_default,
                     ..
                 },
-            ) => (name, annotation) == (other_name, other_annotation),
+            ) => (name, annotation, default) == (other_name, other_annotation, other_default),
             (
                 PactItem::Fn {
                     name,
@@ -118,8 +122,14 @@ impl std::fmt::Display for PactItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PactItem::Const {
-                name, annotation, ..
-            } => f.pad(&format!("const {}: {};", name, annotation)),
+                name,
+                annotation,
+                default,
+                ..
+            } => match default {
+                Some(value) => f.pad(&format!("const {}: {} = {};", name, annotation, value)),
+                None => f.pad(&format!("const {}: {};", name, annotation)),
+            },
             PactItem::Fn {
                 name,
                 parameters,

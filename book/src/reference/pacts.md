@@ -80,10 +80,12 @@ Read that way it's no longer a compile-time value, so it can't be used to define
 
 ## Default implementations
 
-A pact method can ship with a default body, which an implementer may use as-is or override.
+A pact method can ship with a default body for functions, which an implementer may use as-is or override. The same is true for constants.
 
 ```mimas
 pact Greet {
+    const DEFAULT_GREETING: str = "hello";
+
     fn name(self) -> str;
 
     fn hello(self) -> str {
@@ -98,6 +100,7 @@ impl Greet for Dog {
 }
 
 print(Dog { tag = "rex" }.hello()); // "hi, rex"
+print(Dog::DEFAULT_GREETING); // "hello" (inherited from the pact)
 ```
 
 A default body can call the pact's other methods through `self`, including ones the implementer supplies. An impl that defines the method itself overrides the default.
