@@ -90,6 +90,23 @@ test_vm!(
 );
 
 test_vm!(
+    returned_closure_infers_parameter_through_if,
+    "fn choose(add: bool) -> (int) -> int {
+         if add { |n| n + 1 } else { |n| n - 1 }
+     }",
+    "choose(true)(4)" => Int(5),
+    "choose(false)(4)" => Int(3),
+);
+
+test_vm!(
+    unit_result_callback_runs,
+    "fn accept(f: () -> ()!) { f(); }
+     let calls = [0];
+     accept(|| { calls[0] += 1; });",
+    "calls[0]" => Int(1),
+);
+
+test_vm!(
     closure_capture_int,
     "let x = 10;
      let add_x = |y: int| -> int { x + y };",

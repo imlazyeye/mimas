@@ -126,6 +126,36 @@ test_ty!(for_in_int, "for x in 5 { collect x }" => array!(Int));
 test_ty!(for_in_break, "for x in [] { break; }" => Unit);
 test_ty!(for_in_break_unit, "for x in [] { break (); }" => Unit);
 test_ty!(for_in_break_value, "for x in [] { break 0; }" => option!(Int));
+
+test_success!(
+    contextual_loop_result_wrappers,
+    "fn find_for() -> int?! { for i in 3 { break i; } }
+     fn find_while() -> int?! { while true { break 1; } }"
+);
+
+test_success!(
+    collecting_loop_accepts_unit_break,
+    "let xs: [int] = for i in 3 {
+         if i == 2 { break (); }
+         collect i;
+     };"
+);
+
+test_success!(
+    break_literal_uses_loop_context,
+    "let xs: [int?] = loop { break [1]; };"
+);
+
+test_success!(
+    collect_literal_uses_element_context,
+    "let xs: [[int?]] = while true collect [1];"
+);
+
+test_fail!(
+    break_does_not_widen_existing_collection,
+    "let xs = [1];
+     let wider: [int?] = loop { break xs; };" => "mismatched types",
+);
 test_ty!(for_in_dict, "for (x, y) in ~{ foo = 10 } { break y; }" => option!(Int));
 test_ty!(
     for_in_break_option,
@@ -629,4 +659,40 @@ test_success!(
      impl P for B {}
      fn touch(xs) { let x = xs[0]; }
      touch([A, B]);"
+);
+
+test_success!(
+    literal_context_through_if,
+    "let xs: [int?] = if true { [1] } else { [2] };"
+);
+
+test_success!(
+    literal_context_through_match,
+    "let xs: [int?] = match 1 { 0 => [], _ => [1] };"
+);
+
+test_success!(
+    literal_context_through_block_and_grouping,
+    "let xs: [int?] = { let n = 1; ([n]) };"
+);
+
+test_success!(
+    literal_context_through_argument_and_field,
+    "fn take(xs: [int?]) {}
+     struct Holder { xs: [int?] }
+     take(if true { [1] } else { [] });
+     let holder = Holder { xs = { [1] } };"
+);
+
+test_success!(
+    returned_literal_passes_context_to_nested_members,
+    "fn pairs() -> [(int?, int)] { [(1, 2)] }"
+);
+
+test_success!(
+    early_return_literal_uses_return_context,
+    "fn pair(found: bool) -> (int?, int)? {
+         if found { return (1, 2); }
+         null
+     }"
 );

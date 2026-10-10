@@ -1341,3 +1341,53 @@ test_fail!(
      impl Wand { const LEVELS = 3; }
      impl Weapon for Wand { }"
 );
+
+// Each literal shape needs to choose pact members while it is being constructed.
+test_success!(
+    returned_literals_use_pact_member_types,
+    "pact Shape {}
+     struct Circle;
+     impl Shape for Circle {}
+
+     fn array() -> [Shape] { [Circle] }
+     fn tuple() -> (int, Shape)? { (1, Circle) }
+     fn dict() -> ~{Shape}! { ~{ first = Circle } }"
+);
+
+test_success!(
+    pact_default_returns_contextual_literal,
+    "pact Shape {
+         fn children(self) -> [Shape] { [Circle] }
+     }
+     struct Circle;
+     impl Shape for Circle {}"
+);
+
+test_success!(
+    collect_uses_expected_pact_element,
+    "pact Shape {}
+     struct Circle;
+     impl Shape for Circle {}
+
+     fn shapes() -> [Shape] { for i in 3 collect Circle }"
+);
+
+test_fail!(
+    returned_collection_keeps_its_original_member_type,
+    "pact Shape {}
+     struct Circle;
+     impl Shape for Circle {}
+
+     fn shapes() -> [Shape] {
+         let circles = [Circle];
+         circles
+     }" => "mismatched types",
+);
+
+test_fail!(
+    returned_literal_requires_pact_implementation,
+    "pact Shape {}
+     struct Rock;
+
+     fn pair() -> (int, Shape)? { (1, Rock) }" => "mismatched types",
+);

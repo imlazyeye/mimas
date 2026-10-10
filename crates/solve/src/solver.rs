@@ -33,7 +33,6 @@ pub struct Solver {
     pub(crate) node_to_vid: IndexMap<NodeId, Vid>,
     pub(crate) node_decs: IndexMap<NodeId, DecId>,
     pub(crate) closure_captures: IndexMap<NodeId, IndexSet<DecId>>,
-    pub(crate) expected_closures: IndexMap<NodeId, Vec<FnParam>>,
     pub(crate) subs: IdVec<Vid, Option<Ty>>,
     node_visits: HashSet<NodeId>,
     library: HashMap<String, AdtId>,
@@ -66,7 +65,6 @@ impl Solver {
             node_to_vid: IndexMap::new(),
             node_decs: IndexMap::new(),
             closure_captures: IndexMap::new(),
-            expected_closures: IndexMap::new(),
             node_visits: HashSet::new(),
             ribs: Ribs::default(),
             loop_stack: vec![],
@@ -407,8 +405,8 @@ impl Solver {
                 return Ok(());
             }
             let ty = match item.kind() {
-                ItemKind::Struct(s) => s.solve(item.id(), item.location(), self)?,
-                ItemKind::Enum(e) => e.solve(item.id(), item.location(), self)?,
+                ItemKind::Struct(s) => s.solve(item.id(), item.location(), None, self)?,
+                ItemKind::Enum(e) => e.solve(item.id(), item.location(), None, self)?,
                 _ => unreachable!(),
             };
             let vid = self.node_vid(item.id());
@@ -1790,10 +1788,14 @@ impl Solver {
                 | ItemKind::Impl(_) => {
                     if self.touch_node(item.id()) {
                         let ty = match item.kind() {
-                            ItemKind::Function(f) => f.solve(item.id(), item.location(), self)?,
-                            ItemKind::Struct(s) => s.solve(item.id(), item.location(), self)?,
-                            ItemKind::Enum(e) => e.solve(item.id(), item.location(), self)?,
-                            ItemKind::Impl(i) => i.solve(item.id(), item.location(), self)?,
+                            ItemKind::Function(f) => {
+                                f.solve(item.id(), item.location(), None, self)?
+                            }
+                            ItemKind::Struct(s) => {
+                                s.solve(item.id(), item.location(), None, self)?
+                            }
+                            ItemKind::Enum(e) => e.solve(item.id(), item.location(), None, self)?,
+                            ItemKind::Impl(i) => i.solve(item.id(), item.location(), None, self)?,
                             // narrowed by the outer arm -- inner exhaustiveness can't see it
                             _ => unreachable!("outer match restricts to Function/Struct/Enum/Impl"),
                         };
@@ -2097,12 +2099,15 @@ impl Solver {
             expected_ty: expected.clone(),
         });
         let outer_loops = std::mem::take(&mut self.loop_stack);
-        let result = body.query(self);
+        let result = body.query_with(Some(expected.clone()), self);
         self.loop_stack = outer_loops;
         self.fn_stack.pop();
         let found = result?;
         let expected = expected.normalized(self);
-        if found == Ty::Unit && !matches!(expected, Ty::Unit | Ty::Vid(_)) {
+        let checked = body.fulfill_ty(expected.clone(), self);
+        // A unit body is only missing a return if unit cannot fulfill the destination (e.g.
+        // `int?`). In particular, unit can still fulfill `()!` or `()?`.
+        if checked.is_err() && found == Ty::Unit {
             return Err(crate::errors::NotAllPathsReturn {
                 src: self.src(body.location()),
                 at: body.location().into(),
@@ -2110,24 +2115,21 @@ impl Solver {
             }
             .into());
         }
-        body.fulfill_ty(expected, self)
+        checked
     }
 
-    pub(crate) fn run_loop_body(&mut self, body: &Expr) -> Result<LoopRun> {
+    pub(crate) fn run_loop_body(&mut self, body: &Expr, expected: Option<Ty>) -> Result<LoopRun> {
         self.loop_stack.push(LoopRun {
+            expected_ty: expected,
             collect_ty: None,
             break_ty: None,
         });
-        body.fulfill_ty(Ty::Unit, self)?;
-        Ok(self
-            .loop_stack
-            .pop()
-            .map(|mut l| {
-                l.break_ty = l.break_ty.map(|v| v.normalized(self));
-                l.collect_ty = l.collect_ty.map(|v| v.normalized(self));
-                l
-            })
-            .unwrap())
+        let result = body.fulfill_ty(Ty::Unit, self);
+        let mut run = self.loop_stack.pop().unwrap();
+        result?;
+        run.break_ty = run.break_ty.map(|ty| ty.normalized(self));
+        run.collect_ty = run.collect_ty.map(|ty| ty.normalized(self));
+        Ok(run)
     }
 
     pub(crate) fn register_loop_ty(
@@ -2168,6 +2170,7 @@ impl Default for Solver {
 
 #[derive(Clone)]
 pub(crate) struct LoopRun {
+    pub expected_ty: Option<Ty>,
     pub collect_ty: Option<Ty>,
     pub break_ty: Option<Ty>,
 }
