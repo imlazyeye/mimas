@@ -2830,15 +2830,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
-dependencies = [
- "ahash",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -3473,12 +3464,11 @@ name = "mimas-parse"
 version = "0.3.0"
 dependencies = [
  "chompy",
- "hashbrown 0.13.2",
  "itertools 0.10.5",
  "miette",
  "mimas-shared",
  "mutants",
- "pretty_assertions",
+ "rustc-hash 2.1.3",
  "thiserror 1.0.69",
 ]
 
@@ -3498,18 +3488,16 @@ dependencies = [
 name = "mimas-solve"
 version = "0.3.0"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.13.2",
  "chompy",
  "colored",
  "indexmap",
  "itertools 0.10.5",
- "lazy_static",
  "miette",
  "mimas-api",
  "mimas-parse",
  "mimas-shared",
  "mutants",
- "pretty_assertions",
  "thiserror 1.0.69",
 ]
 
@@ -3519,9 +3507,7 @@ version = "0.3.0"
 dependencies = [
  "gc-arena",
  "glam",
- "indexmap",
  "inventory",
- "itertools 0.10.5",
  "itoa",
  "miette",
  "mimas-api",

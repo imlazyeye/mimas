@@ -4,64 +4,66 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+This update includes REPL support, a few new language features, as well as a large amount of bug fixes. Additionally, performance has broadly been improved for the VM.
+
 ### Added
 
-- `Pact::*::member` reaches a member on every implementer of a pact and collects the results into an array. An associated function is called once per implementer, and a constant is read from each. See [Reaching every implementer](https://mim.as/reference/pacts.html#reaching-every-implementer).
-- mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). Each input runs on top of the ones before it, and a trailing expression prints with its type.
-- A pact constant can be read through a value that is only known by its pact (`thing.NAME` with `thing: Named`), which picks the value's own impl at runtime the way a method call does. It used to be a compile error.
-- Constants can be enum variants, tuple structs and structs without fields (`const DOT = Shape::Dot;`, `const CIRCLE = Shape::Circle(4);`), as long as what they hold is constant. Constant arrays and tuples can now hold enum variants, structs and dicts, and a constant can be set from another one through a path (`const MINE = shapes::DOT;`). Each read gives its own value, so changing it never changes the constant. See [Enums, structs and collections](https://mim.as/reference/variables.html#enums-structs-and-collections).
-- `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel".
-- `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write.
-- `std::math` has `IVec2` and `IVec3`, vectors with `int` components, and `Vec2.to_ivec2` and `IVec2.to_vec2` to go between the two kinds. `vec2`, `vec3`, `ivec2` and `ivec3` are functions that create each one, so `ivec2(1, 2)` is `IVec2::new(1, 2)`.
-- `int::random`, `float::random`, `bool::random`, `array.shuffle` and `array.choose` draw from a `library::Random` fixture, which a host can seed with `vm.fixture::<Random>().seed(n)` so a script gets the same numbers on every run.
-- `name @ pattern` binds the whole matched value alongside the pattern's own bindings. Over a variant pattern the binding has the variant's type (`s @ Shape::Circle(_)` makes `s.0` reachable), which is how a match arm changes a variant's fields in place. See [Patterns](https://mim.as/reference/control-flow/match.html#patterns).
-- The `fancy` feature of `mimas`, on by default, renders errors with source snippets and colors through miette. If you'd rather have fewer dependencies, turning it off (`default-features = false`) drops 38 crates for faster builds and smaller binaries, and errors print as plain miette diagnostics instead.
-- Pact constants can provide compile-time defaults (`const LEVELS: int = 8;`). Impls inherit a default unless they override it, with `Self` specialized for each implementer. See [Constants](https://mim.as/reference/pacts.html#constants).
+- mimas now has a REPL which can be ran with `mimas repl` or just `mimas`. A demo of this is available on the [home page of the book](https://mim.as). ([#72](https://github.com/imlazyeye/mimas/pull/72))
+- `Pact::*::member` reaches a member on every implementer of a pact and collects the results into an array. See [Reaching every implementer](https://mim.as/reference/pacts.html#reaching-every-implementer). ([#82](https://github.com/imlazyeye/mimas/pull/82))
+- A pact constant can be read through a value that is only known by its pact (`thing.NAME` with `thing: Named`), which picks the value's own impl at runtime the way a method call does. ([#84](https://github.com/imlazyeye/mimas/pull/84))
+- `name @ pattern` binds the whole matched value alongside the pattern's own bindings, allowing mutable access to enums narrowed to their individual variant type. See [Patterns](https://mim.as/reference/control-flow/match.html#patterns). ([#93](https://github.com/imlazyeye/mimas/pull/93))
+- Constants now support enums and structs. See [Enums, structs and collections](https://mim.as/reference/variables.html#enums-structs-and-collections). ([#88](https://github.com/imlazyeye/mimas/pull/88))
+- `Vm::set_fuel` limits how many ops a Vm can run before it faults with "ran out of fuel". ([#74](https://github.com/imlazyeye/mimas/pull/74))
+- `library::sandboxed` installs the standard library without the `fs`, `process` and `sys` modules, for hosts that run scripts they didn't write. ([#77](https://github.com/imlazyeye/mimas/pull/77))
+- `std::math` has `IVec2` and `IVec3`, along with a series of methods matching the `Vec2` and `Vec3` impls. ([#89](https://github.com/imlazyeye/mimas/pull/89))
+- Randomized values now draw from a `library::Random` fixture, which a host can seed with `vm.fixture::<Random>().seed(n)`. ([#90](https://github.com/imlazyeye/mimas/pull/90))
+- Source snippets and coloring on diagnostics can now be disabled by disabling the default feature `fancy` which drops 18 crates if you are seeking to optimize your compile times and build size. ([#67](https://github.com/imlazyeye/mimas/pull/67))
+- Pact constants can provide compile-time defaults (`const LEVELS: int = 8;`). Impls inherit a default unless they override it, with `Self` specialized for each implementer. See [Constants](https://mim.as/reference/pacts.html#constants). ([#97](https://github.com/imlazyeye/mimas/pull/97))
 
 ### Changed
 
-- Reading a constant's contents reuses a value built when the program loads instead of building it at every read. Binding, passing or storing it still gives its own value, and changing that value never changes the constant.
-- Scripts run faster. mimas's benchmarks take 16% to 41% less time, with the biggest gains on function calls, struct field access, array reads and float math.
-- Embedding mimas pulls in fewer crates: 98 instead of 101 with the default features, and 60 with only `export-api`.
-- `print` and `dbg` now run through an `Output` fixture so hosts can redirect them.
-- **Breaking**: `mimas docs` takes the manifest as `--manifest <path>`, which also works with `--mdbook`, instead of a second positional argument.
-- **Breaking**: `ModuleApi::add_described` takes the function's documentation, so a native described at runtime shows up in `mimas docs` like one with a doc comment.
+- Runtime performance has broadly been improved. Benchmarks show a 16-41% reduction in processing time. These gains are most noticable with function calls, struct field access, array reads, float math, and constant usage. ([#67](https://github.com/imlazyeye/mimas/pull/67), [#92](https://github.com/imlazyeye/mimas/pull/92))
+- Reading a constant's contents reuses a value built when the program loads instead of building it at every read. Binding, passing or storing it still gives its own value, and changing that value never changes the constant. ([#92](https://github.com/imlazyeye/mimas/pull/92))
+- `print` and `dbg` now run through an `Output` fixture so hosts can redirect them. ([#72](https://github.com/imlazyeye/mimas/pull/72))
+- **Breaking**: `mimas docs` takes the manifest as `--manifest <path>`, which also works with `--mdbook`, instead of a second positional argument. ([#78](https://github.com/imlazyeye/mimas/pull/78))
+- **Breaking**: `ModuleApi::add_described` takes the function's documentation, so a native described at runtime shows up in `mimas docs` like one with a doc comment. ([#73](https://github.com/imlazyeye/mimas/pull/73))
 
 ### Fixed
 
-- Constants can use forward references in arithmetic, including in local blocks and across modules, even through long dependency chains.
-- Pact names now follow module scope and visibility. A private pact in another module could be found by its bare name without an import.
-- Using a pact name as a value, including inside parentheses or as an argument, is now a compile error instead of crashing the compiler.
-- Struct patterns named through a module path, such as `shapes::Point { x }`, now resolve the struct and count toward match exhaustiveness. The path also checks the struct's visibility.
-- Functions, closures and pact defaults with a non-unit return type now reject paths that finish without returning a value. Returns inside a `while` or `for` loop that may not run, or an argument skipped by an optional call, no longer count as returning on every path.
-- Arrays, dicts and tuples can no longer be passed under a wider element type, such as passing `[int]` as `[int?]`. They share their contents, so the old check allowed writes through one binding to break another's type. Fresh collection literals still accept optional and pact element annotations.
-- Function parameters are checked in the correct direction: a function taking `int` cannot be used as `(int?) -> int`, while one taking `int?` can be used as `(int) -> int`.
-- Native method overload selection now checks that repeated type parameters agree, so a receiver with mixed element types can select the correct overload.
-- An `if` or `match` with a nonreturning arm keeps the other arm's type. Loop breaks and collected values keep their optional type when any value can be `null`, regardless of their order.
-- Nested optional types consistently flatten to one `?`, including when their inner type is resolved through inference.
-- Integer arithmetic in constants now reports overflow and invalid shift counts at compile time. It used to wrap overflowing values or accept shifts of 64 bits or more.
-- Ordering comparisons in constants compare integers exactly. Large integers could compare as equal after being rounded to floats.
-- `&&` and `||` in constants now short-circuit, so `false && (1 ~/ 0 == 1)` and `true || (1 ~/ 0 == 1)` do not evaluate the division.
-- Float constants now match runtime unary `+` and division by zero, and support `~/` and `%`.
-- Some std methods panicked the host on bad arguments rather than raising a runtime error: `array.insert` past the end, `int.clamp` and `float.clamp` with `low` above `high`, `int::random` and `float::random` with an empty range, `array.sum` and `int.abs` overflowing, and `array::new_filled` with a length too large for an array.
-- `array::new_filled` with a negative length is now a runtime error. It used to give an empty array.
-- A value typed as a pact was accepted where a specific implementer was expected, so one struct could be read as another. It's now a type mismatch.
-- The branches of an `if` or `match`, and the values a loop breaks with or collects, can be different types that share a pact. They used to be a type mismatch, even under a pact annotation.
-- `Self` in a type mismatch reads as the type it stands for. Two different types could show as "expected Self but found Self".
-- Calling a pact method with `?.` on an optional pact value (`thing?.name()` with `thing: Named?`) iced the compiler.
-- `==` between two arrays or two tuples gave an array holding each element's comparison instead of a `bool`, and could panic the host when that result was used. It now compares them structurally, as `!=` already did.
-- `!=` between an `int` and a `float` could be `true` when the two were equal (`i != f` with `let i = 1;` and `let f = 1.0;`).
-- A struct named through a module path and used as a value (`let u = lib::Unit;`, or `let make = lib::Pair;` for a tuple struct) iced the compiler.
-- A top-level `const` in a module couldn't use a name its file imported with `use` (`use lib::R; pub const X = R + 1;` reported an undefined variable).
-- A top-level constant holding a struct could fail with a type mismatch when a field was an option or a result. With `x: int?`, `const A = P { x = null };` followed by `const B = P { x = 1 };` was rejected, because constants were checked before the struct's field types were known.
-- A struct or dict as a parameter default (`fn spawn(at: Point = Point { x = 0 })`) iced the compiler. It's now a compile error. A default has to be a number, string, bool, `null`, or an array or tuple of those.
-- A constant set to a comparison of two arrays or tuples compared how they were written, not their values, so `const SAME = [X] == [1];` was `false` with `const X = 1;`. It's now `true`. Setting a constant to a comparison of structs or dicts had the same problem and is now a compile error.
-- A braced `use` that mixed a type or pact with a function or constant of the same module (`use module::{Pact, foo};`) could leave the type out of scope for the file's signatures and impls. A signature naming it reported an undefined variable, and an `impl Pact for ..` was dropped without an error, so the type didn't count as implementing the pact.
-- Imported types or pacts, and pacts declared later in a module, could fail to resolve in pact signatures. Pact signatures now resolve imported names and forward pact references.
-- Nested struct, enum, pact, and impl declarations now produce compile errors instead of being accepted or silently dropped.
-- An impl's pact constant could have the wrong type (`const NAME = 4;` for a pact's `const NAME: str;`). Impl constants are now checked against the pact declaration, and an unannotated initializer takes its expected type from the pact, including collection literals and `null`.
-- Fresh array, dict and tuple literals use the expected element types in function returns, branches, blocks and loop values, just as they do under a `let` annotation. For example, a function returning `[Pact]` can return `[Adt::new()]` or collect pact implementers in a loop. Existing collections keep their original element types.
-- A closure without annotations takes its parameter and return types from its destination, as in `let f: (int) -> int = |n| n + 1;`, where before only a call argument's parameter type was used.
+- Constants are no longer order dependent to reference one another. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Using pact names as a value no longer crashes the compiler. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Struct patterns named through a module path, such as `shapes::Point { x }`, could violate privacy rules. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Functions, closures and pact defaults with a non-unit return type now reject paths that finish without returning a value. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- `return` within a `while` or `for` loop that may not run no longer satisfy all return paths for a function. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Arrays, dicts and tuples can no longer be passed under a wider element type, such as passing `[int]` as `[int?]`, preventing unexpected nulls to appear in collections at runtime. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Function parameters were checked in the wrong direction: a function taking `int` could be used as `(int?) -> int`, while one taking `int?` couldn't be used as `(int) -> int`. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Native method overload selection could pick the wrong overload for a receiver with mixed element types. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- An `if` or `match` with a nonreturning arm could lose the other arm's type depending on the order of its arms. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Loop breaks and collected values could lose their optional type depending on the order of their values. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Nested optional types didn't always flatten to one `?` when their inner type was resolved through inference. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Integer arithmetic in constants wrapped on overflow and accepted shifts of 64 bits or more. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Ordering comparisons in constants could compare large integers as equal. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- `&&` and `||` in constants didn't short-circuit. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Float constants disagreed with runtime on unary `+` (`+-1.2` was `1.2`) and division by zero, and didn't support `~/` or `%`. ([#91](https://github.com/imlazyeye/mimas/pull/91))
+- Some std methods panicked the host on bad arguments rather than raising a runtime error, such as `array.insert`. ([#76](https://github.com/imlazyeye/mimas/pull/76))
+- `array::new_filled` with a negative length gave an empty array rather than raising a runtime error. ([#76](https://github.com/imlazyeye/mimas/pull/76))
+- A value typed as a pact was accepted where a specific implementer was expected. ([#79](https://github.com/imlazyeye/mimas/pull/79))
+- The branches of an `if` or `match`, and the values a loop breaks with or collects, were a type mismatch when they were different types sharing a pact. ([#79](https://github.com/imlazyeye/mimas/pull/79))
+- Type mismatches involving `Self` could read "expected Self but found Self" for two different types. ([#79](https://github.com/imlazyeye/mimas/pull/79))
+- Calling a pact method with `?.` on an optional pact value crashed the compiler. ([#83](https://github.com/imlazyeye/mimas/pull/83))
+- `==` between two arrays or two tuples gave an array of each element's comparison instead of a `bool`. ([#85](https://github.com/imlazyeye/mimas/pull/85))
+- `!=` between an `int` and a `float` could be `true` when the two were equal. ([#85](https://github.com/imlazyeye/mimas/pull/85))
+- A struct named through a module path and used as a value, such as `let u = lib::Unit;`, crashed the compiler. ([#86](https://github.com/imlazyeye/mimas/pull/86))
+- A top-level `const` in a module couldn't use a name its file imported with `use`. ([#87](https://github.com/imlazyeye/mimas/pull/87))
+- A top-level constant holding a struct could fail with a type mismatch when a field was an option or a result. ([#88](https://github.com/imlazyeye/mimas/pull/88))
+- A struct or dict as a parameter default crashed the compiler rather than raising a compile error. ([#88](https://github.com/imlazyeye/mimas/pull/88))
+- A constant comparing two arrays or tuples compared how they were written, not their values, so `[X] == [1]` was `false` with `const X = 1;`. ([#88](https://github.com/imlazyeye/mimas/pull/88))
+- A braced `use` mixing a type or pact with a function or constant, such as `use module::{Pact, foo};`, could leave the type out of scope for the file's signatures and impls. ([#96](https://github.com/imlazyeye/mimas/pull/96))
+- Imported types and pacts, and pacts declared later in a module, could fail to resolve in pact signatures. ([#96](https://github.com/imlazyeye/mimas/pull/96))
+- Nested struct, enum, pact, and impl declarations were accepted or silently dropped rather than raising a compile error. ([#96](https://github.com/imlazyeye/mimas/pull/96))
+- An impl's pact constant could have the wrong type, such as `const NAME = 4;` for a pact's `const NAME: str;`. ([#97](https://github.com/imlazyeye/mimas/pull/97))
+- Array, dict and tuple literals ignored their expected element types in function returns, branches, blocks and loop values. ([#98](https://github.com/imlazyeye/mimas/pull/98))
+- A closure without annotations ignored its destination's types outside of a call argument, such as in `let f: (int) -> int = |n| n + 1;`. ([#98](https://github.com/imlazyeye/mimas/pull/98))
 
 ## [0.3.0] - 2026-09-26
 

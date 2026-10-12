@@ -23,7 +23,7 @@ To embed into your Rust project, add `mimas` as a dependency to your Cargo.toml.
 
 ```toml
 [dependencies]
-mimas = "0.3.0"
+mimas = "0.4.0"
 ```
 
 Compiling and execution is simple. A full guide can be found [here](../extension-with-rust.md)!
