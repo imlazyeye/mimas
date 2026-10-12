@@ -4,6 +4,8 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
 This update includes REPL support, a few new language features, as well as a large amount of bug fixes. Additionally, performance has broadly been improved for the VM.
 
 ### Added
@@ -164,6 +166,7 @@ These are rejected with a clear error rather than misbehaving, and are documente
 - No generics, no async, and dictionary keys must be strings.
 
 <!-- next-release -->
+[0.4.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.4.0
 [0.3.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.3.0
 [0.2.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.2.0
 [0.1.0]: https://github.com/imlazyeye/mimas/releases/tag/v0.1.0

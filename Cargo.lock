@@ -1698,7 +1698,7 @@ dependencies = [
 
 [[package]]
 name = "extension"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mimas",
 ]
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "game-loop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mimas",
 ]
@@ -2428,7 +2428,7 @@ dependencies = [
 
 [[package]]
 name = "mimas"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "mimas-api",
@@ -2445,7 +2445,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mimas-shared",
  "serde",
@@ -2455,7 +2455,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-bevy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy",
  "miette",
@@ -2470,7 +2470,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "backtrace",
  "clap 3.2.25",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-compile"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "colored",
@@ -2509,7 +2509,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-library"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camino",
  "chompy",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-lsp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "gen-lsp-types",
@@ -2550,7 +2550,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2560,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-parse"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "itertools 0.10.5",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-shared"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "indexmap 2.14.0",
@@ -2586,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-solve"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bitflags 2.11.1",
  "chompy",
@@ -2604,7 +2604,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-vm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gc-arena",
  "glam",

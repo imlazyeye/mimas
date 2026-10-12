@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mimas-shared",
  "walkdir",
@@ -2242,7 +2242,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-bevy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy",
  "criterion",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-compile"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "colored",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-library"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camino",
  "chompy",
@@ -2291,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2301,7 +2301,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-parse"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "itertools 0.10.5",
@@ -2314,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-shared"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "indexmap",
@@ -2325,7 +2325,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-solve"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bitflags",
  "chompy",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-vm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gc-arena",
  "glam",

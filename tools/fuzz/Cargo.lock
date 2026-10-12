@@ -18,18 +18,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "ahash"
-version = "0.8.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
-dependencies = [
- "cfg-if",
- "once_cell",
- "version_check",
- "zerocopy",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -67,12 +55,6 @@ checksum = "537beee3be4a18fb023b570f80e3ae28003db9167a751266b259926e25539d50"
 dependencies = [
  "backtrace",
 ]
-
-[[package]]
-name = "bitflags"
-version = "1.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
@@ -249,15 +231,6 @@ checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
 
 [[package]]
 name = "hashbrown"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
-dependencies = [
- "ahash",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
@@ -362,7 +335,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
- "hashbrown 0.17.1",
+ "hashbrown",
 ]
 
 [[package]]
@@ -477,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "mimas"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mimas-api",
  "mimas-compile",
@@ -491,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mimas-shared",
  "serde",
@@ -501,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-compile"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "colored",
@@ -524,7 +497,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-library"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camino",
  "chompy",
@@ -542,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "mimas-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -552,21 +525,20 @@ dependencies = [
 
 [[package]]
 name = "mimas-parse"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
- "hashbrown 0.13.2",
  "itertools",
  "miette",
  "mimas-shared",
  "mutants",
- "pretty_assertions",
+ "rustc-hash",
  "thiserror",
 ]
 
 [[package]]
 name = "mimas-shared"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chompy",
  "indexmap",
@@ -578,32 +550,28 @@ dependencies = [
 
 [[package]]
 name = "mimas-solve"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags",
  "chompy",
  "colored",
  "indexmap",
  "itertools",
- "lazy_static",
  "miette",
  "mimas-api",
  "mimas-parse",
  "mimas-shared",
  "mutants",
- "pretty_assertions",
  "thiserror",
 ]
 
 [[package]]
 name = "mimas-vm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gc-arena",
  "glam",
- "indexmap",
  "inventory",
- "itertools",
  "itoa",
  "miette",
  "mimas-api",
@@ -641,12 +609,6 @@ checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
 dependencies = [
  "memchr",
 ]
-
-[[package]]
-name = "once_cell"
-version = "1.21.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "owo-colors"
@@ -778,7 +740,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
 dependencies = [
- "bitflags 2.13.2",
+ "bitflags",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -1047,12 +1009,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
-name = "version_check"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1201,26 +1157,6 @@ dependencies = [
  "quote",
  "syn 3.0.6",
  "synstructure 0.14.0",
-]
-
-[[package]]
-name = "zerocopy"
-version = "0.8.57"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d35102a9f36d089ccae9e4c6802bc118be4487b80aaffc0ab4e0cf5ce92d2873"
-dependencies = [
- "zerocopy-derive",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.8.57"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "146c01f5ab44258da43cf276c74a2763db2ff3969c9c652c3f2de07041d0b2bc"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
