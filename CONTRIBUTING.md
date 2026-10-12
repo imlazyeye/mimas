@@ -30,6 +30,40 @@ cargo bench                      # runs our benchmarks
 cargo install --path crates/cli  # install the `mimas` binary locally
 ```
 
+## Conventional Commits
+
+Our commit style is built largely from the spec for [Conventional Commits](https://www.conventionalcommits.org/). We apply them equally onto the titles of our pull requests. Don't worry about getting it perfect first try; we tend to squash PRs, so a maintainer will change adjust the name of the new commit if needed.
+
+### Prefixes
+
+- `feat`: A new user-facing feature.
+- `fix`: A fix for any sort of bug or mistake.
+- `refactor`: An adjustment to the codebase to improve legibility, performance, etc.
+- `tools`: Modifications focused on the tools this repo utilizes.
+- `docs`: Edits to the book or the documentation of the crates/standard library.
+- `ci`: Work focused on our GitHub Actions.
+- `test`: Changes and additions to the unit tests.
+- `wip`: Commits that are in an unfinished state. It is okay to include these in your pull requests, but `wip` should never appear on `main`.
+- `chore`: Anything and everything else if the above do not fit.
+
+### Scope
+
+The area of the project this commit is working within, typically the crate itself. These are encouraged but ultimately optional if there is no meaningful scope to add. Scopes go in parenthesis after your prefix but before your `:`.
+
+```
+feat(vm): functions can be called directly by hosts
+docs(std): added more examples to std::math::Vec2
+ci: move `miri` test to only occur on main
+```
+
+### Breaking Changes
+
+Any commit that introduces a breaking change must include a `!` prior to the `:`.
+
+```
+refactor(std)!: moved the `PI` constant out of the `math` module and into `float`
+```
+
 ## Tools
 
 We also have some tools that are useful for development. They are written in `mimas`, so install it first!
