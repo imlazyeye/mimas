@@ -36,7 +36,7 @@ const TESTS = [
 
 /// The machine the published numbers were measured on. Update this whenever the benchmarks are
 /// re-run somewhere else -- both the benchmarks page and the home page legend read it from here.
-const MACHINE = "an AMD Ryzen 7 9800X3D running Linux";
+const MACHINE = "a 2021 M1 Max MacBook Pro";
 
 
 use std::parse::Value;
@@ -155,11 +155,8 @@ for (name, description) in TESTS {
 full.push(f"<p class=\"bench-legend\">{build_legend(LANGUAGES)} -- measured on {MACHINE}. Bars are scaled within each test. Results slower than 5x of the fastest result are faded and not factored into the scaling.</p>");
 inscribe("./book/src/introduction/benchmarks.md", "benchmark", full.join("\n"));
 
-// home page card -- pure-Rust runtimes only. luau is deliberately absent: it's the quickest
-// thing you can embed in Rust but it's a C++ runtime, so it belongs in the benchmarks page's
-// wider comparison rather than in a like-for-like chart.
-let home_langs = ["mimas", "rhai", "rune", "koto", "dyon", "steel", "boa", "rustpython", "fabricator"];
+let home_langs = ["mimas", "luau", "rhai", "rune", "dyon", "steel", "fabricator"];
 let home = [];
 home.extend(build_chart("physics", "struct field access, float math", home_langs, true));
-home.push(f"<p class=\"bench-legend\">Pure-Rust runtimes, measured on {MACHINE}. {build_legend(home_langs)}</p>");
+home.push(f"<p class=\"bench-legend\">Measured on {MACHINE}. {build_legend(home_langs)}</p>");
 inscribe("./book/src/introduction.md", "homepage benchmark", home.join("\n"));
