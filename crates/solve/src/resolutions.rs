@@ -126,7 +126,6 @@ pub enum ResolvedDeclKind {
     Item {
         defaults: Vec<Option<Literal>>,
         native: Option<NativeId>,
-        takes_self: bool,
     },
     Constant(ConstValue),
     Variant {
@@ -281,10 +280,6 @@ impl From<Solver> for Resolutions {
                 DecKind::Item { defaults } => ResolvedDeclKind::Item {
                     defaults,
                     native: solver.dec_to_native.get(&id).map(|b| b.id),
-                    takes_self: match solver.dec_to_native.get(&id) {
-                        Some(binding) => binding.takes_self,
-                        None => matches!(&ty, Ty::Fn(header) if header.is_method),
-                    },
                 },
                 DecKind::Constant(Some(value)) => ResolvedDeclKind::Constant(value),
                 DecKind::Constant(None) => panic!(

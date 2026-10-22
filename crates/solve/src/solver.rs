@@ -750,9 +750,7 @@ impl Solver {
         };
         // first instantiation fills the dec's vid, later ident resolutions detect that this is
         // a native and re-instantiate so each call gets its own type vars.
-        let initial = self
-            .instantiate_native(&sig, None)
-            .expect("free fn has no recv");
+        let initial = self.instantiate_native(&sig);
         let ident = Ident::synthetic(name);
         let dec_id = self.dec_id(
             &ident,
@@ -761,27 +759,20 @@ impl Solver {
             Vis::Public,
         );
         self.ribs.module_mut().insert(ident, dec_id);
-        self.dec_to_native.insert(
-            dec_id,
-            NativeBinding {
-                id: native_id,
-                sig,
-                takes_self: false,
-            },
-        );
+        self.dec_to_native
+            .insert(dec_id, NativeBinding { id: native_id, sig });
         dec_id
     }
 
     /// Returns the `Ty::Fn` for a native callable, with every `Ty::Anon(N)` in the sig replaced
-    /// by a fresh `Ty::Vid` (same `N` -> same vid, within this one call). If a receiver pattern
-    /// is present and `recv_check` is provided, the actual receiver type is unified against the
-    /// pattern -- failure means the method isn't applicable to this receiver.
-    pub(crate) fn instantiate_native(
-        &mut self,
-        sig: &NativeFnSig,
-        recv_check: Option<(&Ty, Location)>,
-    ) -> Result<Ty> {
+    /// by a fresh `Ty::Vid` (same `N` -> same vid, within this one call).
+    pub(crate) fn instantiate_native(&mut self, sig: &NativeFnSig) -> Ty {
         let mut memo: HashMap<u32, Vid> = HashMap::new();
+        let mut parameters = Vec::new();
+        if let Some(recv) = &sig.recv {
+            let ty = self.substitute_anons(recv, &mut memo);
+            parameters.push(FnParam::new(None, ty, false));
+        }
         let materialized: Vec<Ty> = sig
             .params
             .iter()
@@ -793,22 +784,14 @@ impl Solver {
         while optional_from > 0 && matches!(materialized[optional_from - 1], Ty::Option(_)) {
             optional_from -= 1;
         }
-        let parameters: Vec<FnParam> = materialized
-            .into_iter()
-            .enumerate()
-            .map(|(i, ty)| FnParam::new(None, ty, i >= optional_from))
-            .collect();
+        parameters.extend(
+            materialized
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| FnParam::new(None, ty, i >= optional_from)),
+        );
         let return_ty = self.materialize_slot(&sig.return_ty, &mut memo);
-
-        if let (Some(recv_pat), Some((actual, location))) = (sig.recv.as_ref(), recv_check) {
-            let mut pat = self.substitute_anons(recv_pat, &mut memo);
-            let mut actual = actual.clone();
-            actual
-                .fulfill_ty(&mut pat, self)
-                .map_err(|e| e.into_type_mismatch(self, location))?;
-        }
-
-        Ok(Ty::Fn(FnHeader::new(parameters, return_ty, false)))
+        Ty::Fn(FnHeader::new(parameters, return_ty, sig.recv.is_some()))
     }
 
     /// Produce a fresh `Ty::Fn` from a pact's stored header so unifying it against an impl can't
@@ -1084,21 +1067,14 @@ impl Solver {
                         recv: None,
                     };
                     let ident = Ident::synthetic(f.name.clone());
-                    let ty = self.instantiate_native(&sig, None).expect("no recv");
+                    let ty = self.instantiate_native(&sig);
                     let dec_id = self.dec_id(
                         &ident,
                         ty.clone(),
                         DecKind::Item { defaults: vec![] },
                         Vis::Public,
                     );
-                    self.dec_to_native.insert(
-                        dec_id,
-                        NativeBinding {
-                            id,
-                            sig,
-                            takes_self: false,
-                        },
-                    );
+                    self.dec_to_native.insert(dec_id, NativeBinding { id, sig });
                     self.adts[leaf].as_struct_mut().insert(
                         f.name.clone(),
                         Field {
@@ -1118,29 +1094,21 @@ impl Solver {
                         }),
                     };
                     // recv pattern carries the full receiver shape (e.g. `Ty::Array(Anon(0))`)
-                    // so `instantiate_native` can unify it against the actual receiver per call.
-                    // primitives like `Ty::Int` have nothing to unify, but it's harmless to pass.
+                    // so its slots line up with the params'. an associated fn has no receiver
                     let sig = NativeFnSig {
                         params: m.parameters.clone(),
                         return_ty: m.return_ty.clone(),
-                        recv: Some(m.recv_ty.clone()),
+                        recv: m.takes_self.then(|| m.recv_ty.clone()),
                     };
                     let ident = Ident::synthetic(m.name.clone());
-                    let ty = self.instantiate_native(&sig, None).expect("no recv check");
+                    let ty = self.instantiate_native(&sig);
                     let dec_id = self.dec_id(
                         &ident,
                         ty.clone(),
                         DecKind::Item { defaults: vec![] },
                         Vis::Public,
                     );
-                    self.dec_to_native.insert(
-                        dec_id,
-                        NativeBinding {
-                            id,
-                            sig,
-                            takes_self: m.takes_self,
-                        },
-                    );
+                    self.dec_to_native.insert(dec_id, NativeBinding { id, sig });
                     let field = Field {
                         ty,
                         constant: true,
@@ -1849,7 +1817,7 @@ impl Solver {
                     // without this, two calls with different types unify and the second fails.
                     let ty = if let Some(binding) = self.dec_to_native.get(&dec_id) {
                         let sig = binding.sig.clone();
-                        self.instantiate_native(&sig, None)?
+                        self.instantiate_native(&sig)
                     } else {
                         Ty::Vid(self.decs[dec_id].vid).normalized(self)
                     };
@@ -2181,9 +2149,9 @@ pub(crate) struct FnRun {
 }
 
 // Per-dec `Option<Ty>`-shape signature for native callables. Lets each Ident resolution mint
-// fresh vids per call site instead of sharing one set of inference variables. `recv` carries the
-// pattern type for the receiver (e.g. `[Anon(0)]` for `Vec<T>`) -- methods use it at dispatch to
-// reject receivers whose element type doesn't fit.
+// fresh vids per call site instead of sharing one set of inference variables. `recv` is the
+// pattern type for the receiver of a native that takes `self` (e.g. `[Anon(0)]` for `Vec<T>`),
+// which overloads use at dispatch to reject receivers whose element type doesn't fit.
 #[derive(Clone)]
 pub(crate) struct NativeFnSig {
     pub params: Vec<(String, Option<Ty>)>,
@@ -2195,7 +2163,6 @@ pub(crate) struct NativeFnSig {
 pub(crate) struct NativeBinding {
     pub id: NativeId,
     pub sig: NativeFnSig,
-    pub takes_self: bool,
 }
 
 /// One module-nested native function, as handed to [`Solver::register_native_module`].

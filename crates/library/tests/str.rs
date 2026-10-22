@@ -397,5 +397,20 @@ test_run!(
     "s?.to_upper() ?? \"x\"" => r#""HI""#,
 );
 
+test_run!(
+    chain_rides_into_str_method,
+    r#"struct Named { name: str }
+     let alive: Named? = Named { name = "hi" };
+     let gone: Named? = null;"#,
+    "alive?.name.len()" => "2",
+    "gone?.name.len()" => "null",
+);
+
 test_fail!(str_has_no_pop, r#""hi".pop();"#);
 test_fail!(str_has_no_flatten, r#""hi".flatten();"#);
+
+test_run!(
+    method_by_path,
+    r#"str::is_empty("")"# => "true",
+    r#"str::starts_with("abc", "a")"# => "true",
+);

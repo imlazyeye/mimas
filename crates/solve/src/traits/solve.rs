@@ -172,39 +172,13 @@ impl Solve for Access {
             // module-nested natives need fresh type vars per call site, same as free natives.
             let ty = if let Some(binding) = solver.dec_to_native.get(&dec) {
                 let sig = binding.sig.clone();
-                solver.instantiate_native(&sig, None)?
+                solver.instantiate_native(&sig)
             } else {
                 field.ty
             };
             solver.check_fn_value(id, dec, &ty, right.location())?;
             solver.note(right, ty.clone(), Some(dec));
             Ok(ty)
-        }
-        // can a plain `[i]` / `.x` ride the short-circuit on `e`, or does `e` leave a *fresh*
-        // option that needs its own `?`? the mental model is "one `?` per option you reach
-        // through": a `?` rides cleanly through accesses that introduce no new option
-        // (array index, field), but a dict index is a fresh option (the key might miss), so
-        // the next access spends its own `?`. that's why `f["x"]?["y"][0]` is rejected --
-        // the `["y"]` miss isn't acknowledged -- while `a[0]["foo"]?[0][0]` is fine, the
-        // trailing accesses being array drills. a dict never rides, even as `?["y"]`: the
-        // `?` consumes the *incoming* option but the key's own miss is still unhandled. a
-        // plain index of a fresh option just falls through to the normal path below and
-        // fails to unify (option vs array/dict), so no dedicated error is needed. only the solver
-        // needs this; codegen still null-checks anything `?`-tainted, which stays correct for what
-        // the solver lets through.
-        fn rides(solver: &mut Solver, e: &Expr) -> bool {
-            match e.kind() {
-                ExprKind::Access(Access::Square { left, key, kind }) => {
-                    let dict = key
-                        .query(solver)
-                        .is_ok_and(|t| matches!(t.normalized(solver), Ty::Str));
-                    !dict && (*kind == AccessKind::Option || rides(solver, left))
-                }
-                ExprKind::Access(Access::Dot { left, kind, .. }) => {
-                    *kind == AccessKind::Option || rides(solver, left)
-                }
-                _ => false,
-            }
         }
         match self {
             Access::Square { left, key, kind } => {
@@ -462,8 +436,7 @@ impl Solve for Access {
                                 solver.node_decs.insert(id, dec);
                                 let member = if let Some(binding) = solver.dec_to_native.get(&dec) {
                                     let sig = binding.sig.clone();
-                                    solver
-                                        .instantiate_native(&sig, Some((&lhs, left.location())))?
+                                    solver.instantiate_native(&sig)
                                 } else {
                                     impl_field.ty
                                 };
@@ -816,7 +789,7 @@ impl Solve for Call {
                 solver.node_decs.insert(call.left.id(), dec);
                 let ty = if let Some(binding) = solver.dec_to_native.get(&dec) {
                     let sig = binding.sig.clone();
-                    solver.instantiate_native(&sig, Some((&lhs, left.location())))?
+                    solver.instantiate_native(&sig)
                 } else {
                     field.ty
                 };
@@ -868,9 +841,9 @@ impl Solve for Call {
                 && let ExprKind::Access(Access::Dot { left, kind, .. }) = self.left.kind()
                 && let Some(first) = params.first()
             {
-                // a `?.` receiver is option-typed; dispatch is on the unwrapped inner
-                // (method_intercept already vetted it), so expect Option(self) here
-                let expected = if *kind == AccessKind::Option {
+                // a `?.` receiver (or one a `?` rides through) is option-typed; dispatch is on the
+                // unwrapped inner (method_intercept already vetted it), so expect Option(self) here
+                let expected = if *kind == AccessKind::Option || rides(solver, left) {
                     Ty::Option(Box::new(first.ty.clone()))
                 } else {
                     first.ty.clone()
@@ -926,10 +899,8 @@ impl Solve for Call {
             }
 
             let ty = fn_data.return_ty.as_ref().clone().normalized(solver);
-            if let ExprKind::Access(Access::Dot {
-                kind: AccessKind::Option,
-                ..
-            }) = self.left.kind()
+            if let ExprKind::Access(Access::Dot { left, kind, .. }) = self.left.kind()
+                && (*kind == AccessKind::Option || rides(solver, left))
             {
                 Ok(Ty::Option(Box::new(ty)))
             } else {
@@ -2257,5 +2228,31 @@ fn adt_from_type_path(left: &Expr, solver: &mut Solver) -> Result<AdtId> {
             at: left.location().into(),
             ty: ty.to_string(),
         })?,
+    }
+}
+
+// can a plain `[i]` / `.x` ride the short-circuit on `e`, or does `e` leave a *fresh* option that
+// needs its own `?`? the mental model is "one `?` per option you reach through": a `?` rides
+// cleanly through accesses that introduce no new option (array index, field), but a dict index is a
+// fresh option (the key might miss), so the next access spends its own `?`. that's why
+// `f["x"]?["y"][0]` is rejected -- the `["y"]` miss isn't acknowledged -- while
+// `a[0]["foo"]?[0][0]` is fine, the trailing accesses being array drills. a dict never rides, even
+// as `?["y"]`: the `?` consumes the *incoming* option but the key's own miss is still unhandled. a
+// plain index of a fresh option just falls through to the normal path in `Access::solve` and fails
+// to unify (option vs array/dict), so no dedicated error is needed. only the solver needs this;
+// codegen still null-checks anything `?`-tainted, which stays correct for what the solver lets
+// through.
+fn rides(solver: &mut Solver, e: &Expr) -> bool {
+    match e.kind() {
+        ExprKind::Access(Access::Square { left, key, kind }) => {
+            let dict = key
+                .query(solver)
+                .is_ok_and(|t| matches!(t.normalized(solver), Ty::Str));
+            !dict && (*kind == AccessKind::Option || rides(solver, left))
+        }
+        ExprKind::Access(Access::Dot { left, kind, .. }) => {
+            *kind == AccessKind::Option || rides(solver, left)
+        }
+        _ => false,
     }
 }

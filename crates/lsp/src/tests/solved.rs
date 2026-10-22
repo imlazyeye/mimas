@@ -117,6 +117,33 @@ fn hover_shows_a_module_function_and_its_doc() {
 }
 
 #[test]
+fn hover_shows_a_native_receiver() {
+    let root = tree(
+        "native_receiver",
+        &[("a.mim", r#"let n = "ab".starts_with("a");"#)],
+    );
+    let a = root.join("a.mim");
+    let mut workspace = Workspace::new(HostApi::Off);
+    open(&mut workspace, &a);
+    let hover = workspace
+        .analysis(&a)
+        .unwrap()
+        .hover(&a, at(&a, "starts_with"))
+        .unwrap();
+    let Contents::MarkupContent(content) = hover.contents else {
+        panic!("{:?}", hover.contents);
+    };
+    assert!(
+        content
+            .value
+            .contains("fn starts_with(self, _: str) -> bool"),
+        "{}",
+        content.value
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn each_path_resolves_its_member() {
     let root = tree(
         "each",

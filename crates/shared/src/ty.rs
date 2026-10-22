@@ -313,13 +313,9 @@ impl FnHeader {
         format!("({params}) -> {}", self.return_ty.display(names))
     }
 
-    /// The header as it would be declared, e.g. `fn bar(self, fizz: int) -> Self`. `takes_self`
-    /// covers natives, whose receiver isn't in their parameters.
-    pub fn signature(&self, name: &str, takes_self: bool, names: &dyn TyNames) -> String {
+    /// The header as it would be declared, e.g. `fn bar(self, fizz: int) -> Self`.
+    pub fn signature(&self, name: &str, names: &dyn TyNames) -> String {
         let mut parameters = Vec::new();
-        if takes_self && !self.is_method {
-            parameters.push("self".to_owned());
-        }
         for (i, param) in self.parameters.iter().enumerate() {
             if i == 0 && self.is_method {
                 parameters.push("self".to_owned());

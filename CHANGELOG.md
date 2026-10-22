@@ -4,6 +4,11 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Fixed
+
+- Calling a native method through its type (i.e.: `str::is_empty("")`) was rejected for having extra arguments.
+- A method call that a `?` rides into through a field or index (i.e.: `a?.b.method()`) was rejected for methods from an `impl`, and typed as non-optional for native methods despite producing `null`.
+
 ## [0.4.0] - 2026-10-12
 
 This update includes REPL support, a few new language features, as well as a large amount of bug fixes. Additionally, performance has broadly been improved for the VM.

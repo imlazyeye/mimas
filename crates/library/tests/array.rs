@@ -72,6 +72,18 @@ test_run!(
 test_fail!(push_rejects_wrong_elem, "let a = [1, 2]; a.push(\"x\");");
 
 test_run!(
+    push_by_path,
+    "let a = [1, 2];
+     array::push(a, 3);",
+    "a" => "[1, 2, 3]",
+);
+
+test_fail!(
+    push_by_path_rejects_wrong_elem,
+    r#"array::push([1, 2], "x");"#
+);
+
+test_run!(
     insert_in_middle,
     "let a = [1, 3];
      a.insert(1, 2);",

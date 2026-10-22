@@ -72,9 +72,9 @@ impl Analysis {
             Some(dec_id) => {
                 let dec = &resolutions.decs[dec_id];
                 let (owner, decl) = match (&dec.kind, ty) {
-                    (ResolvedDeclKind::Item { takes_self, .. }, Ty::Fn(header)) => (
+                    (ResolvedDeclKind::Item { .. }, Ty::Fn(header)) => (
                         resolutions.owner_path(dec_id),
-                        header.signature(&dec.name, *takes_self, resolutions),
+                        header.signature(&dec.name, resolutions),
                     ),
                     (ResolvedDeclKind::Adt(aid), _) => (String::new(), resolutions.adt_path(*aid)),
                     (ResolvedDeclKind::Constant(_), _) => (
