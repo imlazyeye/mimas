@@ -136,7 +136,7 @@ fn hover_shows_a_native_receiver() {
     assert!(
         content
             .value
-            .contains("fn starts_with(self, _: str) -> bool"),
+            .contains("fn starts_with(self, prefix: str) -> bool"),
         "{}",
         content.value
     );

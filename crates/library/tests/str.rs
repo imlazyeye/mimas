@@ -416,6 +416,12 @@ test_run!(
 );
 
 test_run!(
+    named_argument,
+    r#""abc".starts_with(prefix = "a")"# => "true",
+    r#"str::starts_with("abc", prefix = "b")"# => "false",
+);
+
+test_run!(
     method_as_value,
     r#"fn test(f: (str) -> bool) -> bool {
          f("")

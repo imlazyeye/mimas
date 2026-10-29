@@ -4,6 +4,10 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Added
+
+- Native functions and methods accept named arguments, and hovering one shows its parameter names.
+
 ### Fixed
 
 - Calling a native method through its type (i.e.: `str::is_empty("")`) was rejected for having extra arguments.
