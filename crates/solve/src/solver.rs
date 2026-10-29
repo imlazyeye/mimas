@@ -787,8 +787,11 @@ impl Solver {
         parameters.extend(
             materialized
                 .into_iter()
+                .zip(&sig.params)
                 .enumerate()
-                .map(|(i, ty)| FnParam::new(None, ty, i >= optional_from)),
+                .map(|(i, (ty, (name, _)))| {
+                    FnParam::new(Some(name.clone()), ty, i >= optional_from)
+                }),
         );
         let return_ty = self.materialize_slot(&sig.return_ty, &mut memo);
         Ty::Fn(FnHeader::new(parameters, return_ty, sig.recv.is_some()))

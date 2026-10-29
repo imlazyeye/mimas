@@ -255,8 +255,8 @@ pub struct Pact {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnParam {
-    /// Source-level name when available (fn definitions). `None` for closures, natives,
-    /// and types derived purely by inference where there's no declaration to read.
+    /// Source-level name when available (fn definitions and natives). `None` for closures and
+    /// types derived purely by inference where there's no declaration to read.
     pub name: Option<String>,
     pub ty: Ty,
     pub has_default: bool,
