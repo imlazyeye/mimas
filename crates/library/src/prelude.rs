@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, io::Write as _};
 
 use macros::native;
 use vm::{
@@ -15,17 +15,22 @@ pub(crate) fn install<'gc>(api: &mut Api<'_, 'gc>) {
     api.add(dbg);
 }
 
-/// Writes `value` to standard output, followed by a newline. A string prints as its plain text,
-/// and any other value prints the same way it would inside an f-string.
+/// Writes `value` to standard output, followed by `end`, which is a newline unless given. A
+/// string prints as its plain text, and any other value prints the same way it would inside an
+/// f-string.
 ///
 /// ```mimas
 /// print("hello");           // hello
 /// print([1, 2, 3]);         // [1, 2, 3]
 /// print(f"{1 + 2} apples"); // 3 apples
+/// print("a", end = "");     // a
+/// print("b");               // ab
 /// ```
 #[native]
-fn print<'gc>(ctx: Ctx<'gc>, value: Val<'gc>) {
-    ctx.fixture::<Output>().write(&ctx.to_string(value));
+fn print<'gc>(ctx: Ctx<'gc>, value: Val<'gc>, end: Option<String>) {
+    let end = end.as_deref().unwrap_or("\n");
+    ctx.fixture::<Output>()
+        .write(&format!("{}{end}", ctx.to_string(value)));
 }
 
 /// Stops the script with a runtime error. The error reads `panic: ` followed by `msg`, or
@@ -80,7 +85,7 @@ fn todo<'gc>(ctx: Ctx<'gc>, msg: Option<anon::T<'gc>>) -> Result<NeverReturn, Rt
 #[native]
 fn dbg<'gc>(ctx: Ctx<'gc>, value: anon::T<'gc>) -> anon::T<'gc> {
     ctx.fixture::<Output>()
-        .write(&format!("dbg value: {}", ctx.display(value.0)));
+        .write(&format!("dbg value: {}\n", ctx.display(value.0)));
     value
 }
 
@@ -88,7 +93,7 @@ type Sink = Box<dyn FnMut(&str)>;
 
 /// Where `print` and `dbg` write. Standard output unless the host sets a sink, which a console
 /// inside a game or the book's web repl does to show the output itself, with
-/// `vm.fixture::<Output>().set(sink)`. A sink gets each line without its newline.
+/// `vm.fixture::<Output>().set(sink)`. A sink gets the text as it's written, newlines included.
 #[derive(Default)]
 pub struct Output(RefCell<Option<Sink>>);
 
@@ -97,10 +102,13 @@ impl Output {
         *self.0.borrow_mut() = Some(Box::new(sink));
     }
 
-    fn write(&self, line: &str) {
+    fn write(&self, text: &str) {
         match &mut *self.0.borrow_mut() {
-            Some(sink) => sink(line),
-            None => println!("{line}"),
+            Some(sink) => sink(text),
+            None => {
+                print!("{text}");
+                let _ = std::io::stdout().flush();
+            }
         }
     }
 }

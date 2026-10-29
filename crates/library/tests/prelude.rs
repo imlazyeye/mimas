@@ -29,17 +29,19 @@ test_fail!(
 
 #[test]
 fn print_goes_to_the_sink() {
-    let lines = Rc::new(RefCell::new(Vec::new()));
+    let printed = Rc::new(RefCell::new(String::new()));
     let mut vm = Vm::compile(
         r#"print("hi");
+           print("a", end = "");
+           print("b", end = "!");
            dbg(1);
            print([1, 2]);"#,
         library::std,
     )
     .unwrap();
-    let sink = Rc::clone(&lines);
+    let sink = Rc::clone(&printed);
     vm.fixture::<library::Output>()
-        .set(move |line| sink.borrow_mut().push(line.to_string()));
+        .set(move |text| sink.borrow_mut().push_str(text));
     vm.run().unwrap();
-    assert_eq!(*lines.borrow(), ["hi", "dbg value: 1", "[1, 2]"]);
+    assert_eq!(*printed.borrow(), "hi\nab!dbg value: 1\n[1, 2]\n");
 }

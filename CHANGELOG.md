@@ -6,7 +6,12 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 ### Added
 
+- `print` takes an optional `end`, written after the value in place of the newline (i.e.: `print("loading...", end = "")`).
 - Native functions and methods accept named arguments, and hovering one shows its parameter names.
+
+### Changed
+
+- An `Output` sink gets the text as it's written, newlines included, instead of one call per line without its newline.
 
 ### Fixed
 
