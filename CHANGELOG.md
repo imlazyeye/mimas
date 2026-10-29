@@ -8,6 +8,7 @@ Notable changes to mimas. The format follows [Keep a Changelog](https://keepacha
 
 - Calling a native method through its type (i.e.: `str::is_empty("")`) was rejected for having extra arguments.
 - A method call that a `?` rides into through a field or index (i.e.: `a?.b.method()`) was rejected for methods from an `impl`, and typed as non-optional for native methods despite producing `null`.
+- Passing a native function or method as a function value (i.e.: `apply(str::is_empty)`) was rejected for methods, and faulted at runtime for everything else.
 
 ## [0.4.0] - 2026-10-12
 
