@@ -33,11 +33,8 @@ impl Repl {
         let library = vm.install_library(library::sandboxed);
         let printed = Rc::new(RefCell::new(String::new()));
         let sink = Rc::clone(&printed);
-        vm.fixture::<Output>().set(move |line| {
-            let mut printed = sink.borrow_mut();
-            printed.push_str(line);
-            printed.push('\n');
-        });
+        vm.fixture::<Output>()
+            .set(move |text| sink.borrow_mut().push_str(text));
         let modules = Modules::from_files(std::iter::empty::<(&str, &str)>(), &library);
         Repl {
             session: Session::new(vm, library, modules),
