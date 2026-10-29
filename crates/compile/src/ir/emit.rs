@@ -214,10 +214,7 @@ impl Emit for Access {
                         let layout = *layout;
                         Some(ir.current().new_instance(layout, vec![]))
                     }
-                    ResolvedDeclKind::Item { .. } => {
-                        let body = ir.item_body_for(dec);
-                        Some(ir.current().ref_body(body))
-                    }
+                    ResolvedDeclKind::Item { .. } => Some(fn_value(ir, dec)),
                     ResolvedDeclKind::Constant(_) => Constant::emit_const_dec(ir, dec),
                     ResolvedDeclKind::Adt(adt) => {
                         let adt = *adt;
@@ -365,37 +362,6 @@ impl Emit for Call {
             .unwrap_or_default()
         }
 
-        fn emit_intrinsic(
-            ir: &mut Ir,
-            intrinsic: api::Intrinsic,
-            args: &[InstId],
-            call: &Call,
-        ) -> InstId {
-            match intrinsic {
-                api::Intrinsic::Len => ir.current().len(args[0]),
-                api::Intrinsic::In => ir.current().check_in(args[1], args[0], true),
-                api::Intrinsic::Push => {
-                    ir.current().push(args[0], args[1]);
-                    ir.current().constant(Constant::Null)
-                }
-                api::Intrinsic::ToFloat => ir.current().to_float(args[0]),
-                api::Intrinsic::Sqrt => ir.current().sqrt(args[0]),
-                api::Intrinsic::File => {
-                    let name = ir
-                        .resolutions
-                        .sources
-                        .get(&call.left.location().file_id)
-                        .unwrap()
-                        .name()
-                        .to_string();
-                    let path = std::fs::canonicalize(&name)
-                        .map_or(name, |path| path.to_string_lossy().into_owned());
-                    let path = ir.intern_str(&path);
-                    ir.current().constant(Constant::Str(path))
-                }
-            }
-        }
-
         // pact-typed receiver dispatch: a runtime IsInstance chain over implementors of the bound,
         // each arm CallDirect-ing that adt's body for the method. a lone implementor is tested too,
         // since a session can add another after this call site is compiled
@@ -526,10 +492,7 @@ impl Emit for Call {
                     let receiver = fn_ty.is_method.then_some(receiver);
                     let args = fill_call_args(ir, &fn_ty, &defaults, &self.arguments, receiver)?;
                     Some(match (native_id, body) {
-                        (Some(id), _) => match ir.intrinsics.get(&id) {
-                            Some(&i) => emit_intrinsic(ir, i, &args, self),
-                            None => ir.current().call_native(id, args),
-                        },
+                        (Some(id), _) => emit_native(ir, id, args),
                         (None, Some(body)) => ir.current().call_direct(body, args),
                         _ => unreachable!(),
                     })
@@ -572,10 +535,7 @@ impl Emit for Call {
 
         Some(match static_callee {
             Some(StaticCallee::Body(body)) => ir.current().call_direct(body, args),
-            Some(StaticCallee::Native(id)) => match ir.intrinsics.get(&id) {
-                Some(&i) => emit_intrinsic(ir, i, &args, self),
-                None => ir.current().call_native(id, args),
-            },
+            Some(StaticCallee::Native(id)) => emit_native(ir, id, args),
             None => {
                 let callee = self.left.lower(ir)?;
                 ir.current().call(callee, args)
@@ -931,10 +891,7 @@ impl Emit for Ident {
                 let local = ir.local_for(dec);
                 Some(ir.current().get_local(local))
             }
-            ResolvedDeclKind::Item { .. } => {
-                let body = ir.item_body_for(dec);
-                Some(ir.current().ref_body(body))
-            }
+            ResolvedDeclKind::Item { .. } => Some(fn_value(ir, dec)),
             ResolvedDeclKind::Adt(adt) => {
                 let adt = *adt;
                 Some(adt_value(ir, dec, adt))
@@ -1509,6 +1466,28 @@ fn num_kind_of(ir: &Ir, id: NodeId) -> OperandKind {
     }
 }
 
+// a fn's name used as a value (a native gets a body that calls it with the same arguments)
+fn fn_value(ir: &mut Ir, dec: DecId) -> InstId {
+    let lowered = ir.item_bodies.contains_key(&dec);
+    let body = ir.item_body_for(dec);
+    if !lowered
+        && let ResolvedDeclKind::Item {
+            native: Some(id), ..
+        } = ir.resolutions.decs[dec].kind
+        && let Ty::Fn(header) = &ir.resolutions.decs[dec].ty
+    {
+        let arity = header.parameters.len();
+        ir.in_body(body, |ir| {
+            let params: Vec<_> = (0..arity).map(|_| ir.synthetic_local("arg")).collect();
+            let args = params.iter().map(|&p| ir.current().get_local(p)).collect();
+            ir.current_body_mut().params = params;
+            let value = emit_native(ir, id, args);
+            ir.current().ret(value);
+        });
+    }
+    ir.current().ref_body(body)
+}
+
 // a struct's name used as a value (the struct itself when it has no fields, otherwise its ctor)
 fn adt_value(ir: &mut Ir, dec: DecId, adt: AdtId) -> InstId {
     if ir.resolutions.adts[adt].fields.is_empty() {
@@ -1516,6 +1495,36 @@ fn adt_value(ir: &mut Ir, dec: DecId, adt: AdtId) -> InstId {
     }
     let body = ir.item_body_for(dec);
     ir.current().ref_body(body)
+}
+
+// a call to the native `id`, or its inlined op when it's an intrinsic
+fn emit_native(ir: &mut Ir, id: NativeId, args: Vec<InstId>) -> InstId {
+    let Some(&intrinsic) = ir.intrinsics.get(&id) else {
+        return ir.current().call_native(id, args);
+    };
+    match intrinsic {
+        api::Intrinsic::Len => ir.current().len(args[0]),
+        api::Intrinsic::In => ir.current().check_in(args[1], args[0], true),
+        api::Intrinsic::Push => {
+            ir.current().push(args[0], args[1]);
+            ir.current().constant(Constant::Null)
+        }
+        api::Intrinsic::ToFloat => ir.current().to_float(args[0]),
+        api::Intrinsic::Sqrt => ir.current().sqrt(args[0]),
+        api::Intrinsic::File => {
+            let name = ir
+                .resolutions
+                .sources
+                .get(&ir.current_loc.file_id)
+                .unwrap()
+                .name()
+                .to_string();
+            let path = std::fs::canonicalize(&name)
+                .map_or(name, |path| path.to_string_lossy().into_owned());
+            let path = ir.intern_str(&path);
+            ir.current().constant(Constant::Str(path))
+        }
+    }
 }
 
 // mutable parts taken out of a shared constant need their own copy

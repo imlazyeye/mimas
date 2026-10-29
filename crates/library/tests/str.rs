@@ -414,3 +414,15 @@ test_run!(
     r#"str::is_empty("")"# => "true",
     r#"str::starts_with("abc", "a")"# => "true",
 );
+
+test_run!(
+    method_as_value,
+    r#"fn test(f: (str) -> bool) -> bool {
+         f("")
+     }
+     fn count(f: (str) -> int) -> int {
+         f("abc")
+     }"#,
+    "test(str::is_empty)" => "true",
+    "count(str::len)" => "3",
+);

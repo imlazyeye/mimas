@@ -84,6 +84,16 @@ test_fail!(
 );
 
 test_run!(
+    push_as_value,
+    "fn add(f: ([int], int) -> (), xs: [int]) {
+         f(xs, 3);
+     }
+     let a = [1, 2];
+     add(array::push, a);",
+    "a" => "[1, 2, 3]",
+);
+
+test_run!(
     insert_in_middle,
     "let a = [1, 3];
      a.insert(1, 2);",

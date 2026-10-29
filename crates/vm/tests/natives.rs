@@ -288,7 +288,18 @@ native_tests! { install_all;
     native_assoc_fn_on_float: "let TEST_VALUE = vec2_len2(float::splat(2.0));" => Captured::Float(8.0);
 
     // regression check for #10
-    native_assoc_fn_on_value: "let f = 2.0; let TEST_VALUE = vec2_len2(f.splat(3.0));" => Captured::Float(18.0)
+    native_assoc_fn_on_value: "let f = 2.0; let TEST_VALUE = vec2_len2(f.splat(3.0));" => Captured::Float(18.0);
+
+    native_fn_as_value:
+        "fn apply(f: (int) -> int) -> int {
+             f(4)
+         }
+         let TEST_VALUE = apply(echo_int);" => Captured::Int(5);
+    native_method_as_value:
+        "fn apply(f: (Vec2) -> Vec2) -> float {
+             vec2_len2(f(Vec2 { x = 1.0, y = 0.0 }))
+         }
+         let TEST_VALUE = apply(Vec2::doubled);" => Captured::Float(4.0)
 }
 
 fn opt_tail(_ctx: Ctx<'_>, a: i64, b: Option<i64>) -> i64 {
