@@ -314,8 +314,7 @@ impl Emit for Call {
             arguments: &[parse::Argument],
             receiver: Option<InstId>,
         ) -> Option<Vec<InstId>> {
-            let extra = (receiver.is_some() && !fn_ty.is_method) as usize;
-            let total = fn_ty.parameters.len() + extra;
+            let total = fn_ty.parameters.len();
             let mut slots: Vec<Option<InstId>> = vec![None; total];
             let mut cursor = 0;
             if let Some(recv) = receiver {
@@ -328,7 +327,6 @@ impl Emit for Call {
                         .parameters
                         .iter()
                         .position(|p| p.name.as_deref() == Some(name.lexeme.as_str()))
-                        .map(|i| i + extra)
                         .expect("solver validated this named arg maps to a slot"),
                     None => {
                         let s = cursor;
@@ -506,9 +504,7 @@ impl Emit for Call {
 
             let access_id = self.left.id();
             if let Some(&dec) = ir.resolutions.node_decs.get(&access_id)
-                && let ResolvedDeclKind::Item {
-                    native, takes_self, ..
-                } = ir.resolutions.decs[dec].kind
+                && let ResolvedDeclKind::Item { native, .. } = ir.resolutions.decs[dec].kind
             {
                 let native_id = native;
                 let body = (native_id.is_none()).then(|| ir.item_body_for(dec));
@@ -527,7 +523,7 @@ impl Emit for Call {
                 }?;
 
                 let do_call = |ir: &mut Ir, receiver: InstId| -> Option<InstId> {
-                    let receiver = takes_self.then_some(receiver);
+                    let receiver = fn_ty.is_method.then_some(receiver);
                     let args = fill_call_args(ir, &fn_ty, &defaults, &self.arguments, receiver)?;
                     Some(match (native_id, body) {
                         (Some(id), _) => match ir.intrinsics.get(&id) {

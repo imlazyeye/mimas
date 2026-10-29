@@ -71,6 +71,18 @@ test_ty!(
      let a: Foo? = null;",
     "a?.items[0]" => option!(Int),
 );
+test_ty!(
+    taint_dot_then_method,
+    "struct Bar { x: int }
+     impl Bar {
+         fn get(self) -> int {
+             self.x
+         }
+     }
+     struct Foo { bar: Bar }
+     let a: Foo? = null;",
+    "a?.bar.get()" => option!(Int),
+);
 test_fail!(
     taint_stops_at_grouping,
     "let a = [ ~{ foo = [[0]] } ]; let y = (a[0][\"foo\"]?[0])[0];"
