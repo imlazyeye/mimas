@@ -82,6 +82,42 @@ expr_test!(
 );
 
 expr_test!(
+    while_let_as_operand,
+    r#"c + while let foo? = arr.pop() { collect foo; }.join("")"#,
+    Evaluation::new(
+        ident_expr!("c"),
+        EvaluationOp::Plus,
+        Call::new(
+            Access::Dot {
+                left: While::new_with_pat(
+                    Pat::new(
+                        PatKind::NullBind(Box::new(ident!("foo").into())),
+                        Location::default(),
+                    ),
+                    Call::new(
+                        Access::Dot {
+                            left: ident_expr!("arr"),
+                            right: ident_expr!("pop"),
+                            kind: AccessKind::Direct,
+                        }
+                        .into_expr(),
+                        vec![],
+                    )
+                    .into_expr(),
+                    block!(Collect::new(ident_expr!("foo")).into_expr().into_stmt()),
+                )
+                .into_expr(),
+                right: ident_expr!("join"),
+                kind: AccessKind::Direct,
+            }
+            .into_expr(),
+            vec![Argument::new(Literal::String("".into()).into_expr())],
+        )
+        .into_expr(),
+    )
+);
+
+expr_test!(
     for_in_no_block,
     "for a in b if a a else null",
     For::new(

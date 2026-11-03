@@ -16,6 +16,17 @@ test_fail!(
     "a + b = 1;"
 );
 
+// keyword-led forms as operands
+test_ok!(
+    block_forms_as_operands,
+    "let a = 1 + loop { break 2; };",
+    "let a = 1 + while b { collect 2; }.len();",
+    "let a = 1 + for x in 3 { collect x; }.len();",
+    "let a = 1 + if b { 2 } else { 3 };",
+    "let a = 1 + match b { _ => 2 };",
+    "let a = -if b { 2 } else { 3 };"
+);
+
 // dot access
 test_ok!(valid_dot_access, "a = b.c;", "a = b.0;");
 test_fail!(invalid_dot_access_operator, "a = b.+;", "a = b.;");
