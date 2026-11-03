@@ -1052,6 +1052,15 @@ impl<'s> Parser<'s> {
     }
 
     fn supreme(&mut self) -> Expr {
+        // a keyword-led form as an operand (`c + while ... {}`) takes the same dispatch it would
+        // at the head of an expression, along with the same postfix rules
+        if matches!(
+            self.peek(),
+            TokKind::Loop | TokKind::While | TokKind::For | TokKind::If | TokKind::Match
+        ) {
+            let expr = self.block_body();
+            return self.chain_after_block(expr);
+        }
         let expr = self.primary();
         self.chain_accesses(expr)
     }

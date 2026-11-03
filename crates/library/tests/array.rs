@@ -368,6 +368,17 @@ test_run!(
     r#"a.join("-")"# => r#""""#,
 );
 
+// a collecting `while let` as the right operand, joined without grouping it first. `pop` takes
+// from the back, so the items come out in reverse
+test_run!(
+    join_while_let_operand,
+    r#"let c = "0";
+     let arr = ["1", "2"];"#,
+    r#"c + while let foo? = arr.pop() {
+         collect foo;
+     }.join("")"# => r#""021""#,
+);
+
 test_fail!(join_rejects_int_sep, r#"let a = ["x"]; let _ = a.join(5);"#);
 
 // BUG: `[non-str].join(sep)` panics the VM (array.rs:105 `.expect`); recv erased to `[Val]`, solver
